@@ -1,4 +1,4 @@
-use crate::{AbsoluteControlValue, ControlValue, MidiSourceValue, RelativeControlValue};
+use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 use helgoboss_midi::MidiMessageKind::PolyphonicKeyPressure;
 use helgoboss_midi::{
     data_could_be_part_of_parameter_number_msg, FourteenBitValue, MidiMessage, MidiMessageKind,
@@ -32,10 +32,9 @@ impl From<MidiClockTransportMessageKind> for MidiMessageKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum MidiSource {
-    // TODO Check if these kind of "anonymous inline" enum structs are better and maybe use them
-    //  in helgoboss-midi as well
+    // TODO Check if these kind of "anonymous inline" enum structs are really enough
     // MidiMessageKind::{NoteOff, NoteOn}
     NoteVelocity {
         channel: Option<Nibble>,
@@ -88,6 +87,9 @@ pub enum MidiSource {
 }
 
 impl MidiSource {
+    /// Usually called very early right in the audio thread in order to determine if it's at all
+    /// necessary to process the source value and to determine if the value should be let through
+    /// or not.
     pub fn processes<M: MidiMessage>(&self, value: &MidiSourceValue<M>) -> bool {
         use MidiSource::*;
         use MidiSourceValue::*;
@@ -144,13 +146,20 @@ impl MidiSource {
             ControlChangeValue {
                 channel,
                 controller_number,
-                ..
+                custom_character,
             } => match value {
-                PlainMessage(msg) => {
-                    msg.get_kind() == MidiMessageKind::ControlChange
-                        && matches(&msg.get_channel().unwrap(), channel)
-                        && matches(&msg.get_data_byte_1(), controller_number)
-                }
+                PlainMessage(msg) => match msg.to_structured() {
+                    StructuredMidiMessage::ControlChange(data) => {
+                        matches(&data.channel, channel)
+                            && matches(&data.controller_number, controller_number)
+                            && calc_control_value_from_control_change(
+                                *custom_character,
+                                data.control_value,
+                            )
+                            .is_ok()
+                    }
+                    _ => false,
+                },
                 _ => false,
             },
             FourteenBitCcMessageValue {
@@ -188,7 +197,10 @@ impl MidiSource {
         }
     }
 
-    // Returns Err if this source can't process the given source value type.
+    /// Returns Err if this source can't process the given source value type. However, this doesn't
+    /// do a complete check if this value should be processed. Please see
+    /// [processes_source_value](#method.processes_source_value). This has been split because
+    /// it's quite likely that those methods must be called from different threads.
     pub fn get_control_value<M: MidiMessage>(
         &self,
         value: &MidiSourceValue<M>,
@@ -203,45 +215,45 @@ impl MidiSource {
             } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::NoteOn(data) => {
-                        Ok(Absolute(AbsoluteControlValue(data.velocity as f64 / 127.0)))
+                        Ok(Absolute(UnitValue::new(data.velocity as f64 / 127.0)))
                     }
-                    StructuredMidiMessage::NoteOff(_) => Ok(Absolute(AbsoluteControlValue(0.0))),
+                    StructuredMidiMessage::NoteOff(_) => Ok(Absolute(UnitValue::new(0.0))),
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
             NoteKeyNumber { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
-                    StructuredMidiMessage::NoteOn(data) => Ok(Absolute(AbsoluteControlValue(
-                        (data.key_number as f64 / 127.0),
-                    ))),
+                    StructuredMidiMessage::NoteOn(data) => {
+                        Ok(Absolute(UnitValue::new((data.key_number as f64 / 127.0))))
+                    }
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
             PitchBendChangeValue { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
-                    StructuredMidiMessage::PitchBendChange(data) => Ok(Absolute(
-                        AbsoluteControlValue((data.pitch_bend_value as f64 / 16383.0)),
-                    )),
+                    StructuredMidiMessage::PitchBendChange(data) => Ok(Absolute(UnitValue::new(
+                        (data.pitch_bend_value as f64 / 16383.0),
+                    ))),
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
             ChannelPressureAmount { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
-                    StructuredMidiMessage::ChannelPressure(data) => Ok(Absolute(
-                        AbsoluteControlValue((data.pressure_amount as f64 / 127.0)),
-                    )),
+                    StructuredMidiMessage::ChannelPressure(data) => Ok(Absolute(UnitValue::new(
+                        (data.pressure_amount as f64 / 127.0),
+                    ))),
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
             ProgramChangeNumber { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
-                    StructuredMidiMessage::ProgramChange(data) => Ok(Absolute(
-                        AbsoluteControlValue((data.program_number as f64 / 127.0)),
-                    )),
+                    StructuredMidiMessage::ProgramChange(data) => Ok(Absolute(UnitValue::new(
+                        (data.program_number as f64 / 127.0),
+                    ))),
                     _ => Err(()),
                 },
                 _ => Err(()),
@@ -252,7 +264,7 @@ impl MidiSource {
             } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::PolyphonicKeyPressure(data) => Ok(Absolute(
-                        AbsoluteControlValue((data.pressure_amount as f64 / 127.0)),
+                        UnitValue::new((data.pressure_amount as f64 / 127.0)),
                     )),
                     _ => Err(()),
                 },
@@ -268,7 +280,7 @@ impl MidiSource {
                         Ok(calc_control_value_from_control_change(
                             *custom_character,
                             data.control_value,
-                        ))
+                        )?)
                     }
                     _ => Err(()),
                 },
@@ -278,9 +290,9 @@ impl MidiSource {
                 channel,
                 msb_controller_number,
             } => match value {
-                FourteenBitCcMessage(msg) => Ok(Absolute(AbsoluteControlValue(
-                    msg.get_value() as f64 / 16383.0,
-                ))),
+                FourteenBitCcMessage(msg) => {
+                    Ok(Absolute(UnitValue::new(msg.get_value() as f64 / 16383.0)))
+                }
                 _ => Err(()),
             },
             ParameterNumberMessageValue {
@@ -289,14 +301,14 @@ impl MidiSource {
                 is_14_bit,
                 is_registered,
             } => match value {
-                ParameterNumberMessage(msg) => Ok(Absolute(AbsoluteControlValue(
+                ParameterNumberMessage(msg) => Ok(Absolute(UnitValue::new(
                     msg.get_value() as f64 / if msg.is_14_bit() { 16383.0 } else { 127.0 },
                 ))),
                 _ => Err(()),
             },
-            ClockTransport { message_kind } => Ok(Absolute(AbsoluteControlValue(1.0))),
+            ClockTransport { message_kind } => Ok(Absolute(UnitValue::new(1.0))),
             ClockTempo => match value {
-                TempoMessage { bpm } => Ok(Absolute(AbsoluteControlValue((*bpm - 1.0) / 960.0))),
+                TempoMessage { bpm } => Ok(Absolute(UnitValue::new((*bpm - 1.0) / 960.0))),
                 _ => Err(()),
             },
         }
@@ -344,13 +356,14 @@ fn matches<T: PartialEq>(actual_value: &T, configured_value: &Option<T>) -> bool
 fn calc_control_value_from_control_change(
     character: SourceCharacter,
     cc_control_value: SevenBitValue,
-) -> ControlValue {
+) -> Result<ControlValue, ()> {
     use ControlValue::*;
     use SourceCharacter::*;
-    match character {
-        Encoder1 => Relative(RelativeControlValue::from_encoder_1_value(cc_control_value)),
-        Encoder2 => Relative(RelativeControlValue::from_encoder_2_value(cc_control_value)),
-        Encoder3 => Relative(RelativeControlValue::from_encoder_2_value(cc_control_value)),
-        _ => Absolute(AbsoluteControlValue(cc_control_value as f64 / 127.0)),
-    }
+    let result = match character {
+        Encoder1 => Relative(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),
+        Encoder2 => Relative(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
+        Encoder3 => Relative(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
+        _ => Absolute(UnitValue::new(cc_control_value as f64 / 127.0)),
+    };
+    Ok(result)
 }
