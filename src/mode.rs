@@ -354,20 +354,23 @@ impl Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::unit_interval;
 
     #[test]
-    fn absolute_basic() {
+    fn absolute_mode_absolute_value_basic() {
         // Given
-        // let mode = Mode::Absolute(AbsoluteModeData {
-        //     source_value_interval: Interval::new(NormalizedValue::new(0.0),
-        // NormalizedValue::new(1.0)),     target_value_interval: (),
-        //     jump_interval: (),
-        //     approach_target_value: false,
-        //     reverse_target_value: false,
-        //     round_target_value: false,
-        //     ignore_out_of_interval_source_values: false,
-        //     control_transformation: None,
-        //     feedback_transformation: None,
-        // });
+        let mode = Mode::Absolute(AbsoluteModeData {
+            source_value_interval: unit_interval(),
+            target_value_interval: unit_interval(),
+            jump_interval: unit_interval(),
+            approach_target_value: false,
+            reverse_target_value: false,
+            round_target_value: false,
+            ignore_out_of_range_source_values: false,
+            control_transformation: None,
+            feedback_transformation: None,
+        });
+        // When
+        // mode.process_control_value(ControlValue::Absolute())
     }
 }

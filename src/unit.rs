@@ -5,8 +5,8 @@ use std::ops::{Add, Sub};
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct UnitValue(f64);
 
-/// A number within the negative or positive unit interval `(-1.0..=1.0)` but never 0 (otherwise it
-/// wouldn't be an increment at all).
+/// A number within the negative or positive unit interval `(-1.0..=1.0)` representing a positive or
+/// negative increment, never 0 (otherwise it wouldn't be an increment after all).
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct UnitIncrement(f64);
 
@@ -189,4 +189,14 @@ impl Interval<UnitValue> {
     pub fn get_center(&self) -> UnitValue {
         UnitValue::new((self.get_min() + self.get_max()) / 2.0)
     }
+}
+
+/// Convenience method for getting the complete unit interval.
+pub fn unit_interval() -> Interval<UnitValue> {
+    create_unit_value_interval(0.0, 1.0)
+}
+
+/// Convenience method for creating an interval of unit values.
+pub fn create_unit_value_interval(min: f64, max: f64) -> Interval<UnitValue> {
+    Interval::new(UnitValue::new(min), UnitValue::new(max))
 }

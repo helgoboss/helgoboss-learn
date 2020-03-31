@@ -2,7 +2,7 @@ use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 use helgoboss_midi::MidiMessageKind::PolyphonicKeyPressure;
 use helgoboss_midi::{
     data_could_be_part_of_parameter_number_msg, FourteenBitValue, MidiMessage, MidiMessageKind,
-    Nibble, SevenBitValue, StructuredMidiMessage,
+    Nibble, SevenBitValue, StructuredMidiMessage, FOURTEEN_BIT_VALUE_MAX, SEVEN_BIT_VALUE_MAX,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,9 +214,9 @@ impl MidiSource {
                 key_number,
             } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
-                    StructuredMidiMessage::NoteOn(data) => {
-                        Ok(Absolute(UnitValue::new(data.velocity as f64 / 127.0)))
-                    }
+                    StructuredMidiMessage::NoteOn(data) => Ok(Absolute(UnitValue::new(
+                        data.velocity as f64 / SEVEN_BIT_VALUE_MAX as f64,
+                    ))),
                     StructuredMidiMessage::NoteOff(_) => Ok(Absolute(UnitValue::new(0.0))),
                     _ => Err(()),
                 },
@@ -224,9 +224,9 @@ impl MidiSource {
             },
             NoteKeyNumber { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
-                    StructuredMidiMessage::NoteOn(data) => {
-                        Ok(Absolute(UnitValue::new((data.key_number as f64 / 127.0))))
-                    }
+                    StructuredMidiMessage::NoteOn(data) => Ok(Absolute(UnitValue::new(
+                        (data.key_number as f64 / SEVEN_BIT_VALUE_MAX as f64),
+                    ))),
                     _ => Err(()),
                 },
                 _ => Err(()),
@@ -234,7 +234,7 @@ impl MidiSource {
             PitchBendChangeValue { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::PitchBendChange(data) => Ok(Absolute(UnitValue::new(
-                        (data.pitch_bend_value as f64 / 16383.0),
+                        (data.pitch_bend_value as f64 / FOURTEEN_BIT_VALUE_MAX as f64),
                     ))),
                     _ => Err(()),
                 },
@@ -243,7 +243,7 @@ impl MidiSource {
             ChannelPressureAmount { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::ChannelPressure(data) => Ok(Absolute(UnitValue::new(
-                        (data.pressure_amount as f64 / 127.0),
+                        (data.pressure_amount as f64 / SEVEN_BIT_VALUE_MAX as f64),
                     ))),
                     _ => Err(()),
                 },
@@ -252,7 +252,7 @@ impl MidiSource {
             ProgramChangeNumber { channel } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::ProgramChange(data) => Ok(Absolute(UnitValue::new(
-                        (data.program_number as f64 / 127.0),
+                        (data.program_number as f64 / SEVEN_BIT_VALUE_MAX as f64),
                     ))),
                     _ => Err(()),
                 },
@@ -264,7 +264,7 @@ impl MidiSource {
             } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::PolyphonicKeyPressure(data) => Ok(Absolute(
-                        UnitValue::new((data.pressure_amount as f64 / 127.0)),
+                        UnitValue::new((data.pressure_amount as f64 / SEVEN_BIT_VALUE_MAX as f64)),
                     )),
                     _ => Err(()),
                 },
@@ -290,9 +290,9 @@ impl MidiSource {
                 channel,
                 msb_controller_number,
             } => match value {
-                FourteenBitCcMessage(msg) => {
-                    Ok(Absolute(UnitValue::new(msg.get_value() as f64 / 16383.0)))
-                }
+                FourteenBitCcMessage(msg) => Ok(Absolute(UnitValue::new(
+                    msg.get_value() as f64 / FOURTEEN_BIT_VALUE_MAX as f64,
+                ))),
                 _ => Err(()),
             },
             ParameterNumberMessageValue {
@@ -302,7 +302,12 @@ impl MidiSource {
                 is_registered,
             } => match value {
                 ParameterNumberMessage(msg) => Ok(Absolute(UnitValue::new(
-                    msg.get_value() as f64 / if msg.is_14_bit() { 16383.0 } else { 127.0 },
+                    msg.get_value() as f64
+                        / if msg.is_14_bit() {
+                            FOURTEEN_BIT_VALUE_MAX as f64
+                        } else {
+                            SEVEN_BIT_VALUE_MAX as f64
+                        },
                 ))),
                 _ => Err(()),
             },
@@ -363,7 +368,9 @@ fn calc_control_value_from_control_change(
         Encoder1 => Relative(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),
         Encoder2 => Relative(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
         Encoder3 => Relative(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
-        _ => Absolute(UnitValue::new(cc_control_value as f64 / 127.0)),
+        _ => Absolute(UnitValue::new(
+            cc_control_value as f64 / SEVEN_BIT_VALUE_MAX as f64,
+        )),
     };
     Ok(result)
 }

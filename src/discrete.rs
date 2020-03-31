@@ -1,7 +1,8 @@
 use crate::{Interval, UnitIncrement, UnitValue};
-use helgoboss_midi::SevenBitValue;
+use helgoboss_midi::{SevenBitValue, SEVEN_BIT_VALUE_MAX};
 use std::ops::Sub;
 
+/// A positive discrete number representing a step count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DiscreteValue(u32);
 
@@ -44,6 +45,8 @@ impl Sub for DiscreteValue {
     }
 }
 
+/// A discrete number representing a positive or negative increment, never 0 (otherwise it wouldn't
+/// be an increment after all).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DiscreteIncrement(i32);
 
@@ -61,7 +64,7 @@ impl DiscreteIncrement {
     /// - 127 > value > 63 results in higher decrement step sizes (64 possible decrement step sizes)
     /// - 1 < value <= 63 results in higher increment step sizes (63 possible increment step sizes)
     pub fn from_encoder_1_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        debug_assert!(value < 128);
+        debug_assert!(value <= SEVEN_BIT_VALUE_MAX);
         if value == 0 {
             return Err(());
         }
@@ -83,7 +86,7 @@ impl DiscreteIncrement {
     /// - 65 < value <= 127 results in higher increment step sizes (63 possible increment step
     ///   sizes)
     pub fn from_encoder_2_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        debug_assert!(value < 128);
+        debug_assert!(value <= SEVEN_BIT_VALUE_MAX);
         if value == 64 {
             return Err(());
         }
@@ -105,7 +108,7 @@ impl DiscreteIncrement {
     ///   sizes)
     /// - 1 < value <= 64 results in higher increment step sizes (64 possible increment step sizes)
     pub fn from_encoder_3_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        debug_assert!(value < 128);
+        debug_assert!(value <= SEVEN_BIT_VALUE_MAX);
         if value == 0 {
             return Err(());
         }
