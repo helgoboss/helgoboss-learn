@@ -47,7 +47,11 @@ impl AbsoluteModeData {
             return self.hitting_target_considering_max_jump(target_bound_value, target);
         }
         // Control value is within source value interval
-        // TODO Factor all this out into a pep_up_ method similar to relative mode
+        let pepped_up_control_value = self.pep_up_control_value(control_value, target);
+        self.hitting_target_considering_max_jump(pepped_up_control_value, target)
+    }
+
+    fn pep_up_control_value(&self, control_value: UnitValue, target: &impl Target) -> UnitValue {
         let mapped_control_value =
             control_value.map_to_unit_interval_from(&self.source_value_interval);
         let transformed_source_value = self
@@ -62,12 +66,11 @@ impl AbsoluteModeData {
         } else {
             mapped_target_value
         };
-        let potentially_rounded_target_value = if self.round_target_value {
+        if self.round_target_value {
             target.round_to_nearest_discrete_value(potentially_inversed_target_value)
         } else {
             potentially_inversed_target_value
-        };
-        self.hitting_target_considering_max_jump(potentially_rounded_target_value, target)
+        }
     }
 
     fn hitting_target_considering_max_jump(
@@ -145,15 +148,50 @@ impl RelativeModeData {
             // - Source value interval (for setting the input interval of relevant source values)
             // - Minimum target step count (enables accurate normal/minimum increment, atomic)
             // - Maximum target step count (enables accurate maximum increment, mapped)
-            let discrete_value = control_value
-                .map_to_unit_interval_from(&self.source_value_interval)
-                .map_from_unit_interval_to_discrete(&self.step_count_interval);
-            let discrete_increment = discrete_value.to_increment(negative_if(self.reverse))?;
+            let discrete_increment = self.convert_to_discrete_increment(control_value)?;
             Some(Instruction::hit_relatively(discrete_increment))
         } else {
-            // Target wants absolute values
-            unimplemented!()
+            // Target wants absolute values, so we have to do the incrementation ourselves.
+            // That gives us lots of options.
+            match target.get_step_size() {
+                None => {
+                    // Continuous target
+                    //
+                    // Settings:
+                    // - Source value interval (for setting the input interval of relevant source
+                    //   values)
+                    // - Minimum target step size (enables accurate minimum increment, atomic)
+                    // - Maximum target step size (enables accurate maximum increment, clamped)
+                    // - Target value interval (absolute, important for rotation only, clamped)
+                    let discrete_increment = self.convert_to_discrete_increment(control_value)?;
+                    self.hitting_target_absolutely(
+                        discrete_increment,
+                        self.step_size_interval.get_min(),
+                        target,
+                    )
+                }
+                Some(step_size) => {
+                    // Discrete target
+                    //
+                    // Settings:
+                    // - Source value interval (for setting the input interval of relevant source
+                    //   values)
+                    // - Minimum target step count (enables accurate normal/minimum increment,
+                    //   atomic)
+                    // - Target value interval (absolute, important for rotation only, clamped)
+                    // - Maximum target step count (enables accurate maximum increment, clamped)
+                    let discrete_increment = self.convert_to_discrete_increment(control_value)?;
+                    self.hitting_target_absolutely(discrete_increment, step_size, target)
+                }
+            }
         }
+    }
+
+    fn convert_to_discrete_increment(&self, control_value: UnitValue) -> Option<DiscreteIncrement> {
+        let discrete_value = control_value
+            .map_to_unit_interval_from(&self.source_value_interval)
+            .map_from_unit_interval_to_discrete(&self.step_count_interval);
+        discrete_value.to_increment(negative_if(self.reverse))
     }
 
     // Classic relative mode: We are getting encoder increments from the source.
@@ -162,7 +200,7 @@ impl RelativeModeData {
     // I guess that possibility would rather cause irritation.
     pub fn process_relative_control_value(
         &self,
-        increment: DiscreteIncrement,
+        discrete_increment: DiscreteIncrement,
         target: &impl Target,
     ) -> Option<Instruction> {
         if target.wants_to_be_hit_with_increments() {
@@ -173,13 +211,8 @@ impl RelativeModeData {
             //
             // Settings which are necessary in order to support >1-increments:
             // - Maximum target step count (enables accurate maximum increment, clamped)
-            let clamped_increment = increment.clamp_to_interval(&self.step_count_interval);
-            let potentially_reversed_increment = if self.reverse {
-                clamped_increment.inverse()
-            } else {
-                clamped_increment
-            };
-            Some(Instruction::hit_relatively(potentially_reversed_increment))
+            let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment);
+            Some(Instruction::hit_relatively(pepped_up_increment))
         } else {
             // Target wants absolute values, so we have to do the incrementation ourselves.
             // That gives us lots of options.
@@ -193,15 +226,10 @@ impl RelativeModeData {
                     //
                     // Settings which are necessary in order to support >1-increments:
                     // - Maximum target step size (enables accurate maximum increment, clamped)
-                    let unit_increment =
-                        increment.to_unit_increment(self.step_size_interval.get_min())?;
-                    let clamped_unit_increment =
-                        unit_increment.clamp_to_interval(&self.step_size_interval);
-                    Some(
-                        self.hitting_target_absolutely_with_increment(
-                            clamped_unit_increment,
-                            target,
-                        ),
+                    self.hitting_target_absolutely(
+                        discrete_increment,
+                        self.step_size_interval.get_min(),
+                        target,
                     )
                 }
                 Some(step_size) => {
@@ -214,14 +242,26 @@ impl RelativeModeData {
                     //
                     // Settings which are necessary in order to support >1-increments:
                     // - Maximum target step count (enables accurate maximum increment, clamped)
-                    unimplemented!()
+                    let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment);
+                    self.hitting_target_absolutely(pepped_up_increment, step_size, target)
                 }
             }
         }
     }
 
+    fn hitting_target_absolutely(
+        &self,
+        discrete_increment: DiscreteIncrement,
+        atomic_unit_value: UnitValue,
+        target: &impl Target,
+    ) -> Option<Instruction> {
+        let unit_increment = discrete_increment.to_unit_increment(atomic_unit_value)?;
+        let clamped_unit_increment = unit_increment.clamp_to_interval(&self.step_size_interval);
+        Some(self.hitting_target_absolutely_with_unit_increment(clamped_unit_increment, target))
+    }
+
     // TODO Maybe also pass target step size because at least in one case we already have it!
-    fn hitting_target_absolutely_with_increment(
+    fn hitting_target_absolutely_with_unit_increment(
         &self,
         increment: UnitIncrement,
         target: &impl Target,
@@ -239,6 +279,15 @@ impl RelativeModeData {
         let clamped_target_value =
             potentially_aligned_value.clamp_to_interval(&self.target_value_interval);
         Instruction::hit_absolutely(clamped_target_value)
+    }
+
+    fn pep_up_discrete_increment(&self, increment: DiscreteIncrement) -> DiscreteIncrement {
+        let clamped_increment = increment.clamp_to_interval(&self.step_count_interval);
+        if self.reverse {
+            clamped_increment.inverse()
+        } else {
+            clamped_increment
+        }
     }
 }
 
