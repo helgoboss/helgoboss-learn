@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(mode.process(absolute(0.0), &target), Some(absolute(0.0)));
         assert_eq!(mode.process(absolute(0.1), &target), Some(absolute(0.0)));
         assert_eq!(mode.process(absolute(0.2), &target), Some(absolute(0.0)));
-        assert_eq!(mode.process(absolute(0.4), &target), Some(absolute(0.5)));
+        assert_abs_diff_eq!(mode.process(absolute(0.4), &target).unwrap(), absolute(0.5));
         assert_eq!(mode.process(absolute(0.6), &target), Some(absolute(1.0)));
         assert_eq!(mode.process(absolute(0.8), &target), Some(absolute(1.0)));
         assert_eq!(mode.process(absolute(1.0), &target), Some(absolute(1.0)));
