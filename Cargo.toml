@@ -8,3 +8,7 @@ edition = "2018"
 
 [dependencies]
 helgoboss-midi = { path = '../helgoboss-midi-rs'}
+num = "0.2.1"
+
+[dev-dependencies]
+approx = "0.3.2"

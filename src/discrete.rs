@@ -2,7 +2,7 @@ use crate::{Interval, UnitIncrement, UnitValue};
 use helgoboss_midi::{SevenBitValue, SEVEN_BIT_VALUE_MAX};
 use std::ops::Sub;
 
-/// A positive discrete number representing a step count.
+/// A positive discrete number most likely representing a step count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DiscreteValue(u32);
 
@@ -33,7 +33,11 @@ impl DiscreteValue {
 
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<DiscreteValue>) -> DiscreteValue {
-        DiscreteValue::new(self.0.clamp(interval.get_min().0, interval.get_max().0))
+        DiscreteValue::new(num::clamp(
+            self.0,
+            interval.get_min().0,
+            interval.get_max().0,
+        ))
     }
 }
 
@@ -150,7 +154,11 @@ impl DiscreteIncrement {
 
     /// Returns the signum (-1 if it's a negative increment, otherwise +1).
     pub fn get_signum(&self) -> i32 {
-        if self.is_positive() { 1 } else { -1 }
+        if self.is_positive() {
+            1
+        } else {
+            -1
+        }
     }
 
     /// Returns a unit increment or None in case of 0.0. The unit increment is built by creating a
@@ -158,7 +166,7 @@ impl DiscreteIncrement {
     /// exceeds the unit interval.
     pub fn to_unit_increment(&self, atomic_unit_value: UnitValue) -> Option<UnitIncrement> {
         let positive_large = self.to_value().get_number() as f64 * atomic_unit_value.get_number();
-        let unit_value = UnitValue::new(positive_large.clamp(0.0, 1.0));
+        let unit_value = UnitValue::new(num::clamp(positive_large, 0.0, 1.0));
         unit_value.to_increment(self.get_signum())
     }
 }
@@ -169,4 +177,9 @@ impl Sub for DiscreteIncrement {
     fn sub(self, rhs: Self) -> Self::Output {
         self.0 - rhs.0
     }
+}
+
+/// Convenience method for creating an interval of discrete values.
+pub fn create_discrete_value_interval(min: u32, max: u32) -> Interval<DiscreteValue> {
+    Interval::new(DiscreteValue::new(min), DiscreteValue::new(max))
 }

@@ -5,45 +5,6 @@ use std::ops::{Add, Sub};
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct UnitValue(f64);
 
-/// A number within the negative or positive unit interval `(-1.0..=1.0)` representing a positive or
-/// negative increment, never 0 (otherwise it wouldn't be an increment after all).
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct UnitIncrement(f64);
-
-impl UnitIncrement {
-    /// Creates the unit increment. Panics if the given number is 0.0.
-    pub fn new(increment: f64) -> UnitIncrement {
-        debug_assert_ne!(increment, 0.0);
-        UnitIncrement(increment)
-    }
-
-    /// Returns the underlying number.
-    pub fn get_number(&self) -> f64 {
-        self.0
-    }
-
-    /// Returns if this increment is positive.
-    pub fn is_positive(&self) -> bool {
-        self.0 >= 0.0
-    }
-
-    /// Returns the signum (-1 if it's a negative increment, otherwise +1).
-    pub fn get_signum(&self) -> i32 {
-        if self.is_positive() { 1 } else { -1 }
-    }
-
-    /// Converts this unit increment into a unit value thereby "losing" its direction.
-    pub fn to_value(&self) -> UnitValue {
-        UnitValue::new(self.0.abs())
-    }
-
-    /// Clamps this increment to the given interval bounds.
-    pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitIncrement {
-        let clamped_value = self.to_value().clamp_to_interval(interval);
-        clamped_value.to_increment(self.get_signum()).unwrap()
-    }
-}
-
 impl UnitValue {
     /// Creates the unit value. Panics if the given number is not within the positive unit interval.
     pub fn new(number: f64) -> UnitValue {
@@ -156,7 +117,8 @@ impl UnitValue {
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        UnitValue::new((self.0 + increment.get_number()).clamp(
+        UnitValue::new(num::clamp(
+            self.0 + increment.get_number(),
             interval.get_min().get_number(),
             interval.get_max().get_number(),
         ))
@@ -164,7 +126,11 @@ impl UnitValue {
 
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitValue {
-        UnitValue::new(self.0.clamp(interval.get_min().0, interval.get_max().0))
+        UnitValue::new(num::clamp(
+            self.0,
+            interval.get_min().0,
+            interval.get_max().0,
+        ))
     }
 }
 
@@ -199,4 +165,47 @@ pub fn unit_interval() -> Interval<UnitValue> {
 /// Convenience method for creating an interval of unit values.
 pub fn create_unit_value_interval(min: f64, max: f64) -> Interval<UnitValue> {
     Interval::new(UnitValue::new(min), UnitValue::new(max))
+}
+
+/// A number within the negative or positive unit interval `(-1.0..=1.0)` representing a positive or
+/// negative increment, never 0 (otherwise it wouldn't be an increment after all).
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct UnitIncrement(f64);
+
+impl UnitIncrement {
+    /// Creates the unit increment. Panics if the given number is 0.0.
+    pub fn new(increment: f64) -> UnitIncrement {
+        debug_assert_ne!(increment, 0.0);
+        UnitIncrement(increment)
+    }
+
+    /// Returns the underlying number.
+    pub fn get_number(&self) -> f64 {
+        self.0
+    }
+
+    /// Returns if this increment is positive.
+    pub fn is_positive(&self) -> bool {
+        self.0 >= 0.0
+    }
+
+    /// Returns the signum (-1 if it's a negative increment, otherwise +1).
+    pub fn get_signum(&self) -> i32 {
+        if self.is_positive() {
+            1
+        } else {
+            -1
+        }
+    }
+
+    /// Converts this unit increment into a unit value thereby "losing" its direction.
+    pub fn to_value(&self) -> UnitValue {
+        UnitValue::new(self.0.abs())
+    }
+
+    /// Clamps this increment to the given interval bounds.
+    pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitIncrement {
+        let clamped_value = self.to_value().clamp_to_interval(interval);
+        clamped_value.to_increment(self.get_signum()).unwrap()
+    }
 }
