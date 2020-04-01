@@ -78,14 +78,14 @@ impl UnitValue {
     /// have the accurate number of intervals at disposal, use this method.
     pub fn round_by_grid_interval_count(&self, interval_count: u32) -> UnitValue {
         let interval_count = interval_count as f64;
-        UnitValue::new((self.0 * interval_count).floor() / interval_count)
+        UnitValue::new((self.0 * interval_count).round() / interval_count)
     }
 
-    // "Rounds" value to its nearest grid value using the grid's interval size. If you pass an
+    // Rounds value to its nearest grid value using the grid's interval size. If you pass an
     // interval size whose multiple doesn't perfectly fit into the unit interval, the last
     // interval will be smaller than all the others. Better don't do that.
     pub fn round_by_grid_interval_size(&self, interval_size: UnitValue) -> UnitValue {
-        UnitValue::new((self.0 / interval_size.0).floor() * interval_size.0)
+        UnitValue::new((self.0 / interval_size.0).round() * interval_size.0)
     }
 
     /// Returns whether this is 0.0.

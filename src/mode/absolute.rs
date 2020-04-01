@@ -124,7 +124,7 @@ mod tests {
     use approx::*;
 
     #[test]
-    fn absolute_mode_absolute_value() {
+    fn absolute_value() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             ..Default::default()
@@ -143,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_relative_target() {
+    fn absolute_value_relative_target() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             ..Default::default()
@@ -162,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_source_interval() {
+    fn absolute_value_source_interval() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
@@ -185,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_source_interval_ignore() {
+    fn absolute_value_source_interval_ignore() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_interval() {
+    fn absolute_value_target_interval() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             target_value_interval: create_unit_value_interval(0.2, 0.6),
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_source_and_target_interval() {
+    fn absolute_value_source_and_target_interval() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_source_and_target_interval_shifted() {
+    fn absolute_value_source_and_target_interval_shifted() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
@@ -277,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_reverse() {
+    fn absolute_value_reverse() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             reverse_target_value: true,
@@ -296,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_round() {
+    fn absolute_value_round() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             round_target_value: true,
@@ -310,15 +310,16 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.0));
-        assert_abs_diff_eq!(mode.process(abs(0.19), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.process(abs(0.11), &target).unwrap(), abs(0.2));
+        assert_abs_diff_eq!(mode.process(abs(0.19), &target).unwrap(), abs(0.2));
         assert_abs_diff_eq!(mode.process(abs(0.2), &target).unwrap(), abs(0.2));
-        assert_abs_diff_eq!(mode.process(abs(0.35), &target).unwrap(), abs(0.2));
-        assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.4));
+        assert_abs_diff_eq!(mode.process(abs(0.35), &target).unwrap(), abs(0.4));
+        assert_abs_diff_eq!(mode.process(abs(0.49), &target).unwrap(), abs(0.4));
         assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
     }
 
     #[test]
-    fn absolute_mode_absolute_value_jump_interval() {
+    fn absolute_value_jump_interval() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             jump_interval: create_unit_value_interval(0.0, 0.2),
@@ -342,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_jump_interval_min() {
+    fn absolute_value_jump_interval_min() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             jump_interval: create_unit_value_interval(0.1, 1.0),
@@ -363,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_jump_interval_approach() {
+    fn absolute_value_jump_interval_approach() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             jump_interval: create_unit_value_interval(0.0, 0.2),
@@ -387,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_relative_value() {
+    fn relative_value() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             ..Default::default()

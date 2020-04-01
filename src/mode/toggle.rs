@@ -33,12 +33,12 @@ impl ToggleModeData {
 mod tests {
     use super::*;
 
-    use crate::mode::test_util::{abs, TestTarget};
+    use crate::mode::test_util::{abs, rel, TestTarget};
     use crate::{create_unit_value_interval, Mode};
     use approx::*;
 
     #[test]
-    fn absolute_mode_absolute_value_target_off() {
+    fn absolute_value_target_off() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             ..Default::default()
@@ -57,7 +57,24 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_on() {
+    fn relative_value() {
+        // Given
+        let mode = Mode::Toggle(ToggleModeData {
+            ..Default::default()
+        });
+        let target = TestTarget {
+            step_size: None,
+            current_value: UnitValue::new(0.0),
+            wants_increments: false,
+        };
+        // When
+        // Then
+        assert!(mode.process(rel(1), &target).is_none());
+        assert!(mode.process(rel(-1), &target).is_none());
+    }
+
+    #[test]
+    fn absolute_value_target_on() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             ..Default::default()
@@ -76,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_rather_off() {
+    fn absolute_value_target_rather_off() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             ..Default::default()
@@ -95,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_rather_on() {
+    fn absolute_value_target_rather_on() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             ..Default::default()
@@ -114,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_interval_target_off() {
+    fn absolute_value_target_interval_target_off() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
@@ -134,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_interval_target_on() {
+    fn absolute_value_target_interval_target_on() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
@@ -154,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_interval_target_rather_off() {
+    fn absolute_value_target_interval_target_rather_off() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
@@ -174,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_interval_target_rather_on() {
+    fn absolute_value_target_interval_target_rather_on() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
@@ -194,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_interval_target_too_off() {
+    fn absolute_value_target_interval_target_too_off() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
@@ -214,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_target_interval_target_too_on() {
+    fn absolute_value_target_interval_target_too_on() {
         // Given
         let mode = Mode::Toggle(ToggleModeData {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
