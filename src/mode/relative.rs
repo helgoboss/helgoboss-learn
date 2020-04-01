@@ -201,7 +201,7 @@ impl RelativeModeData {
     ) -> Option<ControlValue> {
         let current_target_value = target.get_current_value();
         let incremented_target_value = if self.rotate {
-            current_target_value.add_rotating_at_bounds(increment, &self.target_value_interval)
+            current_target_value.add_rotating(increment, &self.target_value_interval)
         } else {
             current_target_value.add_clamping(increment, &self.target_value_interval)
         };
@@ -223,6 +223,7 @@ impl RelativeModeData {
         // TODO Should we really allow the final value to be not on the grid? That would happen if
         //  there's a snap-to-grid step size but the target value interval bound is not on the grid.
         //  Maybe do the snap-to-grid step as last step!
+        // TODO Maybe snap-to-grid also for user-defined step sizes to avoid symmetry issues!
         let clamped_target_value =
             potentially_snapped_value.clamp_to_interval(&self.target_value_interval);
         if clamped_target_value == current_target_value {
@@ -581,10 +582,9 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
-                // TODO This behavior is debatable
-                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
             }
         }
 
@@ -874,16 +874,7 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
-                // TODO Not consequent: If the incremented value is high enough, it jumps
-                //  from the out-of-range value directly to the incremented value. If not, it
-                //  jumps to the interval bound. I can think of two other better behaviors:
-                //  a) Even if the incremented value is high enough, jump to interval bound only
-                //     (would be more consistent in that it *always* jumps to the bound first).
-                //     Preferred variant!
-                //  b) Start the increment not from the current out-of-range value but from the
-                //     interval bound - always, so not jump to bound first but always use bound
-                //     as starting point for the increment.
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.5));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
             }
 
             #[test]
@@ -950,9 +941,9 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
             }
         }
 
@@ -1408,7 +1399,28 @@ mod tests {
                 // When
                 // Then
                 assert!(mode.process(abs(0.0), &target).is_none());
-                // TODO This behavior is debatable
+                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_out_rotate_reverse() {
+                // Given
+                let mode: TestMode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    reverse: true,
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert!(mode.process(abs(0.0), &target).is_none());
                 assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.8));
@@ -1737,10 +1749,9 @@ mod tests {
                 // When
                 // Then
                 assert!(mode.process(abs(0.0), &target).is_none());
-                // TODO Not consequent: See other test (a and b possibilities)
-                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.55));
-                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.2));
             }
 
             #[test]
@@ -1790,6 +1801,28 @@ mod tests {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert!(mode.process(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_out_rotate_reverse() {
+                // Given
+                let mode: TestMode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    reverse: true,
                     rotate: true,
                     ..Default::default()
                 });

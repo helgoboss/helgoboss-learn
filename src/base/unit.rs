@@ -98,34 +98,51 @@ impl UnitValue {
         self.0 == 1.0
     }
 
-    /// Adds the given number. If the result doesn't fit into the given interval anymore, it just
-    /// snaps to the opposite bound of that interval.
-    pub fn add_rotating_at_bounds(
+    /// Adds the given increment. If the result doesn't fit into the given interval anymore, it just
+    /// snaps to the opposite bound of that interval. If this unit value is not within the given
+    /// interval in the first place, it returns an appropriate interval bound instead of doing the
+    /// addition.
+    pub fn add_rotating(
         &self,
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let tmp = self.0 + increment.get_number();
-        if tmp < interval.get_min().get_number() {
-            interval.get_max()
-        } else if tmp > interval.get_max().get_number() {
-            interval.get_min()
+        let (min, max) = (interval.get_min(), interval.get_max());
+        if *self < min {
+            return if increment.is_positive() { min } else { max };
+        }
+        if *self > max {
+            return if increment.is_positive() { min } else { max };
+        }
+        let sum = self.0 + increment.get_number();
+        if sum < min.get_number() {
+            max
+        } else if sum > max.get_number() {
+            min
         } else {
-            UnitValue::new(tmp)
+            UnitValue::new(sum)
         }
     }
 
-    /// Adds the given number. If the result doesn't fit into the given interval anymore, it just
-    /// snaps to the bound of that interval.
+    /// Adds the given increment. If the result doesn't fit into the given interval anymore, it just
+    /// snaps to the bound of that interval. If this unit value is not within the given interval in
+    /// the first place, it returns the closest interval bound instead of doing the addition.
     pub fn add_clamping(
         &self,
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
     ) -> UnitValue {
+        let (min, max) = (interval.get_min(), interval.get_max());
+        if *self < min {
+            return min;
+        }
+        if *self > max {
+            return max;
+        }
         UnitValue::new(num::clamp(
             self.0 + increment.get_number(),
-            interval.get_min().get_number(),
-            interval.get_max().get_number(),
+            min.get_number(),
+            max.get_number(),
         ))
     }
 
