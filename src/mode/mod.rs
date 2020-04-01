@@ -14,13 +14,13 @@ pub use transformation::*;
 mod test_util;
 
 #[derive(Clone, Debug)]
-pub enum Mode {
-    Absolute(AbsoluteModeData),
+pub enum Mode<T: Transformation> {
+    Absolute(AbsoluteModeData<T>),
     Relative(RelativeModeData),
     Toggle(ToggleModeData),
 }
 
-impl Mode {
+impl<T: Transformation> Mode<T> {
     pub fn process(
         &self,
         control_value: ControlValue,

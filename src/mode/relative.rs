@@ -244,7 +244,7 @@ impl RelativeModeData {
 mod tests {
     use super::*;
 
-    use crate::mode::test_util::{abs, rel, TestTarget};
+    use crate::mode::test_util::{abs, rel, TestMode, TestTarget};
     use crate::{create_unit_value_interval, Mode};
     use approx::*;
 
@@ -257,7 +257,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -278,7 +278,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -299,7 +299,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -321,7 +321,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -343,7 +343,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -365,7 +365,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -387,7 +387,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     reverse: true,
                     ..Default::default()
                 });
@@ -410,7 +410,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -432,7 +432,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -454,7 +454,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -476,7 +476,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -498,7 +498,7 @@ mod tests {
             #[test]
             fn target_interval_out() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -520,7 +520,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -543,7 +543,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -566,7 +566,7 @@ mod tests {
             #[test]
             fn target_interval_out_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -594,7 +594,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -615,7 +615,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -636,7 +636,7 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(4, 100),
                     ..Default::default()
                 });
@@ -659,7 +659,7 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(4, 100),
                     ..Default::default()
                 });
@@ -681,7 +681,7 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 2),
                     ..Default::default()
                 });
@@ -703,7 +703,7 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 2),
                     ..Default::default()
                 });
@@ -725,7 +725,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     reverse: true,
                     ..Default::default()
                 });
@@ -747,7 +747,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -769,7 +769,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -791,7 +791,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -813,7 +813,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -835,7 +835,7 @@ mod tests {
             #[test]
             fn target_interval_out() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -857,7 +857,7 @@ mod tests {
             #[test]
             fn target_interval_step_interval_out() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -889,7 +889,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -912,7 +912,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -935,7 +935,7 @@ mod tests {
             #[test]
             fn target_interval_out_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -962,7 +962,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -983,7 +983,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(2, 100),
                     ..Default::default()
                 });
@@ -1005,7 +1005,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 2),
                     ..Default::default()
                 });
@@ -1027,7 +1027,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     reverse: true,
                     ..Default::default()
                 });
@@ -1057,7 +1057,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1075,7 +1075,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1093,7 +1093,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -1113,7 +1113,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -1132,7 +1132,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -1153,7 +1153,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -1173,7 +1173,7 @@ mod tests {
             #[test]
             fn reverse_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     reverse: true,
                     ..Default::default()
                 });
@@ -1192,7 +1192,7 @@ mod tests {
             #[test]
             fn reverse_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     reverse: true,
                     ..Default::default()
                 });
@@ -1212,7 +1212,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -1232,7 +1232,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -1252,7 +1252,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -1272,7 +1272,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -1292,7 +1292,7 @@ mod tests {
             #[test]
             fn target_interval_out() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -1312,7 +1312,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1333,7 +1333,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1354,7 +1354,7 @@ mod tests {
             #[test]
             fn target_interval_out_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1380,7 +1380,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1399,7 +1399,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1418,7 +1418,7 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(4, 8),
                     ..Default::default()
                 });
@@ -1438,7 +1438,7 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(4, 8),
                     ..Default::default()
                 });
@@ -1458,7 +1458,7 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 8),
                     ..Default::default()
                 });
@@ -1478,7 +1478,7 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 2),
                     ..Default::default()
                 });
@@ -1500,7 +1500,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     reverse: true,
                     ..Default::default()
                 });
@@ -1520,7 +1520,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -1540,7 +1540,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     rotate: true,
                     ..Default::default()
                 });
@@ -1560,7 +1560,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -1580,7 +1580,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -1600,7 +1600,7 @@ mod tests {
             #[test]
             fn target_interval_out() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -1620,7 +1620,7 @@ mod tests {
             #[test]
             fn step_count_interval_exceeded() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 100),
                     ..Default::default()
                 });
@@ -1640,7 +1640,7 @@ mod tests {
             #[test]
             fn target_interval_step_interval_out() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -1662,7 +1662,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1683,7 +1683,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1704,7 +1704,7 @@ mod tests {
             #[test]
             fn target_interval_out_rotate() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1730,7 +1730,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1749,7 +1749,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(2, 8),
                     ..Default::default()
                 });
@@ -1769,7 +1769,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 2),
                     ..Default::default()
                 });
@@ -1789,7 +1789,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode = Mode::Relative(RelativeModeData {
+                let mode: TestMode = Mode::Relative(RelativeModeData {
                     reverse: true,
                     ..Default::default()
                 });

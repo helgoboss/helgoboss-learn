@@ -4,7 +4,7 @@ use crate::{
 
 /// Settings for processing control values in absolute mode.
 #[derive(Clone, Debug)]
-pub struct AbsoluteModeData {
+pub struct AbsoluteModeData<T: Transformation> {
     source_value_interval: Interval<UnitValue>,
     target_value_interval: Interval<UnitValue>,
     jump_interval: Interval<UnitValue>,
@@ -12,11 +12,12 @@ pub struct AbsoluteModeData {
     reverse_target_value: bool,
     round_target_value: bool,
     ignore_out_of_range_source_values: bool,
-    control_transformation: Option<Transformation>,
-    feedback_transformation: Option<Transformation>,
+    control_transformation: Option<T>,
+    // TODO Implement feedback logic (in all modes)
+    feedback_transformation: Option<T>,
 }
 
-impl Default for AbsoluteModeData {
+impl<T: Transformation> Default for AbsoluteModeData<T> {
     fn default() -> Self {
         AbsoluteModeData {
             source_value_interval: full_unit_interval(),
@@ -32,7 +33,7 @@ impl Default for AbsoluteModeData {
     }
 }
 
-impl AbsoluteModeData {
+impl<T: Transformation> AbsoluteModeData<T> {
     /// Processes the given control value in absolute mode and returns an appropriate target
     /// instruction.
     pub fn process(&self, control_value: UnitValue, target: &impl Target) -> Option<ControlValue> {
@@ -121,14 +122,14 @@ fn round_to_nearest_discrete_value(
 mod tests {
     use super::*;
 
-    use crate::mode::test_util::{abs, rel, TestTarget};
+    use crate::mode::test_util::{abs, rel, TestMode, TestTarget, TestTransformation};
     use crate::{create_unit_value_interval, Mode};
     use approx::*;
 
     #[test]
     fn absolute_value() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             ..Default::default()
         });
         let target = TestTarget {
@@ -147,7 +148,7 @@ mod tests {
     #[test]
     fn absolute_value_relative_target() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             ..Default::default()
         });
         let target = TestTarget {
@@ -166,7 +167,7 @@ mod tests {
     #[test]
     fn absolute_value_source_interval() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
         });
@@ -189,7 +190,7 @@ mod tests {
     #[test]
     fn absolute_value_source_interval_ignore() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             ignore_out_of_range_source_values: true,
             ..Default::default()
@@ -213,7 +214,7 @@ mod tests {
     #[test]
     fn absolute_value_target_interval() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             target_value_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
         });
@@ -235,7 +236,7 @@ mod tests {
     #[test]
     fn absolute_value_source_and_target_interval() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             target_value_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
@@ -258,7 +259,7 @@ mod tests {
     #[test]
     fn absolute_value_source_and_target_interval_shifted() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             target_value_interval: create_unit_value_interval(0.4, 0.8),
             ..Default::default()
@@ -281,7 +282,7 @@ mod tests {
     #[test]
     fn absolute_value_reverse() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             reverse_target_value: true,
             ..Default::default()
         });
@@ -300,7 +301,7 @@ mod tests {
     #[test]
     fn absolute_value_round() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             round_target_value: true,
             ..Default::default()
         });
@@ -323,7 +324,7 @@ mod tests {
     #[test]
     fn absolute_value_jump_interval() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             jump_interval: create_unit_value_interval(0.0, 0.2),
             ..Default::default()
         });
@@ -347,7 +348,7 @@ mod tests {
     #[test]
     fn absolute_value_jump_interval_min() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             jump_interval: create_unit_value_interval(0.1, 1.0),
             ..Default::default()
         });
@@ -368,7 +369,7 @@ mod tests {
     #[test]
     fn absolute_value_jump_interval_approach() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             jump_interval: create_unit_value_interval(0.0, 0.2),
             approach_target_value: true,
             ..Default::default()
@@ -390,9 +391,47 @@ mod tests {
     }
 
     #[test]
+    fn absolute_value_transformation_ok() {
+        // Given
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
+            control_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
+            ..Default::default()
+        });
+        let target = TestTarget {
+            step_size: None,
+            current_value: UnitValue::new(0.777),
+            wants_increments: false,
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.0));
+    }
+
+    #[test]
+    fn absolute_value_transformation_err() {
+        // Given
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
+            control_transformation: Some(TestTransformation::new(|_| Err(()))),
+            ..Default::default()
+        });
+        let target = TestTarget {
+            step_size: None,
+            current_value: UnitValue::new(0.777),
+            wants_increments: false,
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+    }
+
+    #[test]
     fn relative_value() {
         // Given
-        let mode = Mode::Absolute(AbsoluteModeData {
+        let mode: TestMode = Mode::Absolute(AbsoluteModeData {
             ..Default::default()
         });
         let target = TestTarget {
