@@ -20,8 +20,15 @@ impl Default for RelativeModeData {
     fn default() -> Self {
         RelativeModeData {
             source_value_interval: unit_interval(),
-            step_count_interval: create_discrete_value_interval(1, 100),
-            step_size_interval: create_unit_value_interval(0.01, 1.0),
+            // 0.01 has been chosen as default minimum step size because it corresponds to 1%.
+            // 0.01 has also been chosen as default maximum step size because most users probably
+            // want to start easy, that is without using the "press harder = more increments"
+            // respectively "dial harder = more increments" features. Activating them right from
+            // the start by choosing a higher step size maximum could lead to surprising results
+            // such as ugly parameters jumps, especially if the source is not suited for that.
+            step_size_interval: create_unit_value_interval(0.01, 0.01),
+            // Same reasoning like with `step_size_interval`
+            step_count_interval: create_discrete_value_interval(1, 1),
             target_value_interval: unit_interval(),
             reverse: false,
             rotate: false,
@@ -76,11 +83,7 @@ impl RelativeModeData {
                     // - Maximum target step size (enables accurate maximum increment, clamped)
                     // - Target value interval (absolute, important for rotation only, clamped)
                     let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                    self.hitting_target_absolutely(
-                        discrete_increment,
-                        self.step_size_interval.get_min(),
-                        target,
-                    )
+                    self.hitting_continuous_target_absolutely(discrete_increment, target)
                 }
                 Some(step_size) => {
                     // Discrete target
@@ -93,7 +96,7 @@ impl RelativeModeData {
                     // - Target value interval (absolute, important for rotation only, clamped)
                     // - Maximum target step count (enables accurate maximum increment, clamped)
                     let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                    self.hitting_target_absolutely(discrete_increment, step_size, target)
+                    self.hitting_discrete_target_absolutely(discrete_increment, step_size, target)
                 }
             }
         }
@@ -138,13 +141,12 @@ impl RelativeModeData {
                     //
                     // Settings which are necessary in order to support >1-increments:
                     // - Maximum target step size (enables accurate maximum increment, clamped)
-                    self.hitting_target_absolutely(
+                    self.hitting_continuous_target_absolutely(
                         if self.reverse {
                             discrete_increment.inverse()
                         } else {
                             discrete_increment
                         },
-                        self.step_size_interval.get_min(),
                         target,
                     )
                 }
@@ -159,21 +161,31 @@ impl RelativeModeData {
                     // Settings which are necessary in order to support >1-increments:
                     // - Maximum target step count (enables accurate maximum increment, clamped)
                     let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment);
-                    self.hitting_target_absolutely(pepped_up_increment, step_size, target)
+                    self.hitting_discrete_target_absolutely(pepped_up_increment, step_size, target)
                 }
             }
         }
     }
 
-    fn hitting_target_absolutely(
+    fn hitting_continuous_target_absolutely(
         &self,
         discrete_increment: DiscreteIncrement,
-        atomic_unit_value: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
-        let unit_increment = discrete_increment.to_unit_increment(atomic_unit_value)?;
+        let unit_increment =
+            discrete_increment.to_unit_increment(self.step_size_interval.get_min())?;
         let clamped_unit_increment = unit_increment.clamp_to_interval(&self.step_size_interval);
         Some(self.hitting_target_absolutely_with_unit_increment(clamped_unit_increment, target))
+    }
+
+    fn hitting_discrete_target_absolutely(
+        &self,
+        discrete_increment: DiscreteIncrement,
+        target_step_size: UnitValue,
+        target: &impl Target,
+    ) -> Option<ControlValue> {
+        let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
+        Some(self.hitting_target_absolutely_with_unit_increment(unit_increment, target))
     }
 
     // TODO Maybe also pass target step size because at least in one case we already have it!
@@ -197,7 +209,9 @@ impl RelativeModeData {
         // in-between two discrete values. This is not good and could yield weird effects, one being
         // that behavior changes in a non-symmetrical way as soon as target bounds are reached.
         // So we should fix that bad alignment right now and make sure that the target value ends up
-        // on a perfect unit value denoting a conrete discrete value.
+        // on a perfect unit value denoting a concrete discrete value.
+        // round() is the right choice here because floor() has been found to lead to surprising
+        // jumps due to slight numerical inaccuracies.
         let potentially_aligned_value = target
             .get_step_size()
             .map(|step_size| incremented_target_value.round_by_grid_interval_size(step_size))
@@ -248,8 +262,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.01));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.02));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.10));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.01));
             }
 
             #[test]
@@ -265,8 +279,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.90));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.98));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.99));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.99));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.99));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(1.0));
@@ -321,7 +335,7 @@ mod tests {
             fn max_step_size_1() {
                 // Given
                 let mode = Mode::Relative(RelativeModeData {
-                    step_size_interval: create_unit_value_interval(0.01, 0.01),
+                    step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -335,15 +349,15 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.01));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.01));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.02));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.09));
             }
 
             #[test]
             fn max_step_size_2() {
                 // Given
                 let mode = Mode::Relative(RelativeModeData {
-                    step_size_interval: create_unit_value_interval(0.01, 0.01),
+                    step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -353,8 +367,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.99));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.99));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.91));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.98));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.99));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(1.0));
@@ -375,8 +389,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.10));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.02));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.01));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.01));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
@@ -402,8 +416,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.01));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.02));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.10));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.01));
             }
 
             #[test]
@@ -420,8 +434,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.90));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.98));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.99));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.99));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.99));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
@@ -446,8 +460,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.21));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.22));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.30));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.21));
             }
 
             #[test]
@@ -464,8 +478,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.7));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.78));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.79));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.79));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
@@ -513,8 +527,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.21));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.22));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.30));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.21));
             }
 
             #[test]
@@ -532,8 +546,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.7));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.78));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.79));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.79));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
@@ -585,8 +599,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.05));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.10));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.5));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.05));
             }
 
             #[test]
@@ -602,8 +616,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.5));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.90));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.95));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.95));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(1.0));
@@ -713,8 +727,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.5));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.10));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.05));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.05));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
@@ -739,8 +753,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.05));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.10));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.50));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.05));
             }
 
             #[test]
@@ -757,8 +771,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.50));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.90));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.95));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.95));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
@@ -783,8 +797,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.25));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.30));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.70));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.25));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.25));
             }
 
             #[test]
@@ -801,8 +815,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.3));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.70));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.75));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.75));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
@@ -828,7 +842,30 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
-                // TODO This is not consequent: If the incremented value is high enough, it jumps
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_step_interval_out() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(1, 100),
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                // TODO Not consequent: If the incremented value is high enough, it jumps
                 //  from the out-of-range value directly to the incremented value. If not, it
                 //  jumps to the interval bound. I can think of two other better behaviors:
                 //  a) Even if the incremented value is high enough, jump to interval bound only
@@ -858,8 +895,8 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.25));
-                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.30));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.70));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.25));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.25));
             }
 
             #[test]
@@ -877,8 +914,8 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.3));
-                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.70));
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.75));
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.75));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
@@ -905,7 +942,123 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.5));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.8));
+            }
+        }
+
+        mod relative_target {
+            use super::*;
+
+            #[test]
+            fn default() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(1));
+            }
+
+            #[test]
+            fn min_step_count() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(2, 100),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(-10));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(10));
+            }
+
+            #[test]
+            fn max_step_count() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(1, 2),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(2));
+            }
+
+            #[test]
+            fn reverse() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    reverse: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(-1));
+            }
+        }
+    }
+    mod absolute_value {
+        use super::*;
+
+        mod absolute_continuous_target {
+            use super::*;
+
+            #[test]
+            fn default_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert!(mode.process(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.01));
             }
         }
     }

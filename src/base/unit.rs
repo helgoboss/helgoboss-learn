@@ -46,6 +46,7 @@ impl UnitValue {
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding
     /// in terms of `floor()`).
+    /// TODO Is floor the right choice here vs. round?
     pub fn map_from_unit_interval_to_discrete(
         &self,
         destination_interval: &Interval<DiscreteValue>,

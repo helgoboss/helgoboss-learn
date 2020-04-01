@@ -109,6 +109,8 @@ fn round_to_nearest_discrete_value(
     target: &impl Target,
     approximate_control_value: UnitValue,
 ) -> UnitValue {
+    // round() is the right choice here vs. floor() because we don't want slight numerical
+    // inaccuracies lead to surprising jumps
     match target.get_step_size() {
         None => approximate_control_value,
         Some(step_size) => approximate_control_value.round_by_grid_interval_size(step_size),
