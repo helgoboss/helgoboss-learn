@@ -87,7 +87,7 @@ impl RelativeModeData {
                         step_size_value.to_increment(negative_if(self.reverse))?;
                     self.hitting_target_absolutely_with_unit_increment(
                         step_size_increment,
-                        None,
+                        self.step_size_interval.get_min(),
                         target,
                     )
                 }
@@ -158,7 +158,7 @@ impl RelativeModeData {
                         unit_increment.clamp_to_interval(&self.step_size_interval);
                     self.hitting_target_absolutely_with_unit_increment(
                         clamped_unit_increment,
-                        None,
+                        self.step_size_interval.get_min(),
                         target,
                     )
                 }
@@ -186,23 +186,20 @@ impl RelativeModeData {
         target: &impl Target,
     ) -> Option<ControlValue> {
         let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
-        self.hitting_target_absolutely_with_unit_increment(
-            unit_increment,
-            Some(target_step_size),
-            target,
-        )
+        self.hitting_target_absolutely_with_unit_increment(unit_increment, target_step_size, target)
     }
 
     fn hitting_target_absolutely_with_unit_increment(
         &self,
         increment: UnitIncrement,
-        snap_to_grid_step_size: Option<UnitValue>,
+        snap_to_grid_step_size: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
         let current_target_value = target.get_current_value();
         // TODO One issue that might occur when not incrementing out-of-target-range values
         //  (as is done now) is that the current target value might only appear out of range because
         //  of numerical inaccuracies. That would lead to frustrating "doesn't move" experiences.
+        //  We should snap the target interval to grid step sizes first!
         let incremented_target_value = if self.rotate {
             current_target_value.add_rotating(increment, &self.target_value_interval)
         } else {
@@ -220,14 +217,12 @@ impl RelativeModeData {
         // on a perfect unit value denoting a concrete discrete value (snap to grid).
         // round() is the right choice here because floor() has been found to lead to surprising
         // jumps due to slight numerical inaccuracies.
-        // TODO Maybe snap-to-grid also for user-defined step sizes to avoid symmetry issues!
-        let potentially_snapped_value = snap_to_grid_step_size
-            .map(|step_size| incremented_target_value.round_by_grid_interval_size(step_size))
-            .unwrap_or(incremented_target_value);
-        if potentially_snapped_value == current_target_value {
+        let snapped_value =
+            incremented_target_value.round_by_grid_interval_size(snap_to_grid_step_size);
+        if snapped_value == current_target_value {
             return None;
         }
-        Some(ControlValue::Absolute(potentially_snapped_value))
+        Some(ControlValue::Absolute(snapped_value))
     }
 
     fn pep_up_discrete_increment(&self, increment: DiscreteIncrement) -> DiscreteIncrement {
@@ -1093,7 +1088,7 @@ mod tests {
                 // When
                 // Then
                 assert!(mode.process(abs(0.0), &target).is_none());
-                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.28));
+                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.6));
                 assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
             }
@@ -1132,7 +1127,7 @@ mod tests {
                 // When
                 // Then
                 assert!(mode.process(abs(0.0), &target).is_none());
-                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.018));
+                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.02));
                 assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.05));
                 assert_abs_diff_eq!(mode.process(abs(0.75), &target).unwrap(), abs(0.07));
                 assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.09));
@@ -1196,7 +1191,7 @@ mod tests {
                 assert!(mode.process(abs(0.0), &target).is_none());
                 assert!(mode.process(abs(0.25), &target).is_none());
                 assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
-                assert_abs_diff_eq!(mode.process(abs(0.75), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(abs(0.75), &target).unwrap(), abs(1.0));
                 assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
             }
 
