@@ -129,7 +129,7 @@ fn round_to_nearest_discrete_value(
     // inaccuracies lead to surprising jumps
     match target.get_step_size() {
         None => approximate_control_value,
-        Some(step_size) => approximate_control_value.round_by_grid_interval_size(step_size),
+        Some(step_size) => approximate_control_value.snap_to_grid_by_interval_size(step_size),
     }
 }
 

@@ -76,7 +76,7 @@ impl UnitValue {
     /// "Rounds" value to its nearest grid value using the grid's number of intervals. Using the
     /// number of intervals guarantees that each grid interval will have the same size. So if you
     /// have the accurate number of intervals at disposal, use this method.
-    pub fn round_by_grid_interval_count(&self, interval_count: u32) -> UnitValue {
+    pub fn snap_to_grid_by_interval_count(&self, interval_count: u32) -> UnitValue {
         let interval_count = interval_count as f64;
         UnitValue::new((self.0 * interval_count).round() / interval_count)
     }
@@ -84,7 +84,7 @@ impl UnitValue {
     // Rounds value to its nearest grid value using the grid's interval size. If you pass an
     // interval size whose multiple doesn't perfectly fit into the unit interval, the last
     // interval will be smaller than all the others. Better don't do that.
-    pub fn round_by_grid_interval_size(&self, interval_size: UnitValue) -> UnitValue {
+    pub fn snap_to_grid_by_interval_size(&self, interval_size: UnitValue) -> UnitValue {
         UnitValue::new((self.0 / interval_size.0).round() * interval_size.0)
     }
 

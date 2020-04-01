@@ -192,18 +192,21 @@ impl RelativeModeData {
     fn hitting_target_absolutely_with_unit_increment(
         &self,
         increment: UnitIncrement,
-        snap_to_grid_step_size: UnitValue,
+        grid_interval_size: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
         let current_target_value = target.get_current_value();
-        // TODO One issue that might occur when not incrementing out-of-target-range values
-        //  (as is done now) is that the current target value might only appear out of range because
-        //  of numerical inaccuracies. That would lead to frustrating "doesn't move" experiences.
-        //  We should snap the target interval to grid step sizes first!
+        // The add functions doesn't add if the current target value is not within the target
+        // interval in the first place. Instead it returns one of the interval bounds. One issue
+        // that might occur is that the current target value might only *appear* out-of-range
+        // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
+        // experiences. Therefore We snap the current target value to grid first.
+        let snapped_current_target_value =
+            current_target_value.snap_to_grid_by_interval_size(grid_interval_size);
         let incremented_target_value = if self.rotate {
-            current_target_value.add_rotating(increment, &self.target_value_interval)
+            snapped_current_target_value.add_rotating(increment, &self.target_value_interval)
         } else {
-            current_target_value.add_clamping(increment, &self.target_value_interval)
+            snapped_current_target_value.add_clamping(increment, &self.target_value_interval)
         };
         // If the target has a step size (= has discrete values), we already made sure at this point that the unit increment
         // is an exact multiple of that step size. However, it's possible that the current
@@ -217,12 +220,12 @@ impl RelativeModeData {
         // on a perfect unit value denoting a concrete discrete value (snap to grid).
         // round() is the right choice here because floor() has been found to lead to surprising
         // jumps due to slight numerical inaccuracies.
-        let snapped_value =
-            incremented_target_value.round_by_grid_interval_size(snap_to_grid_step_size);
-        if snapped_value == current_target_value {
+        let desired_target_value =
+            incremented_target_value.snap_to_grid_by_interval_size(grid_interval_size);
+        if desired_target_value == current_target_value {
             return None;
         }
-        Some(ControlValue::Absolute(snapped_value))
+        Some(ControlValue::Absolute(desired_target_value))
     }
 
     fn pep_up_discrete_increment(&self, increment: DiscreteIncrement) -> DiscreteIncrement {
@@ -490,7 +493,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out() {
+            fn target_interval_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -509,6 +512,28 @@ mod tests {
                 assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_current_target_value_just_appearing_out_of_range() {
+                // Given
+                let mode: TestMode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.199999999999),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.21));
             }
 
             #[test]
@@ -558,7 +583,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out_rotate() {
+            fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -826,7 +851,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out() {
+            fn target_interval_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -848,7 +873,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_step_interval_out() {
+            fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 100),
@@ -917,7 +942,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out_rotate() {
+            fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -1315,7 +1340,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out() {
+            fn target_interval_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -1377,7 +1402,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out_rotate() {
+            fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -1398,7 +1423,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out_rotate_reverse() {
+            fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -1687,7 +1712,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out() {
+            fn target_interval_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -1727,7 +1752,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_step_interval_out() {
+            fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     step_count_interval: create_discrete_value_interval(1, 100),
@@ -1790,7 +1815,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out_rotate() {
+            fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -1811,7 +1836,7 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_out_rotate_reverse() {
+            fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
                 let mode: TestMode = Mode::Relative(RelativeModeData {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -1827,7 +1852,6 @@ mod tests {
                 // When
                 // Then
                 assert!(mode.process(abs(0.0), &target).is_none());
-                // TODO Behavior debatable
                 assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.8));
                 assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.8));
