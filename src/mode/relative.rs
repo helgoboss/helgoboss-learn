@@ -1,7 +1,6 @@
-use crate::util::negative_if;
 use crate::{
-    create_discrete_value_interval, create_unit_value_interval, unit_interval, ControlValue,
-    DiscreteIncrement, DiscreteValue, Interval, Target, UnitIncrement, UnitValue,
+    create_discrete_value_interval, create_unit_value_interval, negative_if, unit_interval,
+    ControlValue, DiscreteIncrement, DiscreteValue, Interval, Target, UnitIncrement, UnitValue,
 };
 
 /// Settings for processing control values in relative mode.

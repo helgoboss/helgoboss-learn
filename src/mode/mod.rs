@@ -1,11 +1,14 @@
-use crate::{ControlValue, Target};
-
+mod target;
+pub use target::*;
 mod absolute;
 pub use absolute::*;
 mod relative;
 pub use relative::*;
 mod toggle;
 pub use toggle::*;
+mod transformation;
+use crate::ControlValue;
+pub use transformation::*;
 
 #[cfg(test)]
 mod test_util;

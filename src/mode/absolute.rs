@@ -1,5 +1,6 @@
-use crate::util::negative_if;
-use crate::{unit_interval, ControlValue, Interval, Target, Transformation, UnitValue};
+use crate::{
+    negative_if, unit_interval, ControlValue, Interval, Target, Transformation, UnitValue,
+};
 
 /// Settings for processing control values in absolute mode.
 #[derive(Clone, Debug)]
