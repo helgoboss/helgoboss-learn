@@ -34,8 +34,6 @@ impl From<MidiClockTransportMessageKind> for MidiMessageKind {
 
 #[derive(Clone, Debug)]
 pub enum MidiSource {
-    // TODO Check if these kind of "anonymous inline" enum structs are really enough
-    // MidiMessageKind::{NoteOff, NoteOn}
     NoteVelocity {
         channel: Option<Nibble>,
         key_number: Option<SevenBitValue>,

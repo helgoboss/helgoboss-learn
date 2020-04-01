@@ -6,8 +6,6 @@ use crate::{
 /// Settings for processing control values in relative mode.
 #[derive(Clone, Debug)]
 pub struct RelativeModeData {
-    // TODO Step counts should be display on the right side because they are target-related
-    // TODO Don't display source value interval if source emits step counts
     source_value_interval: Interval<UnitValue>,
     step_count_interval: Interval<DiscreteValue>,
     step_size_interval: Interval<UnitValue>,
@@ -87,12 +85,11 @@ impl RelativeModeData {
                         .map_from_unit_interval_to(&self.step_size_interval);
                     let step_size_increment =
                         step_size_value.to_increment(negative_if(self.reverse))?;
-                    Some(
-                        self.hitting_target_absolutely_with_unit_increment(
-                            step_size_increment,
-                            target,
-                        ),
-                    )
+                    Some(self.hitting_target_absolutely_with_unit_increment(
+                        step_size_increment,
+                        None,
+                        target,
+                    ))
                 }
                 Some(step_size) => {
                     // Discrete target
@@ -150,14 +147,20 @@ impl RelativeModeData {
                     //
                     // Settings which are necessary in order to support >1-increments:
                     // - Maximum target step size (enables accurate maximum increment, clamped)
-                    self.hitting_continuous_target_absolutely(
-                        if self.reverse {
-                            discrete_increment.inverse()
-                        } else {
-                            discrete_increment
-                        },
+                    let potentially_reversed_increment = if self.reverse {
+                        discrete_increment.inverse()
+                    } else {
+                        discrete_increment
+                    };
+                    let unit_increment = potentially_reversed_increment
+                        .to_unit_increment(self.step_size_interval.get_min())?;
+                    let clamped_unit_increment =
+                        unit_increment.clamp_to_interval(&self.step_size_interval);
+                    Some(self.hitting_target_absolutely_with_unit_increment(
+                        clamped_unit_increment,
+                        None,
                         target,
-                    )
+                    ))
                 }
                 Some(step_size) => {
                     // Discrete target
@@ -176,17 +179,6 @@ impl RelativeModeData {
         }
     }
 
-    fn hitting_continuous_target_absolutely(
-        &self,
-        discrete_increment: DiscreteIncrement,
-        target: &impl Target,
-    ) -> Option<ControlValue> {
-        let unit_increment =
-            discrete_increment.to_unit_increment(self.step_size_interval.get_min())?;
-        let clamped_unit_increment = unit_increment.clamp_to_interval(&self.step_size_interval);
-        Some(self.hitting_target_absolutely_with_unit_increment(clamped_unit_increment, target))
-    }
-
     fn hitting_discrete_target_absolutely(
         &self,
         discrete_increment: DiscreteIncrement,
@@ -194,13 +186,17 @@ impl RelativeModeData {
         target: &impl Target,
     ) -> Option<ControlValue> {
         let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
-        Some(self.hitting_target_absolutely_with_unit_increment(unit_increment, target))
+        Some(self.hitting_target_absolutely_with_unit_increment(
+            unit_increment,
+            Some(target_step_size),
+            target,
+        ))
     }
 
-    // TODO Maybe also pass target step size because at least in one case we already have it!
     fn hitting_target_absolutely_with_unit_increment(
         &self,
         increment: UnitIncrement,
+        snap_to_grid_step_size: Option<UnitValue>,
         target: &impl Target,
     ) -> ControlValue {
         let current_value = target.get_current_value();
@@ -218,15 +214,17 @@ impl RelativeModeData {
         // in-between two discrete values. This is not good and could yield weird effects, one being
         // that behavior changes in a non-symmetrical way as soon as target bounds are reached.
         // So we should fix that bad alignment right now and make sure that the target value ends up
-        // on a perfect unit value denoting a concrete discrete value.
+        // on a perfect unit value denoting a concrete discrete value (snap to grid).
         // round() is the right choice here because floor() has been found to lead to surprising
         // jumps due to slight numerical inaccuracies.
-        let potentially_aligned_value = target
-            .get_step_size()
+        let potentially_snapped_value = snap_to_grid_step_size
             .map(|step_size| incremented_target_value.round_by_grid_interval_size(step_size))
             .unwrap_or(incremented_target_value);
+        // TODO Should we really allow the final value to be not on the grid? That would happen if
+        //  there's a snap-to-grid step size but the target value interval bound is not on the grid.
+        //  Maybe do the snap-to-grid step as last step!
         let clamped_target_value =
-            potentially_aligned_value.clamp_to_interval(&self.target_value_interval);
+            potentially_snapped_value.clamp_to_interval(&self.target_value_interval);
         ControlValue::Absolute(clamped_target_value)
     }
 

@@ -2,7 +2,6 @@ use crate::{full_unit_interval, ControlValue, Interval, Target, UnitValue};
 
 #[derive(Clone, Debug)]
 pub struct ToggleModeData {
-    // TODO Don't display source interval in ReaLearn, has no effect anyway
     target_value_interval: Interval<UnitValue>,
 }
 
