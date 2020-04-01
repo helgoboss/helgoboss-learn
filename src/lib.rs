@@ -1,3 +1,6 @@
+mod core;
+pub use core::*;
+
 mod midi_source_value;
 pub use midi_source_value::*;
 
