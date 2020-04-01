@@ -1,14 +1,14 @@
 use crate::{ControlValue, Target, UnitValue};
 
-pub(super) fn abs(number: f64) -> ControlValue {
+pub fn abs(number: f64) -> ControlValue {
     ControlValue::absolute(number)
 }
 
-pub(super) fn rel(increment: i32) -> ControlValue {
+pub fn rel(increment: i32) -> ControlValue {
     ControlValue::relative(increment)
 }
 
-pub(super) struct TestTarget {
+pub struct TestTarget {
     pub step_size: Option<UnitValue>,
     pub current_value: UnitValue,
     pub wants_increments: bool,
