@@ -401,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_mode_absolute_value_source_value_out_of_range_max() {
+    fn absolute_mode_absolute_value_source_interval() {
         // Given
         let mode = Mode::Absolute(AbsoluteModeData {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
@@ -414,13 +414,68 @@ mod tests {
         };
         // When
         // Then
-        assert_eq!(mode.process(absolute(0.0), &target), Some(absolute(0.0)));
-        assert_eq!(mode.process(absolute(0.1), &target), Some(absolute(0.0)));
-        assert_eq!(mode.process(absolute(0.2), &target), Some(absolute(0.0)));
+        assert_abs_diff_eq!(mode.process(absolute(0.0), &target).unwrap(), absolute(0.0));
+        assert_abs_diff_eq!(mode.process(absolute(0.1), &target).unwrap(), absolute(0.0));
+        assert_abs_diff_eq!(mode.process(absolute(0.2), &target).unwrap(), absolute(0.0));
         assert_abs_diff_eq!(mode.process(absolute(0.4), &target).unwrap(), absolute(0.5));
-        assert_eq!(mode.process(absolute(0.6), &target), Some(absolute(1.0)));
-        assert_eq!(mode.process(absolute(0.8), &target), Some(absolute(1.0)));
-        assert_eq!(mode.process(absolute(1.0), &target), Some(absolute(1.0)));
+        assert_abs_diff_eq!(mode.process(absolute(0.6), &target).unwrap(), absolute(1.0));
+        assert_abs_diff_eq!(mode.process(absolute(0.8), &target).unwrap(), absolute(1.0));
+        assert_abs_diff_eq!(mode.process(absolute(1.0), &target).unwrap(), absolute(1.0));
+    }
+
+    #[test]
+    fn absolute_mode_absolute_value_source_interval_ignore() {
+        // Given
+        let mode = Mode::Absolute(AbsoluteModeData {
+            source_value_interval: create_unit_value_interval(0.2, 0.6),
+            ignore_out_of_range_source_values: true,
+            ..Default::default()
+        });
+        let target = TestTarget {
+            step_size: None,
+            current_value: UnitValue::new(1.0),
+            wants_increments: false,
+        };
+        // When
+        // Then
+        assert!(mode.process(absolute(0.0), &target).is_none());
+        assert!(mode.process(absolute(0.1), &target).is_none());
+        assert_abs_diff_eq!(mode.process(absolute(0.2), &target).unwrap(), absolute(0.0));
+        assert_abs_diff_eq!(mode.process(absolute(0.4), &target).unwrap(), absolute(0.5));
+        assert_abs_diff_eq!(mode.process(absolute(0.6), &target).unwrap(), absolute(1.0));
+        assert!(mode.process(absolute(0.8), &target).is_none());
+        assert!(mode.process(absolute(1.0), &target).is_none());
+    }
+
+    #[test]
+    fn absolute_mode_absolute_value_target_interval() {
+        // Given
+        let mode = Mode::Absolute(AbsoluteModeData {
+            target_value_interval: create_unit_value_interval(0.2, 0.6),
+            ..Default::default()
+        });
+        let target = TestTarget {
+            step_size: None,
+            current_value: UnitValue::new(1.0),
+            wants_increments: false,
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.process(absolute(0.0), &target).unwrap(), absolute(0.2));
+        assert_abs_diff_eq!(
+            mode.process(absolute(0.2), &target).unwrap(),
+            absolute(0.28)
+        );
+        assert_abs_diff_eq!(
+            mode.process(absolute(0.25), &target).unwrap(),
+            absolute(0.3)
+        );
+        assert_abs_diff_eq!(mode.process(absolute(0.5), &target).unwrap(), absolute(0.4));
+        assert_abs_diff_eq!(
+            mode.process(absolute(0.75), &target).unwrap(),
+            absolute(0.5)
+        );
+        assert_abs_diff_eq!(mode.process(absolute(1.0), &target).unwrap(), absolute(0.6));
     }
 
     fn absolute(number: f64) -> ControlValue {
