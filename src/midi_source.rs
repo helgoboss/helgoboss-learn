@@ -1,5 +1,5 @@
 use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
-use helgoboss_midi::MidiMessageKind::PolyphonicKeyPressure;
+
 use helgoboss_midi::{
     data_could_be_part_of_parameter_number_msg, FourteenBitValue, MidiMessage, MidiMessageKind,
     Nibble, SevenBitValue, StructuredMidiMessage, FOURTEEN_BIT_VALUE_MAX, SEVEN_BIT_VALUE_MAX,
@@ -208,10 +208,7 @@ impl MidiSource {
         use MidiSource::*;
         use MidiSourceValue::*;
         match self {
-            NoteVelocity {
-                channel,
-                key_number,
-            } => match value {
+            NoteVelocity { .. } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::NoteOn(data) => Ok(ControlValue::absolute(
                         data.velocity as f64 / SEVEN_BIT_VALUE_MAX as f64,
@@ -221,50 +218,47 @@ impl MidiSource {
                 },
                 _ => Err(()),
             },
-            NoteKeyNumber { channel } => match value {
+            NoteKeyNumber { .. } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::NoteOn(data) => Ok(ControlValue::absolute(
-                        (data.key_number as f64 / SEVEN_BIT_VALUE_MAX as f64),
+                        data.key_number as f64 / SEVEN_BIT_VALUE_MAX as f64,
                     )),
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
-            PitchBendChangeValue { channel } => match value {
+            PitchBendChangeValue { .. } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::PitchBendChange(data) => Ok(ControlValue::absolute(
-                        (data.pitch_bend_value as f64 / FOURTEEN_BIT_VALUE_MAX as f64),
+                        data.pitch_bend_value as f64 / FOURTEEN_BIT_VALUE_MAX as f64,
                     )),
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
-            ChannelPressureAmount { channel } => match value {
+            ChannelPressureAmount { .. } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::ChannelPressure(data) => Ok(ControlValue::absolute(
-                        (data.pressure_amount as f64 / SEVEN_BIT_VALUE_MAX as f64),
+                        data.pressure_amount as f64 / SEVEN_BIT_VALUE_MAX as f64,
                     )),
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
-            ProgramChangeNumber { channel } => match value {
+            ProgramChangeNumber { .. } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::ProgramChange(data) => Ok(ControlValue::absolute(
-                        (data.program_number as f64 / SEVEN_BIT_VALUE_MAX as f64),
+                        data.program_number as f64 / SEVEN_BIT_VALUE_MAX as f64,
                     )),
                     _ => Err(()),
                 },
                 _ => Err(()),
             },
-            PolyphonicKeyPressureAmount {
-                channel,
-                key_number,
-            } => match value {
+            PolyphonicKeyPressureAmount { .. } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::PolyphonicKeyPressure(data) => {
                         Ok(ControlValue::absolute(
-                            (data.pressure_amount as f64 / SEVEN_BIT_VALUE_MAX as f64),
+                            data.pressure_amount as f64 / SEVEN_BIT_VALUE_MAX as f64,
                         ))
                     }
                     _ => Err(()),
@@ -272,9 +266,7 @@ impl MidiSource {
                 _ => Err(()),
             },
             ControlChangeValue {
-                channel,
-                controller_number,
-                custom_character,
+                custom_character, ..
             } => match value {
                 PlainMessage(msg) => match msg.to_structured() {
                     StructuredMidiMessage::ControlChange(data) => {
@@ -287,21 +279,13 @@ impl MidiSource {
                 },
                 _ => Err(()),
             },
-            FourteenBitCcMessageValue {
-                channel,
-                msb_controller_number,
-            } => match value {
+            FourteenBitCcMessageValue { .. } => match value {
                 FourteenBitCcMessage(msg) => Ok(ControlValue::absolute(
                     msg.get_value() as f64 / FOURTEEN_BIT_VALUE_MAX as f64,
                 )),
                 _ => Err(()),
             },
-            ParameterNumberMessageValue {
-                channel,
-                number,
-                is_14_bit,
-                is_registered,
-            } => match value {
+            ParameterNumberMessageValue { .. } => match value {
                 ParameterNumberMessage(msg) => Ok(ControlValue::absolute(
                     msg.get_value() as f64
                         / if msg.is_14_bit() {
@@ -312,7 +296,7 @@ impl MidiSource {
                 )),
                 _ => Err(()),
             },
-            ClockTransport { message_kind } => Ok(ControlValue::absolute(1.0)),
+            ClockTransport { .. } => Ok(ControlValue::absolute(1.0)),
             ClockTempo => match value {
                 TempoMessage { bpm } => Ok(ControlValue::absolute((*bpm - 1.0) / 960.0)),
                 _ => Err(()),
@@ -338,9 +322,7 @@ impl MidiSource {
                 }
                 _ => false,
             },
-            ParameterNumberMessageValue {
-                channel, number, ..
-            } => match msg.to_structured() {
+            ParameterNumberMessageValue { channel, .. } => match msg.to_structured() {
                 StructuredMidiMessage::ControlChange(data) => {
                     matches(&data.channel, channel)
                         && data_could_be_part_of_parameter_number_msg(&data)

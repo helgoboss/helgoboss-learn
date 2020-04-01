@@ -1,4 +1,4 @@
-use crate::{DiscreteIncrement, DiscreteValue, Interval};
+use crate::{DiscreteValue, Interval};
 use std::ops::{Add, Sub};
 
 /// A number within the unit interval `(0.0..=1.0)`.

@@ -379,7 +379,7 @@ impl Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::unit_interval;
+
     use approx::*;
 
     #[test]

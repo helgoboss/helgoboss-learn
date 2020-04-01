@@ -1,6 +1,4 @@
-use crate::{DiscreteIncrement, Interval, UnitValue};
-use helgoboss_midi::SevenBitValue;
-use std::ops::{Add, Div, Sub};
+use crate::{DiscreteIncrement, UnitValue};
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
 #[derive(Clone, Copy, Debug, PartialEq)]
