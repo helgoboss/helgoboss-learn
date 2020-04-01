@@ -44,16 +44,15 @@ impl UnitValue {
         UnitValue::new((*self - source_interval.get_min()) / source_interval.get_span())
     }
 
-    /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding
-    /// in terms of `floor()`).
-    /// TODO Is floor the right choice here vs. round?
+    /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).
+    /// round() is used here instead of floor() in order to not give advantage to any direction.
     pub fn map_from_unit_interval_to_discrete(
         &self,
         destination_interval: &Interval<DiscreteValue>,
     ) -> DiscreteValue {
         let min = destination_interval.get_min().get_number();
         let span = destination_interval.get_span();
-        DiscreteValue::new(min + (self.get_number() * span as f64).floor() as u32)
+        DiscreteValue::new(min + (self.get_number() * span as f64).round() as u32)
     }
 
     /// Converts this unit value to a unit increment, either negative or positive depending
