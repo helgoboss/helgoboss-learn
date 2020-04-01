@@ -200,6 +200,9 @@ impl RelativeModeData {
         target: &impl Target,
     ) -> Option<ControlValue> {
         let current_target_value = target.get_current_value();
+        // TODO One issue that might occur when not incrementing out-of-target-range values
+        //  (as is done now) is that the current target value might only appear out of range because
+        //  of numerical inaccuracies. That would lead to frustrating "doesn't move" experiences.
         let incremented_target_value = if self.rotate {
             current_target_value.add_rotating(increment, &self.target_value_interval)
         } else {
@@ -217,19 +220,14 @@ impl RelativeModeData {
         // on a perfect unit value denoting a concrete discrete value (snap to grid).
         // round() is the right choice here because floor() has been found to lead to surprising
         // jumps due to slight numerical inaccuracies.
+        // TODO Maybe snap-to-grid also for user-defined step sizes to avoid symmetry issues!
         let potentially_snapped_value = snap_to_grid_step_size
             .map(|step_size| incremented_target_value.round_by_grid_interval_size(step_size))
             .unwrap_or(incremented_target_value);
-        // TODO Should we really allow the final value to be not on the grid? That would happen if
-        //  there's a snap-to-grid step size but the target value interval bound is not on the grid.
-        //  Maybe do the snap-to-grid step as last step!
-        // TODO Maybe snap-to-grid also for user-defined step sizes to avoid symmetry issues!
-        let clamped_target_value =
-            potentially_snapped_value.clamp_to_interval(&self.target_value_interval);
-        if clamped_target_value == current_target_value {
+        if potentially_snapped_value == current_target_value {
             return None;
         }
-        Some(ControlValue::Absolute(clamped_target_value))
+        Some(ControlValue::Absolute(potentially_snapped_value))
     }
 
     fn pep_up_discrete_increment(&self, increment: DiscreteIncrement) -> DiscreteIncrement {
