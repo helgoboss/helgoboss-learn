@@ -93,6 +93,11 @@ impl UnitValue {
         self.0 == 0.0
     }
 
+    /// Returns whether this is 1.0.
+    pub fn is_one(&self) -> bool {
+        self.0 == 1.0
+    }
+
     /// Adds the given number. If the result doesn't fit into the given interval anymore, it just
     /// snaps to the opposite bound of that interval.
     pub fn add_rotating_at_bounds(
@@ -154,6 +159,11 @@ impl Interval<UnitValue> {
     /// Returns the value which is exactly in the middle between the interval bounds.
     pub fn get_center(&self) -> UnitValue {
         UnitValue::new((self.get_min() + self.get_max()) / 2.0)
+    }
+
+    /// Returns whether this interval is the complete unit interval.
+    pub fn is_full(&self) -> bool {
+        self.get_min().is_zero() && self.get_max().is_one()
     }
 }
 

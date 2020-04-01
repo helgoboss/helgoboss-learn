@@ -19,12 +19,16 @@ impl ToggleModeData {
             return None;
         }
         let center_target_value = self.target_value_interval.get_center();
-        let bound_target_value = if target.get_current_value() > center_target_value {
+        let current_target_value = target.get_current_value();
+        let desired_target_value = if current_target_value > center_target_value {
             self.target_value_interval.get_min()
         } else {
             self.target_value_interval.get_max()
         };
-        Some(ControlValue::Absolute(bound_target_value))
+        if desired_target_value == current_target_value {
+            return None;
+        }
+        Some(ControlValue::Absolute(desired_target_value))
     }
 }
 

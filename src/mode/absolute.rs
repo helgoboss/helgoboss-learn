@@ -81,10 +81,14 @@ impl<T: Transformation> AbsoluteModeData<T> {
         control_value: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
+        if self.jump_interval.is_full() {
+            // No jump restrictions whatsoever
+            return Some(ControlValue::Absolute(control_value));
+        }
         let current_target_value = target.get_current_value();
         let distance = control_value.calc_distance_from(current_target_value);
         if distance > self.jump_interval.get_max() {
-            // Distance too large
+            // Distance is too large
             if !self.approach_target_value {
                 // Scaling not desired. Do nothing.
                 return None;
@@ -95,14 +99,25 @@ impl<T: Transformation> AbsoluteModeData<T> {
                 .to_increment(negative_if(control_value < current_target_value))?;
             let final_target_value =
                 current_target_value.add_clamping(approach_increment, &self.target_value_interval);
-            return Some(ControlValue::Absolute(final_target_value));
+            return self.hit_if_changed(final_target_value, current_target_value);
         }
         // Distance is not too large
         if distance < self.jump_interval.get_min() {
             return None;
         }
         // Distance is also not too small
-        Some(ControlValue::Absolute(control_value))
+        self.hit_if_changed(control_value, current_target_value)
+    }
+
+    fn hit_if_changed(
+        &self,
+        desired_target_value: UnitValue,
+        current_target_value: UnitValue,
+    ) -> Option<ControlValue> {
+        if current_target_value == desired_target_value {
+            return None;
+        }
+        Some(ControlValue::Absolute(desired_target_value))
     }
 }
 
