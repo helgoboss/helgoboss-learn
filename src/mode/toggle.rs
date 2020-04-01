@@ -1,4 +1,4 @@
-use crate::{unit_interval, ControlValue, Interval, Target, UnitValue};
+use crate::{full_unit_interval, ControlValue, Interval, Target, UnitValue};
 
 #[derive(Clone, Debug)]
 pub struct ToggleModeData {
@@ -9,7 +9,7 @@ pub struct ToggleModeData {
 impl Default for ToggleModeData {
     fn default() -> Self {
         ToggleModeData {
-            target_value_interval: unit_interval(),
+            target_value_interval: full_unit_interval(),
         }
     }
 }

@@ -159,7 +159,7 @@ impl Interval<UnitValue> {
 }
 
 /// Convenience method for getting the complete unit interval.
-pub fn unit_interval() -> Interval<UnitValue> {
+pub fn full_unit_interval() -> Interval<UnitValue> {
     create_unit_value_interval(0.0, 1.0)
 }
 

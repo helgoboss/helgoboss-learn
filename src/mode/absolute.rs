@@ -1,5 +1,5 @@
 use crate::{
-    negative_if, unit_interval, ControlValue, Interval, Target, Transformation, UnitValue,
+    full_unit_interval, negative_if, ControlValue, Interval, Target, Transformation, UnitValue,
 };
 
 /// Settings for processing control values in absolute mode.
@@ -19,9 +19,9 @@ pub struct AbsoluteModeData {
 impl Default for AbsoluteModeData {
     fn default() -> Self {
         AbsoluteModeData {
-            source_value_interval: unit_interval(),
-            target_value_interval: unit_interval(),
-            jump_interval: unit_interval(),
+            source_value_interval: full_unit_interval(),
+            target_value_interval: full_unit_interval(),
+            jump_interval: full_unit_interval(),
             approach_target_value: false,
             reverse_target_value: false,
             round_target_value: false,

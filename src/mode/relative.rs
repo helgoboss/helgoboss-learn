@@ -1,5 +1,5 @@
 use crate::{
-    create_discrete_value_interval, create_unit_value_interval, negative_if, unit_interval,
+    create_discrete_value_interval, create_unit_value_interval, full_unit_interval, negative_if,
     ControlValue, DiscreteIncrement, DiscreteValue, Interval, Target, UnitIncrement, UnitValue,
 };
 
@@ -19,7 +19,7 @@ pub struct RelativeModeData {
 impl Default for RelativeModeData {
     fn default() -> Self {
         RelativeModeData {
-            source_value_interval: unit_interval(),
+            source_value_interval: full_unit_interval(),
             // 0.01 has been chosen as default minimum step size because it corresponds to 1%.
             // 0.01 has also been chosen as default maximum step size because most users probably
             // want to start easy, that is without using the "press harder = more increments"
@@ -29,7 +29,7 @@ impl Default for RelativeModeData {
             step_size_interval: create_unit_value_interval(0.01, 0.01),
             // Same reasoning like with `step_size_interval`
             step_count_interval: create_discrete_value_interval(1, 1),
-            target_value_interval: unit_interval(),
+            target_value_interval: full_unit_interval(),
             reverse: false,
             rotate: false,
         }
@@ -82,8 +82,17 @@ impl RelativeModeData {
                     // - Minimum target step size (enables accurate minimum increment, atomic)
                     // - Maximum target step size (enables accurate maximum increment, clamped)
                     // - Target value interval (absolute, important for rotation only, clamped)
-                    let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                    self.hitting_continuous_target_absolutely(discrete_increment, target)
+                    let step_size_value = control_value
+                        .map_to_unit_interval_from(&self.source_value_interval)
+                        .map_from_unit_interval_to(&self.step_size_interval);
+                    let step_size_increment =
+                        step_size_value.to_increment(negative_if(self.reverse))?;
+                    Some(
+                        self.hitting_target_absolutely_with_unit_increment(
+                            step_size_increment,
+                            target,
+                        ),
+                    )
                 }
                 Some(step_size) => {
                     // Discrete target
@@ -1039,6 +1048,7 @@ mod tests {
     }
     mod absolute_value {
         use super::*;
+        // TODO Add tests with varying source value intervals
 
         mod absolute_continuous_target {
             use super::*;
@@ -1059,6 +1069,766 @@ mod tests {
                 assert!(mode.process(abs(0.0), &target).is_none());
                 assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.01));
                 assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.01));
+            }
+
+            #[test]
+            fn default_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert!(mode.process(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            }
+
+            #[test]
+            fn min_step_size_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_size_interval: create_unit_value_interval(0.2, 1.0),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert!(mode.process(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn min_step_size_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_size_interval: create_unit_value_interval(0.2, 1.0),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert!(mode.process(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            }
+
+            #[test]
+            fn max_step_size_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_size_interval: create_unit_value_interval(0.01, 0.09),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert!(mode.process(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.018));
+                assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(abs(0.75), &target).unwrap(), abs(0.07));
+                assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.09));
+            }
+
+            #[test]
+            fn max_step_size_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_size_interval: create_unit_value_interval(0.01, 0.09),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.91));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.98));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.99));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(1.0));
+            }
+
+            #[test]
+            fn reverse() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    reverse: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
+                // TODO All those unnecessary target instructions could be avoided because value is same
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.0));
+            }
+
+            #[test]
+            fn rotate_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.01));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.01));
+            }
+
+            #[test]
+            fn rotate_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.99));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.99));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.99));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.0));
+            }
+
+            #[test]
+            fn target_interval_min() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.2),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.21));
+            }
+
+            #[test]
+            fn target_interval_max() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.8),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.8));
+            }
+
+            #[test]
+            fn target_interval_out() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_min_rotate() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.2),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.21));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.21));
+            }
+
+            #[test]
+            fn target_interval_max_rotate() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.8),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.79));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_out_rotate() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
+                // TODO This behavior is debatable
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.8));
+            }
+        }
+
+        mod absolute_discrete_target {
+            use super::*;
+
+            #[test]
+            fn default_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.05));
+            }
+
+            #[test]
+            fn default_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(1.0));
+            }
+
+            #[test]
+            fn min_step_count_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(4, 100),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(6), &target).unwrap(), abs(0.3));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.5));
+            }
+
+            #[test]
+            fn min_step_count_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(4, 100),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.5));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(1.0));
+            }
+
+            #[test]
+            fn max_step_count_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(1, 2),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.10));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.10));
+            }
+
+            #[test]
+            fn max_step_count_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(1, 2),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.90));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.90));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(1.0));
+            }
+
+            #[test]
+            fn reverse() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    reverse: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.0));
+            }
+
+            #[test]
+            fn rotate_1() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.05));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.05));
+            }
+
+            #[test]
+            fn rotate_2() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(1.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.95));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.0));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.0));
+            }
+
+            #[test]
+            fn target_interval_min() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.2),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.25));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.25));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.25));
+            }
+
+            #[test]
+            fn target_interval_max() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.8),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.8));
+            }
+
+            #[test]
+            fn target_interval_out() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_step_interval_out() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(1, 100),
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                // TODO Not consequent: If the incremented value is high enough, it jumps
+                //  from the out-of-range value directly to the incremented value. If not, it
+                //  jumps to the interval bound. I can think of two other better behaviors:
+                //  a) Even if the incremented value is high enough, jump to interval bound only
+                //     (would be more consistent in that it *always* jumps to the bound first).
+                //  b) Start the increment not from the current out-of-range value but from the
+                //     interval bound - always, so not jump to bound first but always use bound
+                //     as starting point for the increment.
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.5));
+            }
+
+            #[test]
+            fn target_interval_min_rotate() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.2),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.25));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.25));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.25));
+            }
+
+            #[test]
+            fn target_interval_max_rotate() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.8),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.75));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.2));
+            }
+
+            #[test]
+            fn target_interval_out_rotate() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: Some(UnitValue::new(0.05)),
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: false,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), abs(0.8));
+            }
+        }
+
+        mod relative_target {
+            use super::*;
+
+            #[test]
+            fn default() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(1));
+            }
+
+            #[test]
+            fn min_step_count() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(2, 100),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(-10));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(2));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(10));
+            }
+
+            #[test]
+            fn max_step_count() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    step_count_interval: create_discrete_value_interval(1, 2),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(-2));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(2));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(2));
+            }
+
+            #[test]
+            fn reverse() {
+                // Given
+                let mode = Mode::Relative(RelativeModeData {
+                    reverse: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    step_size: None,
+                    current_value: UnitValue::new(0.0),
+                    wants_increments: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.process(rel(-10), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(-2), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(-1), &target).unwrap(), rel(1));
+                assert_abs_diff_eq!(mode.process(rel(1), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(2), &target).unwrap(), rel(-1));
+                assert_abs_diff_eq!(mode.process(rel(10), &target).unwrap(), rel(-1));
             }
         }
     }
