@@ -6,7 +6,14 @@ use std::ops::{Add, Sub};
 pub struct UnitValue(f64);
 
 impl UnitValue {
+    /// 0.0
+    pub const MIN: UnitValue = UnitValue(0.0);
+
+    /// 1.0
+    pub const MAX: UnitValue = UnitValue(1.0);
+
     /// Creates the unit value. Panics if the given number is not within the positive unit interval.
+    // TODO Other options: a) Don't panic and mark unsafe, b) Panic even in prod env, c) try_from
     pub fn new(number: f64) -> UnitValue {
         debug_assert!(0.0 <= number && number <= 1.0);
         UnitValue(number)
@@ -44,10 +51,10 @@ impl UnitValue {
     pub fn map_to_unit_interval_from(&self, source_interval: &Interval<UnitValue>) -> UnitValue {
         let (min, max) = (source_interval.get_min(), source_interval.get_max());
         if *self < min {
-            return UnitValue::new(0.0);
+            return UnitValue::MIN;
         }
         if *self > max {
-            return UnitValue::new(1.0);
+            return UnitValue::MAX;
         }
         UnitValue::new((*self - min) / source_interval.get_span())
     }

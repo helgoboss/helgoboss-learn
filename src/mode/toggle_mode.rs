@@ -59,7 +59,7 @@ mod tests {
         };
         let target = TestTarget {
             step_size: None,
-            current_value: UnitValue::new(0.0),
+            current_value: UnitValue::MIN,
             wants_increments: false,
         };
         // When
@@ -78,7 +78,7 @@ mod tests {
         };
         let target = TestTarget {
             step_size: None,
-            current_value: UnitValue::new(1.0),
+            current_value: UnitValue::MAX,
             wants_increments: false,
         };
         // When
@@ -216,7 +216,7 @@ mod tests {
         };
         let target = TestTarget {
             step_size: None,
-            current_value: UnitValue::new(0.0),
+            current_value: UnitValue::MIN,
             wants_increments: false,
         };
         // When
@@ -236,7 +236,7 @@ mod tests {
         };
         let target = TestTarget {
             step_size: None,
-            current_value: UnitValue::new(1.0),
+            current_value: UnitValue::MAX,
             wants_increments: false,
         };
         // When
