@@ -1,13 +1,14 @@
 mod target;
 pub use target::*;
-mod absolute;
-pub use absolute::*;
+mod absolute_mode;
+pub use absolute_mode::*;
 mod relative;
 pub use relative::*;
 mod toggle_mode;
 pub use toggle_mode::*;
 mod transformation;
 use crate::{ControlValue, UnitValue};
+use std::marker::PhantomData;
 pub use transformation::*;
 
 #[cfg(test)]
@@ -19,9 +20,10 @@ mod test_util;
 /// Different modes for interpreting and transforming control or feedback values.
 #[derive(Clone, Debug)]
 pub enum Mode<T: Transformation> {
-    Absolute(AbsoluteModeData<T>),
+    // Absolute(AbsoluteModeData<T>),
     Relative(RelativeModeData),
     // Toggle(ToggleModeData),
+    P(PhantomData<T>),
 }
 
 impl<T: Transformation> Mode<T> {
@@ -33,9 +35,10 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target,
     ) -> Option<ControlValue> {
         match self {
-            Mode::Absolute(data) => data.control(control_value, target),
+            // Mode::Absolute(data) => data.control(control_value, target),
             Mode::Relative(data) => data.control(control_value, target),
             // Mode::Toggle(data) => data.control(control_value, target),
+            _ => None,
         }
     }
 
@@ -44,9 +47,9 @@ impl<T: Transformation> Mode<T> {
     pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
         use Mode::*;
         match self {
-            Absolute(data) => data.feedback(target_value),
+            // Absolute(data) => data.feedback(target_value),
             Relative(data) => data.feedback(target_value),
-            // Toggle(data) => data.feedback(target_value),
+            _ => None, // Toggle(data) => data.feedback(target_value),
         }
     }
 }
