@@ -34,24 +34,53 @@ impl<T: Transformation> Default for AbsoluteModeData<T> {
 }
 
 impl<T: Transformation> AbsoluteModeData<T> {
-    /// Processes the given control value in absolute mode and returns an appropriate target
-    /// instruction.
-    pub fn process(&self, control_value: UnitValue, target: &impl Target) -> Option<ControlValue> {
-        if !control_value.is_within_interval(&self.source_value_interval) {
-            // Control value is outside source value interval
-            if self.ignore_out_of_range_source_values {
-                return None;
+    /// Processes the given control value in absolute mode and maybe returns an appropriate target value.
+    pub fn control(
+        &self,
+        control_value: ControlValue,
+        target: &impl Target,
+    ) -> Option<ControlValue> {
+        match control_value {
+            ControlValue::Relative(_) => None,
+            ControlValue::Absolute(control_value) => {
+                if !control_value.is_within_interval(&self.source_value_interval) {
+                    // Control value is outside source value interval
+                    if self.ignore_out_of_range_source_values {
+                        return None;
+                    }
+                    let target_bound_value = if control_value < self.source_value_interval.get_min()
+                    {
+                        self.target_value_interval.get_min()
+                    } else {
+                        self.target_value_interval.get_max()
+                    };
+                    return self.hitting_target_considering_max_jump(target_bound_value, target);
+                }
+                // Control value is within source value interval
+                let pepped_up_control_value = self.pep_up_control_value(control_value, target);
+                self.hitting_target_considering_max_jump(pepped_up_control_value, target)
             }
-            let target_bound_value = if control_value < self.source_value_interval.get_min() {
-                self.target_value_interval.get_min()
-            } else {
-                self.target_value_interval.get_max()
-            };
-            return self.hitting_target_considering_max_jump(target_bound_value, target);
         }
-        // Control value is within source value interval
-        let pepped_up_control_value = self.pep_up_control_value(control_value, target);
-        self.hitting_target_considering_max_jump(pepped_up_control_value, target)
+    }
+
+    /// Takes a target value, interprets and transforms it conforming to absolute mode rules and
+    /// maybe returns an appropriate source value that should be sent to the source.
+    pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
+        let potentially_inversed_value = if self.reverse_target_value {
+            target_value.inverse()
+        } else {
+            target_value
+        };
+        let transformed_value = self
+            .feedback_transformation
+            .as_ref()
+            .and_then(|t| t.transform(potentially_inversed_value).ok())
+            .unwrap_or(potentially_inversed_value);
+        Some(
+            transformed_value
+                .map_to_unit_interval_from(&self.target_value_interval)
+                .map_from_unit_interval_to(&self.source_value_interval),
+        )
     }
 
     fn pep_up_control_value(&self, control_value: UnitValue, target: &impl Target) -> UnitValue {
@@ -157,10 +186,10 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(0.777), &target).unwrap(), abs(0.777));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.777), &target).unwrap(), abs(0.777));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
         }
 
         #[test]
@@ -176,10 +205,10 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(0.777), &target).unwrap(), abs(0.777));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.777), &target).unwrap(), abs(0.777));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
         }
 
         #[test]
@@ -196,13 +225,13 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.2), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.4), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(0.6), &target).unwrap(), abs(1.0));
-            assert_abs_diff_eq!(mode.process(abs(0.8), &target).unwrap(), abs(1.0));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
         }
 
         #[test]
@@ -220,13 +249,13 @@ mod tests {
             };
             // When
             // Then
-            assert!(mode.process(abs(0.0), &target).is_none());
-            assert!(mode.process(abs(0.1), &target).is_none());
-            assert_abs_diff_eq!(mode.process(abs(0.2), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.4), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(0.6), &target).unwrap(), abs(1.0));
-            assert!(mode.process(abs(0.8), &target).is_none());
-            assert!(mode.process(abs(1.0), &target).is_none());
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert!(mode.control(abs(0.1), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+            assert!(mode.control(abs(0.8), &target).is_none());
+            assert!(mode.control(abs(1.0), &target).is_none());
         }
 
         #[test]
@@ -243,12 +272,12 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.2));
-            assert_abs_diff_eq!(mode.process(abs(0.2), &target).unwrap(), abs(0.28));
-            assert_abs_diff_eq!(mode.process(abs(0.25), &target).unwrap(), abs(0.3));
-            assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.75), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.28));
+            assert_abs_diff_eq!(mode.control(abs(0.25), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.75), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
         }
 
         #[test]
@@ -266,12 +295,12 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.2));
-            assert_abs_diff_eq!(mode.process(abs(0.2), &target).unwrap(), abs(0.2));
-            assert_abs_diff_eq!(mode.process(abs(0.4), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.6), &target).unwrap(), abs(0.6));
-            assert_abs_diff_eq!(mode.process(abs(0.8), &target).unwrap(), abs(0.6));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
         }
 
         #[test]
@@ -289,12 +318,12 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.2), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.4), &target).unwrap(), abs(0.6));
-            assert_abs_diff_eq!(mode.process(abs(0.6), &target).unwrap(), abs(0.8));
-            assert_abs_diff_eq!(mode.process(abs(0.8), &target).unwrap(), abs(0.8));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.8));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.8));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.8));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.8));
         }
 
         #[test]
@@ -311,9 +340,9 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(1.0));
-            assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
         }
 
         #[test]
@@ -330,13 +359,13 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.11), &target).unwrap(), abs(0.2));
-            assert_abs_diff_eq!(mode.process(abs(0.19), &target).unwrap(), abs(0.2));
-            assert_abs_diff_eq!(mode.process(abs(0.2), &target).unwrap(), abs(0.2));
-            assert_abs_diff_eq!(mode.process(abs(0.35), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.49), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.11), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.19), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.35), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.49), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
         }
 
         #[test]
@@ -353,14 +382,14 @@ mod tests {
             };
             // When
             // Then
-            assert!(mode.process(abs(0.0), &target).is_none());
-            assert!(mode.process(abs(0.1), &target).is_none());
-            assert_abs_diff_eq!(mode.process(abs(0.4), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.6), &target).unwrap(), abs(0.6));
-            assert_abs_diff_eq!(mode.process(abs(0.7), &target).unwrap(), abs(0.7));
-            assert!(mode.process(abs(0.8), &target).is_none());
-            assert!(mode.process(abs(0.9), &target).is_none());
-            assert!(mode.process(abs(1.0), &target).is_none());
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert!(mode.control(abs(0.1), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.7), &target).unwrap(), abs(0.7));
+            assert!(mode.control(abs(0.8), &target).is_none());
+            assert!(mode.control(abs(0.9), &target).is_none());
+            assert!(mode.control(abs(1.0), &target).is_none());
         }
 
         #[test]
@@ -377,11 +406,11 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.1));
-            assert!(mode.process(abs(0.4), &target).is_none());
-            assert!(mode.process(abs(0.5), &target).is_none());
-            assert!(mode.process(abs(0.6), &target).is_none());
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.1));
+            assert!(mode.control(abs(0.4), &target).is_none());
+            assert!(mode.control(abs(0.5), &target).is_none());
+            assert!(mode.control(abs(0.6), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
         }
 
         #[test]
@@ -399,13 +428,13 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.1), &target).unwrap(), abs(0.42));
-            assert_abs_diff_eq!(mode.process(abs(0.4), &target).unwrap(), abs(0.4));
-            assert_abs_diff_eq!(mode.process(abs(0.6), &target).unwrap(), abs(0.6));
-            assert_abs_diff_eq!(mode.process(abs(0.7), &target).unwrap(), abs(0.7));
-            assert_abs_diff_eq!(mode.process(abs(0.8), &target).unwrap(), abs(0.56));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.42));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.7), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.56));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
         }
 
         #[test]
@@ -422,9 +451,9 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(1.0));
-            assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
         }
 
         #[test]
@@ -441,9 +470,9 @@ mod tests {
             };
             // When
             // Then
-            assert_abs_diff_eq!(mode.process(abs(0.0), &target).unwrap(), abs(0.0));
-            assert_abs_diff_eq!(mode.process(abs(0.5), &target).unwrap(), abs(0.5));
-            assert_abs_diff_eq!(mode.process(abs(1.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
         }
     }
 
@@ -463,8 +492,8 @@ mod tests {
             };
             // When
             // Then
-            assert!(mode.process(rel(1), &target).is_none());
-            assert!(mode.process(rel(-3), &target).is_none());
+            assert!(mode.control(rel(1), &target).is_none());
+            assert!(mode.control(rel(-3), &target).is_none());
         }
     }
 }
