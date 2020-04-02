@@ -10,7 +10,7 @@ pub struct Interval<T: PartialOrd + Copy + Sub> {
 impl<T: PartialOrd + Copy + Sub> Interval<T> {
     /// Creates an interval. Panics if `min` is greater than `max`.
     pub fn new(min: T, max: T) -> Interval<T> {
-        debug_assert!(min <= max);
+        assert!(min <= max);
         Interval { min, max }
     }
 

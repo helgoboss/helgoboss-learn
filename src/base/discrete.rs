@@ -23,7 +23,7 @@ impl DiscreteValue {
         if self.is_zero() {
             return None;
         }
-        Some(DiscreteIncrement::new(signum * self.0 as i32))
+        Some(unsafe { DiscreteIncrement::new_unsafe(signum * self.0 as i32) })
     }
 
     /// Returns whether this is 0.
@@ -57,6 +57,15 @@ pub struct DiscreteIncrement(i32);
 impl DiscreteIncrement {
     /// Creates the discrete increment. Panics if the given number is 0.
     pub fn new(increment: i32) -> DiscreteIncrement {
+        assert_ne!(increment, 0);
+        DiscreteIncrement(increment)
+    }
+
+    /// Checks preconditions only in debug build. Should only be used if you want to squeeze out
+    /// every last bit of performance and you are super sure that the number meets the
+    /// preconditions. This constructor is offered because it's not unlikely that a lot of those
+    /// values will be constructed in audio thread.
+    pub unsafe fn new_unsafe(increment: i32) -> DiscreteIncrement {
         debug_assert_ne!(increment, 0);
         DiscreteIncrement(increment)
     }
@@ -68,7 +77,7 @@ impl DiscreteIncrement {
     /// - 127 > value > 63 results in higher decrement step sizes (64 possible decrement step sizes)
     /// - 1 < value <= 63 results in higher increment step sizes (63 possible increment step sizes)
     pub fn from_encoder_1_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        debug_assert!(value <= SEVEN_BIT_VALUE_MAX);
+        assert!(value <= SEVEN_BIT_VALUE_MAX);
         if value == 0 {
             return Err(());
         }
@@ -79,7 +88,7 @@ impl DiscreteIncrement {
             // Decrement
             -1 * (128 - value) as i32
         };
-        Ok(DiscreteIncrement::new(increment))
+        Ok(unsafe { DiscreteIncrement::new_unsafe(increment) })
     }
 
     /// Creates an increment from the given MIDI control-change value assuming that the device
@@ -90,18 +99,18 @@ impl DiscreteIncrement {
     /// - 65 < value <= 127 results in higher increment step sizes (63 possible increment step
     ///   sizes)
     pub fn from_encoder_2_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        debug_assert!(value <= SEVEN_BIT_VALUE_MAX);
+        assert!(value <= SEVEN_BIT_VALUE_MAX);
         if value == 64 {
             return Err(());
         }
-        let increment = if value >= 64 {
+        let increment = if value > 64 {
             // Zero and increment
             (value - 64) as i32
         } else {
             // Decrement
             -1 * (64 - value) as i32
         };
-        Ok(DiscreteIncrement::new(increment))
+        Ok(unsafe { DiscreteIncrement::new_unsafe(increment) })
     }
 
     /// Creates an increment from the given MIDI control-change value assuming that the device
@@ -112,7 +121,7 @@ impl DiscreteIncrement {
     ///   sizes)
     /// - 1 < value <= 64 results in higher increment step sizes (64 possible increment step sizes)
     pub fn from_encoder_3_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        debug_assert!(value <= SEVEN_BIT_VALUE_MAX);
+        assert!(value <= SEVEN_BIT_VALUE_MAX);
         if value == 0 {
             return Err(());
         }
@@ -123,7 +132,7 @@ impl DiscreteIncrement {
             // Decrement
             -1 * (value - 64) as i32
         };
-        Ok(DiscreteIncrement::new(increment))
+        Ok(unsafe { DiscreteIncrement::new_unsafe(increment) })
     }
 
     /// Clamps this increment to the given interval bounds.
@@ -139,7 +148,7 @@ impl DiscreteIncrement {
 
     /// Switches the direction of this increment (makes a positive one negative and vice versa).
     pub fn inverse(&self) -> DiscreteIncrement {
-        DiscreteIncrement::new(-self.0)
+        unsafe { DiscreteIncrement::new_unsafe(-self.0) }
     }
 
     /// Returns the underlying number.

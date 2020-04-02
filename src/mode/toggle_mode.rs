@@ -1,4 +1,4 @@
-use crate::{full_unit_interval, ControlValue, Interval, Target, UnitValue};
+use crate::{full_unit_interval, Interval, Target, UnitValue};
 
 #[derive(Clone, Debug)]
 pub struct ToggleMode {

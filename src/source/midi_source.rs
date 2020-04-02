@@ -1,6 +1,5 @@
 use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 
-use helgoboss_midi::MidiMessageKind::ChannelPressure;
 use helgoboss_midi::{
     ctrl_number_could_be_part_of_parameter_number_msg, FourteenBitValue, Midi14BitCcMessage,
     MidiMessage, MidiMessageFactory, MidiMessageKind, MidiParameterNumberMessage, Nibble,
@@ -112,7 +111,7 @@ impl MidiSource {
                     NoteOff {
                         channel: ch,
                         key_number: kn,
-                        velocity,
+                        ..
                     } if matches(ch, *channel) && matches(kn, *key_number) => {
                         Some(abs(UnitValue::MIN))
                     }
@@ -256,7 +255,7 @@ impl MidiSource {
                 ControlChange {
                     channel: ch,
                     controller_number,
-                    control_value,
+                    ..
                 } => {
                     matches(ch, *channel)
                         && (matches(controller_number, *msb_controller_number)
@@ -268,7 +267,7 @@ impl MidiSource {
                 ControlChange {
                     channel: ch,
                     controller_number,
-                    control_value,
+                    ..
                 } => {
                     matches(ch, *channel)
                         && ctrl_number_could_be_part_of_parameter_number_msg(controller_number)
