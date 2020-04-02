@@ -87,7 +87,13 @@ pub enum MidiSource {
 impl MidiSource {
     /// Usually called very early right in the audio thread in order to determine if it's at all
     /// necessary to process the source value and to determine if the value should be let through
-    /// or not.
+    /// or not. This makes it possible to do as little as possible in the audio thread and send
+    /// the remaining work to another thread.
+    /// TODO Don't know if this so helpful in practice. Is it maybe better to do more in the audio
+    ///  thread and only send the mode output to the GUI thread? No, because the mode needs to
+    ///  access target values which can't be done in the audio thread usually. But the control
+    ///  value could already be determined in the audio thread. Maybe better maintainable in the
+    ///  long run, then we could put those 2 methods together.
     pub fn processes<M: MidiMessage>(&self, value: &MidiSourceValue<M>) -> bool {
         use MidiSource::*;
         use MidiSourceValue::*;
@@ -329,6 +335,16 @@ impl MidiSource {
             },
             _ => false,
         }
+    }
+    /// Returns an appropriate MIDI source value for the given feedback value if feedback is
+    /// supported by this source.
+    pub fn get_feedback_value<M: MidiMessage>(
+        &self,
+        feedback_value: UnitValue,
+    ) -> Option<MidiSourceValue<M>> {
+        use MidiSource::*;
+        use MidiSourceValue::*;
+        unimplemented!()
     }
 }
 
