@@ -22,7 +22,7 @@ impl UnitValue {
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
-    pub unsafe fn new_unsafe(number: f64) -> UnitValue {
+    pub unsafe fn new_unchecked(number: f64) -> UnitValue {
         debug_assert!(0.0 <= number && number <= 1.0);
         UnitValue(number)
     }
@@ -39,7 +39,7 @@ impl UnitValue {
 
     /// Calculates the distance between this and another unit value.
     pub fn calc_distance_from(&self, rhs: Self) -> UnitValue {
-        unsafe { UnitValue::new_unsafe((self.0 - rhs.0).abs()) }
+        unsafe { UnitValue::new_unchecked((self.0 - rhs.0).abs()) }
     }
 
     /// Maps this value to the given destination interval assuming that this value currently
@@ -50,7 +50,7 @@ impl UnitValue {
     ) -> UnitValue {
         let min = destination_interval.get_min().get_number();
         let span = destination_interval.get_span();
-        unsafe { UnitValue::new_unsafe(min + self.get_number() * span) }
+        unsafe { UnitValue::new_unchecked(min + self.get_number() * span) }
     }
 
     /// Maps this value to the unit interval assuming that this value currently exhausts the given
@@ -64,7 +64,7 @@ impl UnitValue {
         if *self > max {
             return UnitValue::MAX;
         }
-        unsafe { UnitValue::new_unsafe((*self - min) / source_interval.get_span()) }
+        unsafe { UnitValue::new_unchecked((*self - min) / source_interval.get_span()) }
     }
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).
@@ -84,7 +84,7 @@ impl UnitValue {
         if self.is_zero() {
             return None;
         }
-        Some(unsafe { UnitIncrement::new_unsafe(signum as f64 * self.0) })
+        Some(unsafe { UnitIncrement::new_unchecked(signum as f64 * self.0) })
     }
 
     /// Returns the value on the "other side" of the unit interval.
@@ -93,7 +93,7 @@ impl UnitValue {
     /// - 0.8 => 0.2
     /// - 0.6 => 0.4
     pub fn inverse(&self) -> UnitValue {
-        unsafe { UnitValue::new_unsafe(1.0 - self.0) }
+        unsafe { UnitValue::new_unchecked(1.0 - self.0) }
     }
 
     /// "Rounds" value to its nearest grid value using the grid's number of intervals. Using the
@@ -101,14 +101,14 @@ impl UnitValue {
     /// have the accurate number of intervals at disposal, use this method.
     pub fn snap_to_grid_by_interval_count(&self, interval_count: u32) -> UnitValue {
         let interval_count = interval_count as f64;
-        unsafe { UnitValue::new_unsafe((self.0 * interval_count).round() / interval_count) }
+        unsafe { UnitValue::new_unchecked((self.0 * interval_count).round() / interval_count) }
     }
 
     // Rounds value to its nearest grid value using the grid's interval size. If you pass an
     // interval size whose multiple doesn't perfectly fit into the unit interval, the last
     // interval will be smaller than all the others. Better don't do that.
     pub fn snap_to_grid_by_interval_size(&self, interval_size: UnitValue) -> UnitValue {
-        unsafe { UnitValue::new_unsafe((self.0 / interval_size.0).round() * interval_size.0) }
+        unsafe { UnitValue::new_unchecked((self.0 / interval_size.0).round() * interval_size.0) }
     }
 
     /// Returns whether this is 0.0.
@@ -143,7 +143,7 @@ impl UnitValue {
         } else if sum > max.get_number() {
             min
         } else {
-            unsafe { UnitValue::new_unsafe(sum) }
+            unsafe { UnitValue::new_unchecked(sum) }
         }
     }
 
@@ -163,7 +163,7 @@ impl UnitValue {
             return max;
         }
         unsafe {
-            UnitValue::new_unsafe(num::clamp(
+            UnitValue::new_unchecked(num::clamp(
                 self.0 + increment.get_number(),
                 min.get_number(),
                 max.get_number(),
@@ -174,7 +174,7 @@ impl UnitValue {
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitValue {
         unsafe {
-            UnitValue::new_unsafe(num::clamp(
+            UnitValue::new_unchecked(num::clamp(
                 self.0,
                 interval.get_min().0,
                 interval.get_max().0,
@@ -202,7 +202,7 @@ impl Sub for UnitValue {
 impl Interval<UnitValue> {
     /// Returns the value which is exactly in the middle between the interval bounds.
     pub fn get_center(&self) -> UnitValue {
-        unsafe { UnitValue::new_unsafe((self.get_min() + self.get_max()) / 2.0) }
+        unsafe { UnitValue::new_unchecked((self.get_min() + self.get_max()) / 2.0) }
     }
 
     /// Returns whether this interval is the complete unit interval.
@@ -237,7 +237,7 @@ impl UnitIncrement {
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
-    pub unsafe fn new_unsafe(increment: f64) -> UnitIncrement {
+    pub unsafe fn new_unchecked(increment: f64) -> UnitIncrement {
         debug_assert_ne!(increment, 0.0);
         UnitIncrement(increment)
     }
@@ -263,7 +263,7 @@ impl UnitIncrement {
 
     /// Converts this unit increment into a unit value thereby "losing" its direction.
     pub fn to_value(&self) -> UnitValue {
-        unsafe { UnitValue::new_unsafe(self.0.abs()) }
+        unsafe { UnitValue::new_unchecked(self.0.abs()) }
     }
 
     /// Clamps this increment to the given interval bounds.

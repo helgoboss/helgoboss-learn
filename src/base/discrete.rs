@@ -23,7 +23,7 @@ impl DiscreteValue {
         if self.is_zero() {
             return None;
         }
-        Some(unsafe { DiscreteIncrement::new_unsafe(signum * self.0 as i32) })
+        Some(unsafe { DiscreteIncrement::new_unchecked(signum * self.0 as i32) })
     }
 
     /// Returns whether this is 0.
@@ -65,7 +65,7 @@ impl DiscreteIncrement {
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
-    pub unsafe fn new_unsafe(increment: i32) -> DiscreteIncrement {
+    pub unsafe fn new_unchecked(increment: i32) -> DiscreteIncrement {
         debug_assert_ne!(increment, 0);
         DiscreteIncrement(increment)
     }
@@ -88,7 +88,7 @@ impl DiscreteIncrement {
             // Decrement
             -1 * (128 - value) as i32
         };
-        Ok(unsafe { DiscreteIncrement::new_unsafe(increment) })
+        Ok(unsafe { DiscreteIncrement::new_unchecked(increment) })
     }
 
     /// Creates an increment from the given MIDI control-change value assuming that the device
@@ -110,7 +110,7 @@ impl DiscreteIncrement {
             // Decrement
             -1 * (64 - value) as i32
         };
-        Ok(unsafe { DiscreteIncrement::new_unsafe(increment) })
+        Ok(unsafe { DiscreteIncrement::new_unchecked(increment) })
     }
 
     /// Creates an increment from the given MIDI control-change value assuming that the device
@@ -132,7 +132,7 @@ impl DiscreteIncrement {
             // Decrement
             -1 * (value - 64) as i32
         };
-        Ok(unsafe { DiscreteIncrement::new_unsafe(increment) })
+        Ok(unsafe { DiscreteIncrement::new_unchecked(increment) })
     }
 
     /// Clamps this increment to the given interval bounds.
@@ -148,7 +148,7 @@ impl DiscreteIncrement {
 
     /// Switches the direction of this increment (makes a positive one negative and vice versa).
     pub fn inverse(&self) -> DiscreteIncrement {
-        unsafe { DiscreteIncrement::new_unsafe(-self.0) }
+        unsafe { DiscreteIncrement::new_unchecked(-self.0) }
     }
 
     /// Returns the underlying number.
