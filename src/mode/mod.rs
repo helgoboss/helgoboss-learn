@@ -4,8 +4,8 @@ mod absolute;
 pub use absolute::*;
 mod relative;
 pub use relative::*;
-mod toggle;
-pub use toggle::*;
+mod toggle_mode;
+pub use toggle_mode::*;
 mod transformation;
 use crate::{ControlValue, UnitValue};
 pub use transformation::*;
@@ -21,7 +21,7 @@ mod test_util;
 pub enum Mode<T: Transformation> {
     Absolute(AbsoluteModeData<T>),
     Relative(RelativeModeData),
-    Toggle(ToggleModeData),
+    // Toggle(ToggleModeData),
 }
 
 impl<T: Transformation> Mode<T> {
@@ -35,7 +35,7 @@ impl<T: Transformation> Mode<T> {
         match self {
             Mode::Absolute(data) => data.control(control_value, target),
             Mode::Relative(data) => data.control(control_value, target),
-            Mode::Toggle(data) => data.control(control_value, target),
+            // Mode::Toggle(data) => data.control(control_value, target),
         }
     }
 
@@ -46,7 +46,7 @@ impl<T: Transformation> Mode<T> {
         match self {
             Absolute(data) => data.feedback(target_value),
             Relative(data) => data.feedback(target_value),
-            Toggle(data) => data.feedback(target_value),
+            // Toggle(data) => data.feedback(target_value),
         }
     }
 }
