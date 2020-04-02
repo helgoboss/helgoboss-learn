@@ -39,9 +39,17 @@ impl UnitValue {
     }
 
     /// Maps this value to the unit interval assuming that this value currently exhausts the given
-    /// source interval.
+    /// source interval. If this value is outside the source interval, this method returns either
+    /// 0.0 or 1.0.
     pub fn map_to_unit_interval_from(&self, source_interval: &Interval<UnitValue>) -> UnitValue {
-        UnitValue::new((*self - source_interval.get_min()) / source_interval.get_span())
+        let (min, max) = (source_interval.get_min(), source_interval.get_max());
+        if *self < min {
+            return UnitValue::new(0.0);
+        }
+        if *self > max {
+            return UnitValue::new(1.0);
+        }
+        UnitValue::new((*self - min) / source_interval.get_span())
     }
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).

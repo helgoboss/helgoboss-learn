@@ -247,6 +247,34 @@ mod tests {
         assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.3));
     }
 
+    #[test]
+    fn feedback() {
+        // Given
+        let mode = ToggleMode {
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(1.0));
+    }
+
+    #[test]
+    fn feedback_target_interval() {
+        // Given
+        let mode = ToggleMode {
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.4)), abs(0.25));
+        assert_abs_diff_eq!(mode.feedback(abs(0.7)), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(1.0));
+    }
+
     fn abs(number: f64) -> UnitValue {
         UnitValue::new(number)
     }

@@ -49,16 +49,17 @@ impl RelativeMode {
     }
 
     /// Takes a target value, interprets and transforms it conforming to relative mode rules and
-    /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
+    /// returns an appropriate source value that should be sent to the source. Of course this makes
+    /// sense for absolute sources only.
+    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
         let potentially_inversed_value = if self.reverse {
             target_value.inverse()
         } else {
             target_value
         };
-        // TODO In case the source emits absolute values, this should be mapped to source value
-        //  interval. But how do we know? Maybe we should split the relative mode into two modes?
-        Some(potentially_inversed_value.map_to_unit_interval_from(&self.target_value_interval))
+        potentially_inversed_value
+            .map_to_unit_interval_from(&self.target_value_interval)
+            .map_from_unit_interval_to(&self.source_value_interval)
     }
 
     /// Relative one-direction mode (convert absolute button presses to relative increments)
@@ -1994,6 +1995,53 @@ mod tests {
                 assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), rel(-1));
             }
         }
+
+        mod feedback {
+            use super::*;
+
+            #[test]
+            fn default() {
+                // Given
+                let mode = RelativeMode {
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(uv(0.0)), uv(0.0));
+                assert_abs_diff_eq!(mode.feedback(uv(0.5)), uv(0.5));
+                assert_abs_diff_eq!(mode.feedback(uv(1.0)), uv(1.0));
+            }
+
+            #[test]
+            fn reverse() {
+                // Given
+                let mode = RelativeMode {
+                    reverse: true,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(uv(0.0)), uv(1.0));
+                assert_abs_diff_eq!(mode.feedback(uv(0.5)), uv(0.5));
+                assert_abs_diff_eq!(mode.feedback(uv(1.0)), uv(0.0));
+            }
+
+            #[test]
+            fn source_and_target_interval() {
+                // Given
+                let mode = RelativeMode {
+                    source_value_interval: create_unit_value_interval(0.2, 0.8),
+                    target_value_interval: create_unit_value_interval(0.4, 1.0),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(uv(0.0)), uv(0.2));
+                assert_abs_diff_eq!(mode.feedback(uv(0.4)), uv(0.2));
+                assert_abs_diff_eq!(mode.feedback(uv(0.7)), uv(0.5));
+                assert_abs_diff_eq!(mode.feedback(uv(1.0)), uv(0.8));
+            }
+        }
     }
 
     fn abs(number: f64) -> ControlValue {
@@ -2002,5 +2050,9 @@ mod tests {
 
     fn rel(increment: i32) -> ControlValue {
         ControlValue::relative(increment)
+    }
+
+    fn uv(number: f64) -> UnitValue {
+        UnitValue::new(number)
     }
 }

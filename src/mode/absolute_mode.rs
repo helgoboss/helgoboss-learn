@@ -55,7 +55,7 @@ impl<T: Transformation> AbsoluteMode<T> {
 
     /// Takes a target value, interprets and transforms it conforming to absolute mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
+    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
         let potentially_inversed_value = if self.reverse_target_value {
             target_value.inverse()
         } else {
@@ -66,11 +66,9 @@ impl<T: Transformation> AbsoluteMode<T> {
             .as_ref()
             .and_then(|t| t.transform(potentially_inversed_value).ok())
             .unwrap_or(potentially_inversed_value);
-        Some(
-            transformed_value
-                .map_to_unit_interval_from(&self.target_value_interval)
-                .map_from_unit_interval_to(&self.source_value_interval),
-        )
+        transformed_value
+            .map_to_unit_interval_from(&self.target_value_interval)
+            .map_from_unit_interval_to(&self.source_value_interval)
     }
 
     fn pep_up_control_value(&self, control_value: UnitValue, target: &impl Target) -> UnitValue {
@@ -460,6 +458,63 @@ mod tests {
         assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
         assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
         assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+    }
+
+    #[test]
+    fn feedback() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(1.0));
+    }
+
+    #[test]
+    fn feedback_reverse() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            reverse_target_value: true,
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(0.0));
+    }
+
+    #[test]
+    fn feedback_source_and_target_interval() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            source_value_interval: create_unit_value_interval(0.2, 0.8),
+            target_value_interval: create_unit_value_interval(0.4, 1.0),
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.2));
+        assert_abs_diff_eq!(mode.feedback(abs(0.4)), abs(0.2));
+        assert_abs_diff_eq!(mode.feedback(abs(0.7)), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(0.8));
+    }
+
+    #[test]
+    fn feedback_transformation() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            feedback_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(0.0));
     }
 
     fn abs(number: f64) -> UnitValue {
