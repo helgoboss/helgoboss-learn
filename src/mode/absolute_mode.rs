@@ -156,8 +156,8 @@ fn round_to_nearest_discrete_value(
 mod tests {
     use super::*;
 
-    use crate::mode::test_util::{TestTarget, TestTransformation};
-    use crate::{create_unit_value_interval, Mode};
+    use crate::create_unit_value_interval;
+    use crate::mode::test_util::TestTarget;
     use approx::*;
 
     #[test]
@@ -464,5 +464,25 @@ mod tests {
 
     fn abs(number: f64) -> UnitValue {
         UnitValue::new(number)
+    }
+
+    struct TestTransformation {
+        transformer: Box<dyn Fn(UnitValue) -> Result<UnitValue, ()>>,
+    }
+
+    impl TestTransformation {
+        pub fn new(
+            transformer: impl Fn(UnitValue) -> Result<UnitValue, ()> + 'static,
+        ) -> TestTransformation {
+            Self {
+                transformer: Box::new(transformer),
+            }
+        }
+    }
+
+    impl Transformation for TestTransformation {
+        fn transform(&self, input_value: UnitValue) -> Result<UnitValue, ()> {
+            (self.transformer)(input_value)
+        }
     }
 }

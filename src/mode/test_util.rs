@@ -1,12 +1,4 @@
-use crate::{ControlValue, Mode, Target, Transformation, UnitValue};
-
-pub fn abs(number: f64) -> ControlValue {
-    ControlValue::absolute(number)
-}
-
-pub fn rel(increment: i32) -> ControlValue {
-    ControlValue::relative(increment)
-}
+use crate::{ControlValue, Target, Transformation, UnitValue};
 
 pub struct TestTarget {
     pub step_size: Option<UnitValue>,
@@ -27,25 +19,3 @@ impl Target for TestTarget {
         self.wants_increments
     }
 }
-
-pub struct TestTransformation {
-    transformer: Box<dyn Fn(UnitValue) -> Result<UnitValue, ()>>,
-}
-
-impl TestTransformation {
-    pub fn new(
-        transformer: impl Fn(UnitValue) -> Result<UnitValue, ()> + 'static,
-    ) -> TestTransformation {
-        Self {
-            transformer: Box::new(transformer),
-        }
-    }
-}
-
-impl Transformation for TestTransformation {
-    fn transform(&self, input_value: UnitValue) -> Result<UnitValue, ()> {
-        (self.transformer)(input_value)
-    }
-}
-
-pub type TestMode = Mode<TestTransformation>;
