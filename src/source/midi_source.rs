@@ -74,9 +74,8 @@ pub enum MidiSource {
     ParameterNumberValue {
         channel: Option<Channel>,
         number: Option<U14>,
-        // TODO Those flags should be options as well
-        is_14_bit: bool,
-        is_registered: bool,
+        is_14_bit: Option<bool>,
+        is_registered: Option<bool>,
     },
     // MidiMessageKind::TimingClock
     ClockTempo,
@@ -215,8 +214,8 @@ impl MidiSource {
                 ParameterNumber(msg)
                     if matches(msg.get_channel(), *channel)
                         && matches(msg.get_number(), *number)
-                        && msg.is_14_bit() == *is_14_bit
-                        && msg.is_registered() == *is_registered =>
+                        && matches(msg.is_14_bit(), *is_14_bit)
+                        && matches(msg.is_registered(), *is_registered) =>
                 {
                     let unit_value = if msg.is_14_bit() {
                         normalize_14_bit(msg.get_value())
@@ -340,8 +339,8 @@ impl MidiSource {
             ParameterNumberValue {
                 channel: Some(ch),
                 number: Some(n),
-                is_14_bit,
-                is_registered,
+                is_14_bit: Some(is_14_bit),
+                is_registered: Some(is_registered),
             } => Some(ParameterNumber(if *is_registered {
                 if *is_14_bit {
                     MidiParameterNumberMessage::registered_14_bit(
@@ -1020,8 +1019,8 @@ mod tests {
         let source = MidiSource::ParameterNumberValue {
             channel: None,
             number: None,
-            is_14_bit: true,
-            is_registered: false,
+            is_14_bit: None,
+            is_registered: None,
         };
         // When
         // Then
@@ -1055,13 +1054,16 @@ mod tests {
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
-        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_abs_diff_eq!(
+            source.control(&pn(rpn_14_bit(1, 520, 2048))).unwrap(),
+            abs(0.12500762986022096)
+        );
         assert_abs_diff_eq!(
             source.control(&pn(nrpn_14_bit(1, 520, 16383))).unwrap(),
             abs(1.0)
         );
-        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
-        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_abs_diff_eq!(source.control(&pn(rpn(1, 342, 0))).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(source.control(&pn(nrpn(1, 520, 127))).unwrap(), abs(1.0));
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
@@ -1073,8 +1075,8 @@ mod tests {
         let source = MidiSource::ParameterNumberValue {
             channel: Some(ch(7)),
             number: Some(u14(3000)),
-            is_14_bit: false,
-            is_registered: true,
+            is_14_bit: Some(false),
+            is_registered: Some(true),
         };
         // When
         // Then
