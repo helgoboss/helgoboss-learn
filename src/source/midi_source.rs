@@ -1,7 +1,7 @@
 use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 
 use helgoboss_midi::{
-    Channel, ControllerNumber, KeyNumber, Midi14BitControlChangeMessage, MidiMessage,
+    Channel, ControllerNumber, KeyNumber, MidiControlChange14BitMessage, MidiMessage,
     MidiMessageFactory, MidiMessageKind, MidiParameterNumberMessage, StructuredMidiMessage, U14,
     U7,
 };
@@ -65,15 +65,16 @@ pub enum MidiSource {
     PitchBendChangeValue {
         channel: Option<Channel>,
     },
-    // Midi14BitCcMessage
-    FourteenBitCcMessageValue {
+    // MidiControlChange14BitMessage
+    ControlChange14BitValue {
         channel: Option<Channel>,
         msb_controller_number: Option<ControllerNumber>,
     },
     // MidiParameterNumberMessage
-    ParameterNumberMessageValue {
+    ParameterNumberValue {
         channel: Option<Channel>,
         number: Option<U14>,
+        // TODO Those flags should be options as well
         is_14_bit: bool,
         is_registered: bool,
     },
@@ -88,10 +89,7 @@ pub enum MidiSource {
 impl MidiSource {
     /// Determines the appropriate control value from the given MIDI source value. If this source
     /// doesn't process values of that kind, it returns None.
-    pub fn get_control_value<M: MidiMessage>(
-        &self,
-        value: &MidiSourceValue<M>,
-    ) -> Option<ControlValue> {
+    pub fn control<M: MidiMessage>(&self, value: &MidiSourceValue<M>) -> Option<ControlValue> {
         use MidiSource as S;
         use MidiSourceValue::*;
         use StructuredMidiMessage::*;
@@ -100,7 +98,7 @@ impl MidiSource {
                 channel,
                 key_number,
             } => match value {
-                PlainMessage(msg) => match msg.to_structured() {
+                Plain(msg) => match msg.to_structured() {
                     NoteOn {
                         channel: ch,
                         key_number: kn,
@@ -120,7 +118,7 @@ impl MidiSource {
                 _ => None,
             },
             S::NoteKeyNumber { channel } => match value {
-                PlainMessage(msg) => match msg.to_structured() {
+                Plain(msg) => match msg.to_structured() {
                     NoteOn {
                         channel: ch,
                         key_number,
@@ -133,7 +131,7 @@ impl MidiSource {
                 _ => None,
             },
             S::PitchBendChangeValue { channel } => match value {
-                PlainMessage(msg) => match msg.to_structured() {
+                Plain(msg) => match msg.to_structured() {
                     PitchBendChange {
                         channel: ch,
                         pitch_bend_value,
@@ -143,7 +141,7 @@ impl MidiSource {
                 _ => None,
             },
             S::ChannelPressureAmount { channel } => match value {
-                PlainMessage(msg) => match msg.to_structured() {
+                Plain(msg) => match msg.to_structured() {
                     ChannelPressure {
                         channel: ch,
                         pressure_amount,
@@ -153,7 +151,7 @@ impl MidiSource {
                 _ => None,
             },
             S::ProgramChangeNumber { channel } => match value {
-                PlainMessage(msg) => match msg.to_structured() {
+                Plain(msg) => match msg.to_structured() {
                     ProgramChange {
                         channel: ch,
                         program_number,
@@ -166,7 +164,7 @@ impl MidiSource {
                 channel,
                 key_number,
             } => match value {
-                PlainMessage(msg) => match msg.to_structured() {
+                Plain(msg) => match msg.to_structured() {
                     PolyphonicKeyPressure {
                         channel: ch,
                         key_number: kn,
@@ -183,7 +181,7 @@ impl MidiSource {
                 controller_number,
                 custom_character,
             } => match value {
-                PlainMessage(msg) => match msg.to_structured() {
+                Plain(msg) => match msg.to_structured() {
                     ControlChange {
                         channel: ch,
                         controller_number: cn,
@@ -196,11 +194,11 @@ impl MidiSource {
                 },
                 _ => None,
             },
-            S::FourteenBitCcMessageValue {
+            S::ControlChange14BitValue {
                 channel,
                 msb_controller_number,
             } => match value {
-                FourteenBitControlChangeMessage(msg)
+                ControlChange14Bit(msg)
                     if matches(msg.get_channel(), *channel)
                         && matches(msg.get_msb_controller_number(), *msb_controller_number) =>
                 {
@@ -208,13 +206,13 @@ impl MidiSource {
                 }
                 _ => None,
             },
-            S::ParameterNumberMessageValue {
+            S::ParameterNumberValue {
                 channel,
                 number,
                 is_14_bit,
                 is_registered,
             } => match value {
-                ParameterNumberMessage(msg)
+                ParameterNumber(msg)
                     if matches(msg.get_channel(), *channel)
                         && matches(msg.get_number(), *number)
                         && msg.is_14_bit() == *is_14_bit
@@ -230,13 +228,11 @@ impl MidiSource {
                 _ => None,
             },
             S::ClockTransport { message_kind } => match value {
-                PlainMessage(msg) if msg.get_kind() == (*message_kind).into() => {
-                    Some(abs(UnitValue::MAX))
-                }
+                Plain(msg) if msg.get_kind() == (*message_kind).into() => Some(abs(UnitValue::MAX)),
                 _ => None,
             },
             S::ClockTempo => match value {
-                TempoMessage { bpm } => Some(abs(UnitValue::new((*bpm - 1.0) / 960.0))),
+                Tempo { bpm } => Some(abs(UnitValue::new((*bpm - 1.0) / 960.0))),
                 _ => None,
             },
         }
@@ -248,7 +244,7 @@ impl MidiSource {
         use MidiSource::*;
         use StructuredMidiMessage::*;
         match self {
-            FourteenBitCcMessageValue {
+            ControlChange14BitValue {
                 channel,
                 msb_controller_number,
             } => match msg.to_structured() {
@@ -267,7 +263,7 @@ impl MidiSource {
                 }
                 _ => false,
             },
-            ParameterNumberMessageValue { channel, .. } => match msg.to_structured() {
+            ParameterNumberValue { channel, .. } => match msg.to_structured() {
                 ControlChange {
                     channel: ch,
                     controller_number,
@@ -284,7 +280,7 @@ impl MidiSource {
 
     /// Returns an appropriate MIDI source value for the given feedback value if feedback is
     /// supported by this source.
-    pub fn get_feedback_value<M: MidiMessage + MidiMessageFactory>(
+    pub fn feedback<M: MidiMessage + MidiMessageFactory>(
         &self,
         feedback_value: UnitValue,
     ) -> Option<MidiSourceValue<M>> {
@@ -294,12 +290,12 @@ impl MidiSource {
             NoteVelocity {
                 channel: Some(ch),
                 key_number: Some(kn),
-            } => Some(PlainMessage(M::note_on(
+            } => Some(Plain(M::note_on(
                 *ch,
                 *kn,
                 denormalize_7_bit(feedback_value),
             ))),
-            NoteKeyNumber { channel: Some(ch) } => Some(PlainMessage(M::note_on(
+            NoteKeyNumber { channel: Some(ch) } => Some(Plain(M::note_on(
                 *ch,
                 denormalize_7_bit(feedback_value),
                 U7::MAX,
@@ -307,7 +303,7 @@ impl MidiSource {
             PolyphonicKeyPressureAmount {
                 channel: Some(ch),
                 key_number: Some(kn),
-            } => Some(PlainMessage(M::polyphonic_key_pressure(
+            } => Some(Plain(M::polyphonic_key_pressure(
                 *ch,
                 *kn,
                 denormalize_7_bit(feedback_value),
@@ -316,36 +312,37 @@ impl MidiSource {
                 channel: Some(ch),
                 controller_number: Some(cn),
                 ..
-            } => Some(PlainMessage(M::control_change(
+            } => Some(Plain(M::control_change(
                 *ch,
                 *cn,
                 denormalize_7_bit(feedback_value),
             ))),
-            ProgramChangeNumber { channel: Some(ch) } => Some(PlainMessage(M::program_change(
+            ProgramChangeNumber { channel: Some(ch) } => Some(Plain(M::program_change(
                 *ch,
                 denormalize_7_bit(feedback_value),
             ))),
-            ChannelPressureAmount { channel: Some(ch) } => Some(PlainMessage(M::channel_pressure(
+            ChannelPressureAmount { channel: Some(ch) } => Some(Plain(M::channel_pressure(
                 *ch,
                 denormalize_7_bit(feedback_value),
             ))),
-            PitchBendChangeValue { channel: Some(ch) } => Some(PlainMessage(M::pitch_bend_change(
+            PitchBendChangeValue { channel: Some(ch) } => Some(Plain(M::pitch_bend_change(
                 *ch,
-                // TODO Add test!
                 denormalize_14_bit_ceil(feedback_value),
             ))),
-            FourteenBitCcMessageValue {
+            ControlChange14BitValue {
                 channel: Some(ch),
                 msb_controller_number: Some(mcn),
-            } => Some(FourteenBitControlChangeMessage(
-                Midi14BitControlChangeMessage::new(*ch, *mcn, denormalize_14_bit(feedback_value)),
-            )),
-            ParameterNumberMessageValue {
+            } => Some(ControlChange14Bit(MidiControlChange14BitMessage::new(
+                *ch,
+                *mcn,
+                denormalize_14_bit(feedback_value),
+            ))),
+            ParameterNumberValue {
                 channel: Some(ch),
                 number: Some(n),
                 is_14_bit,
                 is_registered,
-            } => Some(ParameterNumberMessage(if *is_registered {
+            } => Some(ParameterNumber(if *is_registered {
                 if *is_14_bit {
                     MidiParameterNumberMessage::registered_14_bit(
                         *ch,
@@ -440,22 +437,787 @@ fn rel(increment: DiscreteIncrement) -> ControlValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // TODO This is an IDE error ... anything we can do to work around that?
-    use helgoboss_midi::{channel as ch, key_number, u7, MidiMessageFactory, RawMidiMessage};
-    use MidiSourceValue::*;
+    use approx::*;
+    use helgoboss_midi::test_util::*;
+    use helgoboss_midi::{
+        channel as ch, controller_number as cn, key_number as kn, u14, u7, RawMidiMessage,
+    };
 
     #[test]
-    fn default() {
+    fn note_velocity_1() {
         // Given
         let source = MidiSource::NoteVelocity {
-            channel: None,
+            channel: Some(ch(0)),
             key_number: None,
         };
         // When
-        source.get_control_value(&PlainMessage(RawMidiMessage::note_on(
-            ch(0),
-            key_number(64),
-            u7(100),
-        )));
+        // Then
+        assert_abs_diff_eq!(
+            source.control(&plain(note_on(0, 64, 127,))).unwrap(),
+            abs(1.0)
+        );
+        assert_abs_diff_eq!(
+            source.control(&plain(note_on(0, 20, 0,))).unwrap(),
+            abs(0.0)
+        );
+        assert_abs_diff_eq!(
+            source.control(&plain(note_off(0, 20, 100,))).unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(program_change(5, 64,))), None);
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(3, 14, 64,))),
+            None
+        );
+        assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn note_velocity_2() {
+        // Given
+        let source = MidiSource::NoteVelocity {
+            channel: Some(ch(4)),
+            key_number: Some(kn(20)),
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 64, 127,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(note_on(4, 20, 0,))).unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&plain(note_off(15, 20, 100,))), None);
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(plain(note_on(4, 20, 64)))
+        );
+    }
+
+    #[test]
+    fn note_key_number_1() {
+        // Given
+        let source = MidiSource::NoteKeyNumber { channel: None };
+        // When
+        // Then
+        assert_abs_diff_eq!(
+            source.control(&plain(note_on(0, 127, 55,))).unwrap(),
+            abs(1.0)
+        );
+        assert_abs_diff_eq!(
+            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(program_change(5, 64,))), None);
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(3, 14, 64,))),
+            None
+        );
+        assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn note_key_number_2() {
+        // Given
+        let source = MidiSource::NoteKeyNumber {
+            channel: Some(ch(1)),
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(plain(note_on(1, 64, 127)))
+        );
+    }
+
+    #[test]
+    fn polyphonic_key_pressure_amount_1() {
+        // Given
+        let source = MidiSource::PolyphonicKeyPressureAmount {
+            channel: Some(ch(1)),
+            key_number: None,
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(program_change(5, 64,))), None);
+        assert_abs_diff_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 14, 127,)))
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 16, 0,)))
+                .unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(3, 14, 127))),
+            None
+        );
+        assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn polyphonic_key_pressure_amount_2() {
+        // Given
+        let source = MidiSource::PolyphonicKeyPressureAmount {
+            channel: Some(ch(1)),
+            key_number: Some(kn(53)),
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 53, 127,)))
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(plain(polyphonic_key_pressure(1, 53, 64)))
+        );
+    }
+
+    #[test]
+    fn control_change_value_1() {
+        // Given
+        let source = MidiSource::ControlChangeValue {
+            channel: Some(ch(1)),
+            controller_number: None,
+            custom_character: SourceCharacter::Range,
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(control_change(1, 64, 127,))).unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(source.control(&plain(program_change(5, 64,))), None);
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn control_change_value_2() {
+        // Given
+        let source = MidiSource::ControlChangeValue {
+            channel: Some(ch(1)),
+            controller_number: Some(cn(64)),
+            custom_character: SourceCharacter::Encoder2,
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(control_change(1, 65, 127,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(control_change(1, 64, 62,))).unwrap(),
+            rel(-2)
+        );
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(plain(control_change(1, 64, 64)))
+        );
+    }
+
+    #[test]
+    fn program_change_number_1() {
+        // Given
+        let source = MidiSource::ProgramChangeNumber { channel: None };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(program_change(5, 0,))).unwrap(),
+            abs(0.0)
+        );
+        assert_abs_diff_eq!(
+            source.control(&plain(program_change(6, 127,))).unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn program_change_number_2() {
+        // Given
+        let source = MidiSource::ProgramChangeNumber {
+            channel: Some(ch(10)),
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(
+            source.control(&plain(program_change(10, 0,))).unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&plain(program_change(6, 127,))), None);
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(plain(program_change(10, 64)))
+        );
+    }
+
+    #[test]
+    fn channel_pressure_amount_1() {
+        // Given
+        let source = MidiSource::ChannelPressureAmount { channel: None };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(channel_pressure(5, 0,))).unwrap(),
+            abs(0.0)
+        );
+        assert_abs_diff_eq!(
+            source.control(&plain(channel_pressure(6, 127,))).unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(program_change(3, 79,))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn channel_pressure_amount_2() {
+        // Given
+        let source = MidiSource::ChannelPressureAmount {
+            channel: Some(ch(15)),
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(channel_pressure(5, 0,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(channel_pressure(15, 127,))).unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(plain(channel_pressure(15, 64)))
+        );
+    }
+
+    #[test]
+    fn pitch_bend_change_value_1() {
+        // Given
+        let source = MidiSource::PitchBendChangeValue { channel: None };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_abs_diff_eq!(
+            source.control(&plain(pitch_bend_change(5, 0,))).unwrap(),
+            abs(0.0)
+        );
+        // TODO What's the best way to translate this exactly to 0.5 (so it's same like feedback)
+        assert_abs_diff_eq!(
+            source.control(&plain(pitch_bend_change(6, 8192,))).unwrap(),
+            abs(0.5000305194408838)
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(program_change(3, 79,))), None);
+        assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 12000))),
+            None
+        );
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn pitch_bend_change_value_2() {
+        // Given
+        let source = MidiSource::PitchBendChangeValue {
+            channel: Some(ch(3)),
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(
+            source.control(&plain(pitch_bend_change(3, 0,))).unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(plain(pitch_bend_change(3, 8192)))
+        );
+    }
+
+    #[test]
+    fn control_change_14_bit_value_1() {
+        // Given
+        let source = MidiSource::ControlChange14BitValue {
+            channel: Some(ch(1)),
+            msb_controller_number: None,
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_abs_diff_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 10, 4096)))
+                .unwrap(),
+            abs(0.2500152597204419)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 10, 16383)))
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(program_change(3, 79,))), None);
+        assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn control_change_14_bit_value_2() {
+        // Given
+        let source = MidiSource::ControlChange14BitValue {
+            channel: Some(ch(1)),
+            msb_controller_number: Some(cn(7)),
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 4096))),
+            None
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 7, 16383)))
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(cc(control_change_14_bit(1, 7, 8192)))
+        );
+    }
+
+    #[test]
+    fn parameter_number_value_1() {
+        // Given
+        let source = MidiSource::ParameterNumberValue {
+            channel: None,
+            number: None,
+            is_14_bit: true,
+            is_registered: false,
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 4096))),
+            None
+        );
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 16383))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(program_change(3, 79,))), None);
+        assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_abs_diff_eq!(
+            source.control(&pn(nrpn_14_bit(1, 520, 16383))).unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn parameter_number_value_2() {
+        // Given
+        let source = MidiSource::ParameterNumberValue {
+            channel: Some(ch(7)),
+            number: Some(u14(3000)),
+            is_14_bit: false,
+            is_registered: true,
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(control_change(7, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(7, 64, 127,))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(7, 10, 4096))),
+            None
+        );
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(7, 10, 16383))),
+            None
+        );
+        assert_eq!(source.control(&pn(rpn_14_bit(7, 3000, 11253))), None);
+        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), abs(0.0));
+        assert_eq!(source.control(&pn(nrpn_14_bit(7, 3000, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(7, 3000, 24))), None);
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(pn(rpn(7, 3000, 64)))
+        );
+    }
+
+    #[test]
+    fn clock_tempo() {
+        // Given
+        let source = MidiSource::ClockTempo;
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 4096))),
+            None
+        );
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 16383))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(program_change(3, 79,))), None);
+        assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 16383))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
+        assert_abs_diff_eq!(
+            source.control(&tempo(120.0)).unwrap(),
+            abs(0.12395833333333334)
+        );
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    #[test]
+    fn clock_transport() {
+        // Given
+        let source = MidiSource::ClockTransport {
+            message_kind: MidiClockTransportMessageKind::Continue,
+        };
+        // When
+        // Then
+        assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
+        assert_eq!(source.control(&plain(note_on(1, 0, 64,))), None);
+        assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
+        assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
+        assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
+        assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 4096))),
+            None
+        );
+        assert_eq!(
+            source.control(&cc(control_change_14_bit(1, 10, 16383))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
+            None
+        );
+        assert_eq!(
+            source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
+            None
+        );
+        assert_eq!(source.control(&plain(program_change(3, 79,))), None);
+        assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
+        assert_eq!(source.control(&plain(timing_clock())), None);
+        assert_eq!(source.control(&plain(start())), None);
+        assert_eq!(source.control(&plain(continue_message())), Some(abs(1.0)));
+        assert_eq!(source.control(&plain(stop())), None);
+        assert_eq!(source.control(&plain(active_sensing())), None);
+        assert_eq!(source.control(&plain(system_reset())), None);
+        assert_eq!(source.control(&pn(rpn_14_bit(1, 520, 11253))), None);
+        assert_eq!(source.control(&pn(nrpn_14_bit(1, 520, 16383))), None);
+        assert_eq!(source.control(&pn(rpn(1, 342, 45))), None);
+        assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
+        assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
+        assert_eq!(source.control(&tempo(120.0)), None);
+        assert_eq!(source.feedback::<RawMidiMessage>(uv(0.5)), None);
+    }
+
+    fn abs(value: f64) -> ControlValue {
+        ControlValue::absolute(value)
+    }
+
+    fn rel(increment: i32) -> ControlValue {
+        ControlValue::relative(increment)
+    }
+
+    fn plain(msg: RawMidiMessage) -> MidiSourceValue<RawMidiMessage> {
+        MidiSourceValue::Plain(msg)
+    }
+
+    fn pn(msg: MidiParameterNumberMessage) -> MidiSourceValue<RawMidiMessage> {
+        MidiSourceValue::ParameterNumber(msg)
+    }
+
+    fn cc(msg: MidiControlChange14BitMessage) -> MidiSourceValue<RawMidiMessage> {
+        MidiSourceValue::ControlChange14Bit(msg)
+    }
+
+    fn uv(value: f64) -> UnitValue {
+        UnitValue::new(value)
+    }
+
+    fn tempo(bpm: f64) -> MidiSourceValue<RawMidiMessage> {
+        MidiSourceValue::Tempo { bpm }
     }
 }

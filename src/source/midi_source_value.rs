@@ -1,9 +1,10 @@
-use helgoboss_midi::{Midi14BitControlChangeMessage, MidiMessage, MidiParameterNumberMessage};
+use helgoboss_midi::{MidiControlChange14BitMessage, MidiMessage, MidiParameterNumberMessage};
 
 /// Incoming value which might be used to control something
+#[derive(Debug, Clone, PartialEq)]
 pub enum MidiSourceValue<M: MidiMessage> {
-    PlainMessage(M),
-    ParameterNumberMessage(MidiParameterNumberMessage),
-    FourteenBitControlChangeMessage(Midi14BitControlChangeMessage),
-    TempoMessage { bpm: f64 },
+    Plain(M),
+    ParameterNumber(MidiParameterNumberMessage),
+    ControlChange14Bit(MidiControlChange14BitMessage),
+    Tempo { bpm: f64 },
 }
