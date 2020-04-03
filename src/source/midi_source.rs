@@ -1,8 +1,9 @@
 use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 
 use helgoboss_midi::{
-    Channel, ControllerNumber, KeyNumber, Midi14BitCcMessage, MidiMessage, MidiMessageFactory,
-    MidiMessageKind, MidiParameterNumberMessage, StructuredMidiMessage, U14, U7,
+    Channel, ControllerNumber, KeyNumber, Midi14BitControlChangeMessage, MidiMessage,
+    MidiMessageFactory, MidiMessageKind, MidiParameterNumberMessage, StructuredMidiMessage, U14,
+    U7,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,7 +200,7 @@ impl MidiSource {
                 channel,
                 msb_controller_number,
             } => match value {
-                FourteenBitCcMessage(msg)
+                FourteenBitControlChangeMessage(msg)
                     if matches(msg.get_channel(), *channel)
                         && matches(msg.get_msb_controller_number(), *msb_controller_number) =>
                 {
@@ -336,11 +337,9 @@ impl MidiSource {
             FourteenBitCcMessageValue {
                 channel: Some(ch),
                 msb_controller_number: Some(mcn),
-            } => Some(FourteenBitCcMessage(Midi14BitCcMessage::new(
-                *ch,
-                *mcn,
-                denormalize_14_bit(feedback_value),
-            ))),
+            } => Some(FourteenBitControlChangeMessage(
+                Midi14BitControlChangeMessage::new(*ch, *mcn, denormalize_14_bit(feedback_value)),
+            )),
             ParameterNumberMessageValue {
                 channel: Some(ch),
                 number: Some(n),
@@ -441,6 +440,7 @@ fn rel(increment: DiscreteIncrement) -> ControlValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // TODO This is an IDE error ... anything we can do to work around that?
     use helgoboss_midi::{channel as ch, key_number, u7, MidiMessageFactory, RawMidiMessage};
     use MidiSourceValue::*;
 
