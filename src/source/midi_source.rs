@@ -492,7 +492,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -555,7 +555,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -627,7 +627,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -701,7 +701,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -791,7 +791,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -858,7 +858,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(3, 15012,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -949,7 +949,7 @@ mod tests {
         assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -1039,7 +1039,7 @@ mod tests {
         assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -1133,7 +1133,7 @@ mod tests {
         assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -1266,7 +1266,7 @@ mod tests {
         assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), None);
+        assert_eq!(source.control(&plain(r#continue())), None);
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -1316,7 +1316,7 @@ mod tests {
         assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(continue_message())), Some(abs(1.0)));
+        assert_eq!(source.control(&plain(r#continue())), Some(abs(1.0)));
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
