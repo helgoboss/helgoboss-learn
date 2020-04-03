@@ -1,5 +1,5 @@
 use crate::{Interval, UnitIncrement, UnitValue};
-use helgoboss_midi::{SevenBitValue, SEVEN_BIT_VALUE_MAX};
+use helgoboss_midi::U7;
 use std::ops::Sub;
 
 /// A positive discrete number most likely representing a step count.
@@ -76,8 +76,8 @@ impl DiscreteIncrement {
     /// - 127 = decrement; 0 = none; 1 = increment
     /// - 127 > value > 63 results in higher decrement step sizes (64 possible decrement step sizes)
     /// - 1 < value <= 63 results in higher increment step sizes (63 possible increment step sizes)
-    pub fn from_encoder_1_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        assert!(value <= SEVEN_BIT_VALUE_MAX);
+    pub fn from_encoder_1_value(value: U7) -> Result<DiscreteIncrement, ()> {
+        let value = u8::from(value);
         if value == 0 {
             return Err(());
         }
@@ -98,8 +98,8 @@ impl DiscreteIncrement {
     /// - 63 > value >= 0 results in higher decrement step sizes (64 possible decrement step sizes)
     /// - 65 < value <= 127 results in higher increment step sizes (63 possible increment step
     ///   sizes)
-    pub fn from_encoder_2_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        assert!(value <= SEVEN_BIT_VALUE_MAX);
+    pub fn from_encoder_2_value(value: U7) -> Result<DiscreteIncrement, ()> {
+        let value = u8::from(value);
         if value == 64 {
             return Err(());
         }
@@ -120,8 +120,8 @@ impl DiscreteIncrement {
     /// - 65 < value <= 127 results in higher decrement step sizes (63 possible decrement step
     ///   sizes)
     /// - 1 < value <= 64 results in higher increment step sizes (64 possible increment step sizes)
-    pub fn from_encoder_3_value(value: SevenBitValue) -> Result<DiscreteIncrement, ()> {
-        assert!(value <= SEVEN_BIT_VALUE_MAX);
+    pub fn from_encoder_3_value(value: U7) -> Result<DiscreteIncrement, ()> {
+        let value = u8::from(value);
         if value == 0 {
             return Err(());
         }

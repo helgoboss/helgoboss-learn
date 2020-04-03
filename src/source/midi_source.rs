@@ -1,9 +1,8 @@
 use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 
 use helgoboss_midi::{
-    ctrl_number_could_be_part_of_parameter_number_msg, FourteenBitValue, Midi14BitCcMessage,
-    MidiMessage, MidiMessageFactory, MidiMessageKind, MidiParameterNumberMessage, Nibble,
-    SevenBitValue, StructuredMidiMessage, FOURTEEN_BIT_VALUE_MAX, SEVEN_BIT_VALUE_MAX,
+    Channel, ControllerNumber, KeyNumber, Midi14BitCcMessage, MidiMessage, MidiMessageFactory,
+    MidiMessageKind, MidiParameterNumberMessage, StructuredMidiMessage, U14, U7,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,44 +35,44 @@ impl From<MidiClockTransportMessageKind> for MidiMessageKind {
 #[derive(Clone, Debug)]
 pub enum MidiSource {
     NoteVelocity {
-        channel: Option<Nibble>,
-        key_number: Option<SevenBitValue>,
+        channel: Option<Channel>,
+        key_number: Option<KeyNumber>,
     },
     NoteKeyNumber {
-        channel: Option<Nibble>,
+        channel: Option<Channel>,
     },
     // MidiMessageKind::PolyphonicKeyPressure
     PolyphonicKeyPressureAmount {
-        channel: Option<Nibble>,
-        key_number: Option<SevenBitValue>,
+        channel: Option<Channel>,
+        key_number: Option<KeyNumber>,
     },
     // MidiMessageKind::ControlChange
     ControlChangeValue {
-        channel: Option<Nibble>,
-        controller_number: Option<SevenBitValue>,
+        channel: Option<Channel>,
+        controller_number: Option<ControllerNumber>,
         custom_character: SourceCharacter,
     },
     // MidiMessageKind::ProgramChange
     ProgramChangeNumber {
-        channel: Option<Nibble>,
+        channel: Option<Channel>,
     },
     // MidiMessageKind::ChannelPressure
     ChannelPressureAmount {
-        channel: Option<Nibble>,
+        channel: Option<Channel>,
     },
     // MidiMessageKind::PitchBendChange
     PitchBendChangeValue {
-        channel: Option<Nibble>,
+        channel: Option<Channel>,
     },
     // Midi14BitCcMessage
     FourteenBitCcMessageValue {
-        channel: Option<Nibble>,
-        msb_controller_number: Option<SevenBitValue>,
+        channel: Option<Channel>,
+        msb_controller_number: Option<ControllerNumber>,
     },
     // MidiParameterNumberMessage
     ParameterNumberMessageValue {
-        channel: Option<Nibble>,
-        number: Option<FourteenBitValue>,
+        channel: Option<Channel>,
+        number: Option<U14>,
         is_14_bit: bool,
         is_registered: bool,
     },
@@ -125,7 +124,7 @@ impl MidiSource {
                         channel: ch,
                         key_number,
                         velocity,
-                    } if velocity > 0 && matches(ch, *channel) => {
+                    } if velocity > U7::MIN && matches(ch, *channel) => {
                         Some(abs(normalize_7_bit(key_number)))
                     }
                     _ => None,
@@ -223,7 +222,7 @@ impl MidiSource {
                     let unit_value = if msg.is_14_bit() {
                         normalize_14_bit(msg.get_value())
                     } else {
-                        normalize_7_bit(msg.get_value() as u8)
+                        normalize_7_bit(u16::from(msg.get_value()) as u8)
                     };
                     Some(abs(unit_value))
                 }
@@ -259,7 +258,11 @@ impl MidiSource {
                 } => {
                     matches(ch, *channel)
                         && (matches(controller_number, *msb_controller_number)
-                            || matches(controller_number, msb_controller_number.map(|n| n + 32)))
+                            || matches(
+                                controller_number,
+                                msb_controller_number
+                                    .map(|n| n.get_corresponding_14_bit_lsb().unwrap()),
+                            ))
                 }
                 _ => false,
             },
@@ -270,7 +273,7 @@ impl MidiSource {
                     ..
                 } => {
                     matches(ch, *channel)
-                        && ctrl_number_could_be_part_of_parameter_number_msg(controller_number)
+                        && controller_number.can_be_part_of_parameter_number_message()
                 }
                 _ => false,
             },
@@ -298,7 +301,7 @@ impl MidiSource {
             NoteKeyNumber { channel: Some(ch) } => Some(PlainMessage(M::note_on(
                 *ch,
                 denormalize_7_bit(feedback_value),
-                SEVEN_BIT_VALUE_MAX,
+                U7::MAX,
             ))),
             PolyphonicKeyPressureAmount {
                 channel: Some(ch),
@@ -386,7 +389,7 @@ fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> b
 
 fn calc_control_value_from_control_change(
     character: SourceCharacter,
-    cc_control_value: SevenBitValue,
+    cc_control_value: U7,
 ) -> Result<ControlValue, ()> {
     use SourceCharacter::*;
     let result = match character {
@@ -398,20 +401,21 @@ fn calc_control_value_from_control_change(
     Ok(result)
 }
 
-fn normalize_7_bit(value: SevenBitValue) -> UnitValue {
-    UnitValue::new(value as f64 / SEVEN_BIT_VALUE_MAX as f64)
+fn normalize_7_bit<T: Into<u8>>(value: T) -> UnitValue {
+    UnitValue::new(value.into() as f64 / u8::from(U7::MAX) as f64)
 }
 
-fn normalize_14_bit(value: FourteenBitValue) -> UnitValue {
-    UnitValue::new(value as f64 / FOURTEEN_BIT_VALUE_MAX as f64)
+fn normalize_14_bit(value: U14) -> UnitValue {
+    UnitValue::new(u16::from(value) as f64 / u16::from(U14::MAX) as f64)
 }
 
-fn denormalize_7_bit(value: UnitValue) -> SevenBitValue {
-    (value.get_number() * SEVEN_BIT_VALUE_MAX as f64).round() as SevenBitValue
+fn denormalize_7_bit<T: From<U7>>(value: UnitValue) -> T {
+    unsafe { U7::new_unchecked((value.get_number() * u8::from(U7::MAX) as f64).round() as u8) }
+        .into()
 }
 
-fn denormalize_14_bit(value: UnitValue) -> FourteenBitValue {
-    (value.get_number() * FOURTEEN_BIT_VALUE_MAX as f64).round() as FourteenBitValue
+fn denormalize_14_bit(value: UnitValue) -> U14 {
+    unsafe { U14::new_unchecked((value.get_number() * u16::from(U14::MAX) as f64).round() as u16) }
 }
 
 /// This uses `ceil()` instead of `round()`. Should be used for pitch bend because it's centered.
@@ -422,8 +426,8 @@ fn denormalize_14_bit(value: UnitValue) -> FourteenBitValue {
 ///   8191.5. Official center is 8192.
 /// - Example centered: Possible pitch bend values go from -8192 to 8191. Exact center would be
 ///   -0.5. Official center is 0.
-fn denormalize_14_bit_ceil(value: UnitValue) -> FourteenBitValue {
-    (value.get_number() * FOURTEEN_BIT_VALUE_MAX as f64).ceil() as FourteenBitValue
+fn denormalize_14_bit_ceil(value: UnitValue) -> U14 {
+    unsafe { U14::new_unchecked((value.get_number() * u16::from(U14::MAX) as f64).ceil() as u16) }
 }
 
 fn abs(value: UnitValue) -> ControlValue {
@@ -437,7 +441,7 @@ fn rel(increment: DiscreteIncrement) -> ControlValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use helgoboss_midi::{MidiMessageFactory, RawMidiMessage};
+    use helgoboss_midi::{channel as ch, key_number, u7, MidiMessageFactory, RawMidiMessage};
     use MidiSourceValue::*;
 
     #[test]
@@ -448,6 +452,10 @@ mod tests {
             key_number: None,
         };
         // When
-        source.get_control_value(&PlainMessage(RawMidiMessage::note_on(0, 64, 100)));
+        source.get_control_value(&PlainMessage(RawMidiMessage::note_on(
+            ch(0),
+            key_number(64),
+            u7(100),
+        )));
     }
 }
