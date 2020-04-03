@@ -326,7 +326,7 @@ impl MidiSource {
             ))),
             PitchBendChangeValue { channel: Some(ch) } => Some(Plain(M::pitch_bend_change(
                 *ch,
-                denormalize_14_bit_ceil(feedback_value),
+                denormalize_14_bit_centered(feedback_value),
             ))),
             ControlChange14BitValue {
                 channel: Some(ch),
@@ -421,7 +421,7 @@ fn denormalize_14_bit(value: UnitValue) -> U14 {
 ///   8191.5. Official center is 8192.
 /// - Example centered: Possible pitch bend values go from -8192 to 8191. Exact center would be
 ///   -0.5. Official center is 0.
-fn denormalize_14_bit_ceil(value: UnitValue) -> U14 {
+fn denormalize_14_bit_centered(value: UnitValue) -> U14 {
     unsafe { U14::new_unchecked((value.get_number() * u16::from(U14::MAX) as f64).ceil() as u16) }
 }
 
@@ -719,8 +719,25 @@ mod tests {
             None
         );
         assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.0)),
+            Some(plain(control_change(1, 64, 0)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.25)),
+            Some(plain(control_change(1, 64, 32)))
+        );
+        assert_eq!(
             source.feedback::<RawMidiMessage>(uv(0.5)),
             Some(plain(control_change(1, 64, 64)))
+        );
+        // In a center-oriented mapping this would yield 96 instead of 95
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.75)),
+            Some(plain(control_change(1, 64, 95)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(1.0)),
+            Some(plain(control_change(1, 64, 127)))
         );
     }
 
@@ -929,8 +946,24 @@ mod tests {
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.0)),
+            Some(plain(pitch_bend_change(3, 0)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.25)),
+            Some(plain(pitch_bend_change(3, 4096)))
+        );
+        assert_eq!(
             source.feedback::<RawMidiMessage>(uv(0.5)),
             Some(plain(pitch_bend_change(3, 8192)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.75)),
+            Some(plain(pitch_bend_change(3, 12288)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(1.0)),
+            Some(plain(pitch_bend_change(3, 16383)))
         );
     }
 
@@ -1008,8 +1041,25 @@ mod tests {
             abs(1.0)
         );
         assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.0)),
+            Some(cc(control_change_14_bit(1, 7, 0)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.25)),
+            Some(cc(control_change_14_bit(1, 7, 4096)))
+        );
+        assert_eq!(
             source.feedback::<RawMidiMessage>(uv(0.5)),
             Some(cc(control_change_14_bit(1, 7, 8192)))
+        );
+        // In a center-oriented mapping this would yield 12288 instead of 12287
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.75)),
+            Some(cc(control_change_14_bit(1, 7, 12287)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(1.0)),
+            Some(cc(control_change_14_bit(1, 7, 16383)))
         );
     }
 
@@ -1095,8 +1145,59 @@ mod tests {
         assert_eq!(source.control(&pn(nrpn_14_bit(7, 3000, 45))), None);
         assert_eq!(source.control(&pn(nrpn(7, 3000, 24))), None);
         assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.0)),
+            Some(pn(rpn(7, 3000, 0)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.25)),
+            Some(pn(rpn(7, 3000, 32)))
+        );
+        assert_eq!(
             source.feedback::<RawMidiMessage>(uv(0.5)),
             Some(pn(rpn(7, 3000, 64)))
+        );
+        // In a center-oriented mapping this would yield 96 instead of 95
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.75)),
+            Some(pn(rpn(7, 3000, 95)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(1.0)),
+            Some(pn(rpn(7, 3000, 127)))
+        );
+    }
+
+    #[test]
+    fn parameter_number_value_3() {
+        // Given
+        let source = MidiSource::ParameterNumberValue {
+            channel: Some(ch(7)),
+            number: Some(u14(3000)),
+            is_14_bit: Some(true),
+            is_registered: Some(true),
+        };
+        // When
+        // Then
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.0)),
+            Some(pn(rpn_14_bit(7, 3000, 0)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.25)),
+            Some(pn(rpn_14_bit(7, 3000, 4096)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.5)),
+            Some(pn(rpn_14_bit(7, 3000, 8192)))
+        );
+        // In a center-oriented mapping this would yield 12288 instead of 12287
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(0.75)),
+            Some(pn(rpn_14_bit(7, 3000, 12287)))
+        );
+        assert_eq!(
+            source.feedback::<RawMidiMessage>(uv(1.0)),
+            Some(pn(rpn_14_bit(7, 3000, 16383)))
         );
     }
 
