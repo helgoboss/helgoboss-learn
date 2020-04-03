@@ -134,7 +134,9 @@ impl MidiSource {
                     PitchBendChange {
                         channel: ch,
                         pitch_bend_value,
-                    } if matches(ch, *channel) => Some(abs(normalize_14_bit(pitch_bend_value))),
+                    } if matches(ch, *channel) => {
+                        Some(abs(normalize_14_bit_centered(pitch_bend_value)))
+                    }
                     _ => None,
                 },
                 _ => None,
@@ -404,6 +406,14 @@ fn normalize_14_bit(value: U14) -> UnitValue {
     UnitValue::new(u16::from(value) as f64 / u16::from(U14::MAX) as f64)
 }
 
+/// See denormalize_14_bit_centered for an explanation
+fn normalize_14_bit_centered(value: U14) -> UnitValue {
+    if value == U14::MAX {
+        return UnitValue::MAX;
+    }
+    UnitValue::new(u16::from(value) as f64 / U14::COUNT as f64)
+}
+
 fn denormalize_7_bit<T: From<U7>>(value: UnitValue) -> T {
     unsafe { U7::new_unchecked((value.get_number() * u8::from(U7::MAX) as f64).round() as u8) }
         .into()
@@ -413,16 +423,24 @@ fn denormalize_14_bit(value: UnitValue) -> U14 {
     unsafe { U14::new_unchecked((value.get_number() * u16::from(U14::MAX) as f64).round() as u16) }
 }
 
-/// This uses `ceil()` instead of `round()`. Should be used for pitch bend because it's centered.
-/// The center is not an integer (because there's an even number of possible values) and the
-/// official center is considered as the next higher value.
+/// When doing the mapping, this doesn't consider 16383 as maximum value but 16384. However, the
+/// result is clamped again to (0..=16383) ... it's a bit like using `ceil()` instead of `round()`.
+/// The intended effect is that now the range has a discrete center, which it normally doesn't have
+/// because there's an even number of possible values. This way of denormalization is intended to be
+/// used with controllers that are known to be centered. However, as you can imagine, there's also
+/// a side effect: Instead of having an equal distribution, this algorithm slightly favors higher
+/// numbers, so ideally it really should only be used for centered controllers.
 ///
-/// - Example uncentered: Possible pitch bend values go from 0 to 16383. Exact center would be
-///   8191.5. Official center is 8192.
-/// - Example centered: Possible pitch bend values go from -8192 to 8191. Exact center would be
-///   -0.5. Official center is 0.
+/// Take pitch bend change as an example: The official center of pitch bend is considered to be the
+/// ceiling of the actual center value, which is 8192.
+///
+/// - Unsigned view: Possible pitch bend values go from 0 to 16383. Exact center would be 8191.5.
+///   Official center is 8192.
+/// - Signed view: Possible pitch bend values go from -8192 to 8191. Exact center would be -0.5.
+///   Official center is 0.
 fn denormalize_14_bit_centered(value: UnitValue) -> U14 {
-    unsafe { U14::new_unchecked((value.get_number() * u16::from(U14::MAX) as f64).ceil() as u16) }
+    let spread = (value.get_number() * U14::COUNT as f64).round() as u16;
+    unsafe { U14::new_unchecked(spread.min(16383)) }
 }
 
 fn abs(value: UnitValue) -> ControlValue {
@@ -899,10 +917,25 @@ mod tests {
             source.control(&plain(pitch_bend_change(5, 0,))).unwrap(),
             abs(0.0)
         );
-        // TODO What's the best way to translate this exactly to 0.5 (so it's same like feedback)
+        assert_abs_diff_eq!(
+            source.control(&plain(pitch_bend_change(6, 4096,))).unwrap(),
+            abs(0.25)
+        );
         assert_abs_diff_eq!(
             source.control(&plain(pitch_bend_change(6, 8192,))).unwrap(),
-            abs(0.5000305194408838)
+            abs(0.5)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&plain(pitch_bend_change(6, 12288,)))
+                .unwrap(),
+            abs(0.75)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&plain(pitch_bend_change(6, 16383,)))
+                .unwrap(),
+            abs(1.0)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
