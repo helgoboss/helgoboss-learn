@@ -8,18 +8,18 @@ use helgoboss_midi::{
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceCharacter {
-    Range,
-    Switch,
-    Encoder1,
-    Encoder2,
-    Encoder3,
+    Range = 0,
+    Switch = 1,
+    Encoder1 = 2,
+    Encoder2 = 3,
+    Encoder3 = 4,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MidiClockTransportMessageKind {
-    Start,
-    Continue,
-    Stop,
+    Start = 0,
+    Continue = 1,
+    Stop = 2,
 }
 
 impl From<MidiClockTransportMessageKind> for MidiMessageKind {
