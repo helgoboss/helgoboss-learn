@@ -36,9 +36,10 @@ impl ToggleMode {
     /// Takes a target value, interprets and transforms it conforming to toggle mode rules and
     /// returns an appropriate source value that should be sent to the source.
     pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
-        // Toggle switches between min and max target value and when doing feedback we want this to translate
-        // to min source and max source value. But we also allow feedback of values inbetween. Then users can detect
-        // whether a parameter is somewhere between target min and max.
+        // Toggle switches between min and max target value and when doing feedback we want this to
+        // translate to min source and max source value. But we also allow feedback of
+        // values inbetween. Then users can detect whether a parameter is somewhere between
+        // target min and max.
         target_value.map_to_unit_interval_from(&self.target_value_interval)
     }
 }

@@ -222,18 +222,19 @@ impl RelativeMode {
         } else {
             snapped_current_target_value.add_clamping(increment, &self.target_value_interval)
         };
-        // If the target has a step size (= has discrete values), we already made sure at this point that the unit increment
-        // is an exact multiple of that step size. However, it's possible that the current
-        // numerical unit value of the target is in-between two discrete values, not exactly on the
-        // perfect discrete value. The target most likely doesn't care and automatically derives the nearest discrete value
+        // If the target has a step size (= has discrete values), we already made sure at this point
+        // that the unit increment is an exact multiple of that step size. However, it's
+        // possible that the current numerical unit value of the target is in-between two
+        // discrete values, not exactly on the perfect discrete value. The target most
+        // likely doesn't care and automatically derives the nearest discrete value
         // from that imperfect unit value. However,
-        // if we would just apply the increment as-is, we would *again* end up with an imperfect unit value
-        // in-between two discrete values. This is not good and could yield weird effects, one being
-        // that behavior changes in a non-symmetrical way as soon as target bounds are reached.
-        // So we should fix that bad alignment right now and make sure that the target value ends up
-        // on a perfect unit value denoting a concrete discrete value (snap to grid).
-        // round() is the right choice here because floor() has been found to lead to surprising
-        // jumps due to slight numerical inaccuracies.
+        // if we would just apply the increment as-is, we would *again* end up with an imperfect
+        // unit value in-between two discrete values. This is not good and could yield weird
+        // effects, one being that behavior changes in a non-symmetrical way as soon as
+        // target bounds are reached. So we should fix that bad alignment right now and make
+        // sure that the target value ends up on a perfect unit value denoting a concrete
+        // discrete value (snap to grid). round() is the right choice here because floor()
+        // has been found to lead to surprising jumps due to slight numerical inaccuracies.
         let desired_target_value =
             incremented_target_value.snap_to_grid_by_interval_size(grid_interval_size);
         if desired_target_value == current_target_value {

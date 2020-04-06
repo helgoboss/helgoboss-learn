@@ -33,7 +33,7 @@ impl From<MidiClockTransportMessageKind> for MidiMessageKind {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MidiSource {
     NoteVelocity {
         channel: Option<Channel>,

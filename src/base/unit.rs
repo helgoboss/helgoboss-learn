@@ -254,11 +254,7 @@ impl UnitIncrement {
 
     /// Returns the signum (-1 if it's a negative increment, otherwise +1).
     pub fn get_signum(&self) -> i32 {
-        if self.is_positive() {
-            1
-        } else {
-            -1
-        }
+        if self.is_positive() { 1 } else { -1 }
     }
 
     /// Converts this unit increment into a unit value thereby "losing" its direction.
