@@ -5,21 +5,22 @@ use helgoboss_midi::{
     MidiMessageFactory, MidiMessageKind, MidiParameterNumberMessage, StructuredMidiMessage, U14,
     U7,
 };
+use std::convert::{TryFrom, TryInto};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceCharacter {
-    Range = 0,
-    Switch = 1,
-    Encoder1 = 2,
-    Encoder2 = 3,
-    Encoder3 = 4,
+    Range,
+    Switch,
+    Encoder1,
+    Encoder2,
+    Encoder3,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MidiClockTransportMessageKind {
-    Start = 0,
-    Continue = 1,
-    Stop = 2,
+    Start,
+    Continue,
+    Stop,
 }
 
 impl From<MidiClockTransportMessageKind> for MidiMessageKind {
@@ -222,7 +223,7 @@ impl MidiSource {
                     let unit_value = if msg.is_14_bit() {
                         normalize_14_bit(msg.get_value())
                     } else {
-                        normalize_7_bit(u16::from(msg.get_value()) as u8)
+                        normalize_7_bit(U7::try_from(msg.get_value()).unwrap())
                     };
                     Some(abs(unit_value))
                 }
@@ -415,12 +416,11 @@ fn normalize_14_bit_centered(value: U14) -> UnitValue {
 }
 
 fn denormalize_7_bit<T: From<U7>>(value: UnitValue) -> T {
-    unsafe { U7::new_unchecked((value.get_number() * u8::from(U7::MAX) as f64).round() as u8) }
-        .into()
+    unsafe { U7::new_unchecked((value.get() * u8::from(U7::MAX) as f64).round() as u8) }.into()
 }
 
 fn denormalize_14_bit(value: UnitValue) -> U14 {
-    unsafe { U14::new_unchecked((value.get_number() * u16::from(U14::MAX) as f64).round() as u16) }
+    unsafe { U14::new_unchecked((value.get() * u16::from(U14::MAX) as f64).round() as u16) }
 }
 
 /// When doing the mapping, this doesn't consider 16383 as maximum value but 16384. However, the
@@ -439,7 +439,7 @@ fn denormalize_14_bit(value: UnitValue) -> U14 {
 /// - Signed view: Possible pitch bend values go from -8192 to 8191. Exact center would be -0.5.
 ///   Official center is 0.
 fn denormalize_14_bit_centered(value: UnitValue) -> U14 {
-    let spread = (value.get_number() * U14::COUNT as f64).round() as u16;
+    let spread = (value.get() * U14::COUNT as f64).round() as u16;
     unsafe { U14::new_unchecked(spread.min(16383)) }
 }
 
@@ -455,10 +455,8 @@ fn rel(increment: DiscreteIncrement) -> ControlValue {
 mod tests {
     use super::*;
     use approx::*;
-    use helgoboss_midi::test_util::*;
-    use helgoboss_midi::{
-        channel as ch, controller_number as cn, key_number as kn, u14, u7, RawMidiMessage,
-    };
+    use helgoboss_midi::test_util::{channel as ch, controller_number as cn, key_number as kn, *};
+    use helgoboss_midi::RawMidiMessage;
 
     #[test]
     fn note_velocity_1() {

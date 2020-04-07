@@ -27,8 +27,9 @@ impl UnitValue {
         UnitValue(number)
     }
 
+    // TODO Maybe we should rather implement From<UnitValue> for f64? Same with other newtypes.
     /// Returns the underlying number.
-    pub fn get_number(&self) -> f64 {
+    pub fn get(&self) -> f64 {
         self.0
     }
 
@@ -48,9 +49,9 @@ impl UnitValue {
         &self,
         destination_interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let min = destination_interval.get_min().get_number();
+        let min = destination_interval.get_min().get();
         let span = destination_interval.get_span();
-        unsafe { UnitValue::new_unchecked(min + self.get_number() * span) }
+        unsafe { UnitValue::new_unchecked(min + self.get() * span) }
     }
 
     /// Maps this value to the unit interval assuming that this value currently exhausts the given
@@ -73,9 +74,9 @@ impl UnitValue {
         &self,
         destination_interval: &Interval<DiscreteValue>,
     ) -> DiscreteValue {
-        let min = destination_interval.get_min().get_number();
+        let min = destination_interval.get_min().get();
         let span = destination_interval.get_span();
-        DiscreteValue::new(min + (self.get_number() * span as f64).round() as u32)
+        DiscreteValue::new(min + (self.get() * span as f64).round() as u32)
     }
 
     /// Converts this unit value to a unit increment, either negative or positive depending
@@ -137,10 +138,10 @@ impl UnitValue {
         if *self > max {
             return if increment.is_positive() { min } else { max };
         }
-        let sum = self.0 + increment.get_number();
-        if sum < min.get_number() {
+        let sum = self.0 + increment.get();
+        if sum < min.get() {
             max
-        } else if sum > max.get_number() {
+        } else if sum > max.get() {
             min
         } else {
             unsafe { UnitValue::new_unchecked(sum) }
@@ -163,11 +164,7 @@ impl UnitValue {
             return max;
         }
         unsafe {
-            UnitValue::new_unchecked(num::clamp(
-                self.0 + increment.get_number(),
-                min.get_number(),
-                max.get_number(),
-            ))
+            UnitValue::new_unchecked(num::clamp(self.0 + increment.get(), min.get(), max.get()))
         }
     }
 
@@ -243,7 +240,7 @@ impl UnitIncrement {
     }
 
     /// Returns the underlying number.
-    pub fn get_number(&self) -> f64 {
+    pub fn get(&self) -> f64 {
         self.0
     }
 

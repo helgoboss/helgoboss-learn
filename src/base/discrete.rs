@@ -13,7 +13,7 @@ impl DiscreteValue {
     }
 
     /// Returns the underlying number.
-    pub fn get_number(&self) -> u32 {
+    pub fn get(&self) -> u32 {
         self.0
     }
 
@@ -152,7 +152,7 @@ impl DiscreteIncrement {
     }
 
     /// Returns the underlying number.
-    pub fn get_number(&self) -> i32 {
+    pub fn get(&self) -> i32 {
         self.0
     }
 
@@ -170,7 +170,7 @@ impl DiscreteIncrement {
     /// multiple of the given atomic unit value (= minimum step size) and clamping the result if it
     /// exceeds the unit interval.
     pub fn to_unit_increment(&self, atomic_unit_value: UnitValue) -> Option<UnitIncrement> {
-        let positive_large = self.to_value().get_number() as f64 * atomic_unit_value.get_number();
+        let positive_large = self.to_value().get() as f64 * atomic_unit_value.get();
         let unit_value = UnitValue::new(num::clamp(positive_large, 0.0, 1.0));
         unit_value.to_increment(self.get_signum())
     }

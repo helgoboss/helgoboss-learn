@@ -9,7 +9,7 @@ impl AbsDiffEq for UnitValue {
     }
 
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        self.get_number().abs_diff_eq(&other.get_number(), epsilon)
+        self.get().abs_diff_eq(&other.get(), epsilon)
     }
 }
 
