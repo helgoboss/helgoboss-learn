@@ -2,7 +2,7 @@ use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 
 use helgoboss_midi::{
     Channel, ControllerNumber, KeyNumber, MidiControlChange14BitMessage, MidiMessage,
-    MidiMessageFactory, MidiMessageKind, MidiParameterNumberMessage, StructuredMidiMessage, U14,
+    MidiMessageFactory, MidiMessageType, MidiParameterNumberMessage, StructuredMidiMessage, U14,
     U7,
 };
 use std::convert::{TryFrom, TryInto};
@@ -17,19 +17,19 @@ pub enum SourceCharacter {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MidiClockTransportMessageKind {
+pub enum MidiClockTransportMessage {
     Start,
     Continue,
     Stop,
 }
 
-impl From<MidiClockTransportMessageKind> for MidiMessageKind {
-    fn from(kind: MidiClockTransportMessageKind) -> Self {
-        use MidiClockTransportMessageKind::*;
-        match kind {
-            Start => MidiMessageKind::Start,
-            Continue => MidiMessageKind::Continue,
-            Stop => MidiMessageKind::Stop,
+impl From<MidiClockTransportMessage> for MidiMessageType {
+    fn from(msg: MidiClockTransportMessage) -> Self {
+        use MidiClockTransportMessage::*;
+        match msg {
+            Start => MidiMessageType::Start,
+            Continue => MidiMessageType::Continue,
+            Stop => MidiMessageType::Stop,
         }
     }
 }
@@ -43,26 +43,26 @@ pub enum MidiSource {
     NoteKeyNumber {
         channel: Option<Channel>,
     },
-    // MidiMessageKind::PolyphonicKeyPressure
+    // MidiMessageType::PolyphonicKeyPressure
     PolyphonicKeyPressureAmount {
         channel: Option<Channel>,
         key_number: Option<KeyNumber>,
     },
-    // MidiMessageKind::ControlChange
+    // MidiMessageType::ControlChange
     ControlChangeValue {
         channel: Option<Channel>,
         controller_number: Option<ControllerNumber>,
         custom_character: SourceCharacter,
     },
-    // MidiMessageKind::ProgramChange
+    // MidiMessageType::ProgramChange
     ProgramChangeNumber {
         channel: Option<Channel>,
     },
-    // MidiMessageKind::ChannelPressure
+    // MidiMessageType::ChannelPressure
     ChannelPressureAmount {
         channel: Option<Channel>,
     },
-    // MidiMessageKind::PitchBendChange
+    // MidiMessageType::PitchBendChange
     PitchBendChangeValue {
         channel: Option<Channel>,
     },
@@ -78,17 +78,17 @@ pub enum MidiSource {
         is_14_bit: Option<bool>,
         is_registered: Option<bool>,
     },
-    // MidiMessageKind::TimingClock
+    // MidiMessageType::TimingClock
     ClockTempo,
-    // MidiMessageKind::{Start, Continue, Stop}
+    // MidiMessageType::{Start, Continue, Stop}
     ClockTransport {
-        message_kind: MidiClockTransportMessageKind,
+        message: MidiClockTransportMessage,
     },
 }
 
 impl MidiSource {
     /// Determines the appropriate control value from the given MIDI source value. If this source
-    /// doesn't process values of that kind, it returns None.
+    /// doesn't process values of that type, it returns None.
     pub fn control<M: MidiMessage>(&self, value: &MidiSourceValue<M>) -> Option<ControlValue> {
         use MidiSource as S;
         use MidiSourceValue::*;
@@ -229,8 +229,8 @@ impl MidiSource {
                 }
                 _ => None,
             },
-            S::ClockTransport { message_kind } => match value {
-                Plain(msg) if msg.get_kind() == (*message_kind).into() => Some(abs(UnitValue::MAX)),
+            S::ClockTransport { message } => match value {
+                Plain(msg) if msg.get_type() == (*message).into() => Some(abs(UnitValue::MAX)),
                 _ => None,
             },
             S::ClockTempo => match value {
@@ -1284,7 +1284,7 @@ mod tests {
     fn clock_transport() {
         // Given
         let source = MidiSource::ClockTransport {
-            message_kind: MidiClockTransportMessageKind::Continue,
+            message: MidiClockTransportMessage::Continue,
         };
         // When
         // Then
