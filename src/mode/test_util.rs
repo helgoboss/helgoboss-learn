@@ -7,11 +7,11 @@ pub struct TestTarget {
 }
 
 impl Target for TestTarget {
-    fn get_current_value(&self) -> UnitValue {
+    fn current_value(&self) -> UnitValue {
         self.current_value
     }
 
-    fn get_step_size(&self) -> Option<UnitValue> {
+    fn step_size(&self) -> Option<UnitValue> {
         self.step_size
     }
 

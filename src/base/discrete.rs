@@ -33,11 +33,7 @@ impl DiscreteValue {
 
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<DiscreteValue>) -> DiscreteValue {
-        DiscreteValue::new(num::clamp(
-            self.0,
-            interval.get_min().0,
-            interval.get_max().0,
-        ))
+        DiscreteValue::new(num::clamp(self.0, interval.min().0, interval.max().0))
     }
 }
 
@@ -77,7 +73,7 @@ impl DiscreteIncrement {
     /// - 127 > value > 63 results in higher decrement step sizes (64 possible decrement step sizes)
     /// - 1 < value <= 63 results in higher increment step sizes (63 possible increment step sizes)
     pub fn from_encoder_1_value(value: U7) -> Result<DiscreteIncrement, ()> {
-        let value = u8::from(value);
+        let value = value.get();
         if value == 0 {
             return Err(());
         }
@@ -99,7 +95,7 @@ impl DiscreteIncrement {
     /// - 65 < value <= 127 results in higher increment step sizes (63 possible increment step
     ///   sizes)
     pub fn from_encoder_2_value(value: U7) -> Result<DiscreteIncrement, ()> {
-        let value = u8::from(value);
+        let value = value.get();
         if value == 64 {
             return Err(());
         }
@@ -121,7 +117,7 @@ impl DiscreteIncrement {
     ///   sizes)
     /// - 1 < value <= 64 results in higher increment step sizes (64 possible increment step sizes)
     pub fn from_encoder_3_value(value: U7) -> Result<DiscreteIncrement, ()> {
-        let value = u8::from(value);
+        let value = value.get();
         if value == 0 {
             return Err(());
         }
@@ -138,7 +134,7 @@ impl DiscreteIncrement {
     /// Clamps this increment to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<DiscreteValue>) -> DiscreteIncrement {
         let clamped_value = self.to_value().clamp_to_interval(interval);
-        clamped_value.to_increment(self.get_signum()).unwrap()
+        clamped_value.to_increment(self.signum()).unwrap()
     }
 
     /// Converts this discrete increment into a discrete value thereby "losing" its direction.
@@ -162,7 +158,7 @@ impl DiscreteIncrement {
     }
 
     /// Returns the signum (-1 if it's a negative increment, otherwise +1).
-    pub fn get_signum(&self) -> i32 {
+    pub fn signum(&self) -> i32 {
         if self.is_positive() { 1 } else { -1 }
     }
 
@@ -172,7 +168,7 @@ impl DiscreteIncrement {
     pub fn to_unit_increment(&self, atomic_unit_value: UnitValue) -> Option<UnitIncrement> {
         let positive_large = self.to_value().get() as f64 * atomic_unit_value.get();
         let unit_value = UnitValue::new(num::clamp(positive_large, 0.0, 1.0));
-        unit_value.to_increment(self.get_signum())
+        unit_value.to_increment(self.signum())
     }
 }
 

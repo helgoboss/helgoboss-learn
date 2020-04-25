@@ -4,11 +4,11 @@ use crate::{full_unit_interval, negative_if, Interval, Target, Transformation, U
 #[derive(Clone, Debug)]
 pub struct AbsoluteMode<T: Transformation> {
     source_value_interval: Interval<UnitValue>,
-    target_value_interval: Interval<UnitValue>,
+    tarvalue_interval: Interval<UnitValue>,
     jump_interval: Interval<UnitValue>,
-    approach_target_value: bool,
-    reverse_target_value: bool,
-    round_target_value: bool,
+    approach_tarvalue: bool,
+    reverse_tarvalue: bool,
+    round_tarvalue: bool,
     ignore_out_of_range_source_values: bool,
     control_transformation: Option<T>,
     feedback_transformation: Option<T>,
@@ -18,11 +18,11 @@ impl<T: Transformation> Default for AbsoluteMode<T> {
     fn default() -> Self {
         AbsoluteMode {
             source_value_interval: full_unit_interval(),
-            target_value_interval: full_unit_interval(),
+            tarvalue_interval: full_unit_interval(),
             jump_interval: full_unit_interval(),
-            approach_target_value: false,
-            reverse_target_value: false,
-            round_target_value: false,
+            approach_tarvalue: false,
+            reverse_tarvalue: false,
+            round_tarvalue: false,
             ignore_out_of_range_source_values: false,
             control_transformation: None,
             feedback_transformation: None,
@@ -39,25 +39,25 @@ impl<T: Transformation> AbsoluteMode<T> {
             if self.ignore_out_of_range_source_values {
                 return None;
             }
-            let target_bound_value = if control_value < self.source_value_interval.get_min() {
-                self.target_value_interval.get_min()
+            let tarbound_value = if control_value < self.source_value_interval.min() {
+                self.tarvalue_interval.min()
             } else {
-                self.target_value_interval.get_max()
+                self.tarvalue_interval.max()
             };
-            return self.hitting_target_considering_max_jump(target_bound_value, target);
+            return self.hitting_tarconsidering_max_jump(tarbound_value, target);
         }
         // Control value is within source value interval
         let pepped_up_control_value = self.pep_up_control_value(control_value, target);
-        self.hitting_target_considering_max_jump(pepped_up_control_value, target)
+        self.hitting_tarconsidering_max_jump(pepped_up_control_value, target)
     }
 
     /// Takes a target value, interprets and transforms it conforming to absolute mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
-        let potentially_inversed_value = if self.reverse_target_value {
-            target_value.inverse()
+    pub fn feedback(&self, tarvalue: UnitValue) -> UnitValue {
+        let potentially_inversed_value = if self.reverse_tarvalue {
+            tarvalue.inverse()
         } else {
-            target_value
+            tarvalue
         };
         let transformed_value = self
             .feedback_transformation
@@ -65,7 +65,7 @@ impl<T: Transformation> AbsoluteMode<T> {
             .and_then(|t| t.transform(potentially_inversed_value).ok())
             .unwrap_or(potentially_inversed_value);
         transformed_value
-            .map_to_unit_interval_from(&self.target_value_interval)
+            .map_to_unit_interval_from(&self.tarvalue_interval)
             .map_from_unit_interval_to(&self.source_value_interval)
     }
 
@@ -77,21 +77,21 @@ impl<T: Transformation> AbsoluteMode<T> {
             .as_ref()
             .and_then(|t| t.transform(mapped_control_value).ok())
             .unwrap_or(mapped_control_value);
-        let mapped_target_value =
-            transformed_source_value.map_from_unit_interval_to(&self.target_value_interval);
-        let potentially_inversed_target_value = if self.reverse_target_value {
-            mapped_target_value.inverse()
+        let mapped_tarvalue =
+            transformed_source_value.map_from_unit_interval_to(&self.tarvalue_interval);
+        let potentially_inversed_tarvalue = if self.reverse_tarvalue {
+            mapped_tarvalue.inverse()
         } else {
-            mapped_target_value
+            mapped_tarvalue
         };
-        if self.round_target_value {
-            round_to_nearest_discrete_value(target, potentially_inversed_target_value)
+        if self.round_tarvalue {
+            round_to_nearest_discrete_value(target, potentially_inversed_tarvalue)
         } else {
-            potentially_inversed_target_value
+            potentially_inversed_tarvalue
         }
     }
 
-    fn hitting_target_considering_max_jump(
+    fn hitting_tarconsidering_max_jump(
         &self,
         control_value: UnitValue,
         target: &impl Target,
@@ -100,39 +100,39 @@ impl<T: Transformation> AbsoluteMode<T> {
             // No jump restrictions whatsoever
             return Some(control_value);
         }
-        let current_target_value = target.get_current_value();
-        let distance = control_value.calc_distance_from(current_target_value);
-        if distance > self.jump_interval.get_max() {
+        let current_tarvalue = target.current_value();
+        let distance = control_value.calc_distance_from(current_tarvalue);
+        if distance > self.jump_interval.max() {
             // Distance is too large
-            if !self.approach_target_value {
+            if !self.approach_tarvalue {
                 // Scaling not desired. Do nothing.
                 return None;
             }
             // Scaling desired
             let approach_distance = distance.map_from_unit_interval_to(&self.jump_interval);
-            let approach_increment = approach_distance
-                .to_increment(negative_if(control_value < current_target_value))?;
-            let final_target_value =
-                current_target_value.add_clamping(approach_increment, &self.target_value_interval);
-            return self.hit_if_changed(final_target_value, current_target_value);
+            let approach_increment =
+                approach_distance.to_increment(negative_if(control_value < current_tarvalue))?;
+            let final_tarvalue =
+                current_tarvalue.add_clamping(approach_increment, &self.tarvalue_interval);
+            return self.hit_if_changed(final_tarvalue, current_tarvalue);
         }
         // Distance is not too large
-        if distance < self.jump_interval.get_min() {
+        if distance < self.jump_interval.min() {
             return None;
         }
         // Distance is also not too small
-        self.hit_if_changed(control_value, current_target_value)
+        self.hit_if_changed(control_value, current_tarvalue)
     }
 
     fn hit_if_changed(
         &self,
-        desired_target_value: UnitValue,
-        current_target_value: UnitValue,
+        desired_tarvalue: UnitValue,
+        current_tarvalue: UnitValue,
     ) -> Option<UnitValue> {
-        if current_target_value == desired_target_value {
+        if current_tarvalue == desired_tarvalue {
             return None;
         }
-        Some(desired_target_value)
+        Some(desired_tarvalue)
     }
 }
 
@@ -142,7 +142,7 @@ fn round_to_nearest_discrete_value(
 ) -> UnitValue {
     // round() is the right choice here vs. floor() because we don't want slight numerical
     // inaccuracies lead to surprising jumps
-    match target.get_step_size() {
+    match target.step_size() {
         None => approximate_control_value,
         Some(step_size) => approximate_control_value.snap_to_grid_by_interval_size(step_size),
     }
@@ -242,10 +242,10 @@ mod tests {
     }
 
     #[test]
-    fn target_interval() {
+    fn tarinterval() {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
-            target_value_interval: create_unit_value_interval(0.2, 0.6),
+            tarvalue_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
         };
         let target = TestTarget {
@@ -264,11 +264,11 @@ mod tests {
     }
 
     #[test]
-    fn source_and_target_interval() {
+    fn source_and_tarinterval() {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
-            target_value_interval: create_unit_value_interval(0.2, 0.6),
+            tarvalue_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
         };
         let target = TestTarget {
@@ -287,11 +287,11 @@ mod tests {
     }
 
     #[test]
-    fn source_and_target_interval_shifted() {
+    fn source_and_tarinterval_shifted() {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
-            target_value_interval: create_unit_value_interval(0.4, 0.8),
+            tarvalue_interval: create_unit_value_interval(0.4, 0.8),
             ..Default::default()
         };
         let target = TestTarget {
@@ -313,7 +313,7 @@ mod tests {
     fn reverse() {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
-            reverse_target_value: true,
+            reverse_tarvalue: true,
             ..Default::default()
         };
         let target = TestTarget {
@@ -332,7 +332,7 @@ mod tests {
     fn round() {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
-            round_target_value: true,
+            round_tarvalue: true,
             ..Default::default()
         };
         let target = TestTarget {
@@ -401,7 +401,7 @@ mod tests {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             jump_interval: create_unit_value_interval(0.0, 0.2),
-            approach_target_value: true,
+            approach_tarvalue: true,
             ..Default::default()
         };
         let target = TestTarget {
@@ -475,7 +475,7 @@ mod tests {
     fn feedback_reverse() {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
-            reverse_target_value: true,
+            reverse_tarvalue: true,
             ..Default::default()
         };
         // When
@@ -486,11 +486,11 @@ mod tests {
     }
 
     #[test]
-    fn feedback_source_and_target_interval() {
+    fn feedback_source_and_tarinterval() {
         // Given
         let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.8),
-            target_value_interval: create_unit_value_interval(0.4, 1.0),
+            tarvalue_interval: create_unit_value_interval(0.4, 1.0),
             ..Default::default()
         };
         // When

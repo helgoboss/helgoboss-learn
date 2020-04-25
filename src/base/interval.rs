@@ -20,17 +20,17 @@ impl<T: PartialOrd + Copy + Sub> Interval<T> {
     }
 
     /// Returns the low bound of this interval.
-    pub fn get_min(&self) -> T {
+    pub fn min(&self) -> T {
         self.min
     }
 
     /// Returns the high bound of this interval.
-    pub fn get_max(&self) -> T {
+    pub fn max(&self) -> T {
         self.max
     }
 
     /// Returns the distance between the low and high bound of this interval.
-    pub fn get_span(&self) -> T::Output {
+    pub fn span(&self) -> T::Output {
         self.max - self.min
     }
 }

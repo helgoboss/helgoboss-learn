@@ -49,8 +49,8 @@ impl UnitValue {
         &self,
         destination_interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let min = destination_interval.get_min().get();
-        let span = destination_interval.get_span();
+        let min = destination_interval.min().get();
+        let span = destination_interval.span();
         unsafe { UnitValue::new_unchecked(min + self.get() * span) }
     }
 
@@ -58,14 +58,14 @@ impl UnitValue {
     /// source interval. If this value is outside the source interval, this method returns either
     /// 0.0 or 1.0.
     pub fn map_to_unit_interval_from(&self, source_interval: &Interval<UnitValue>) -> UnitValue {
-        let (min, max) = (source_interval.get_min(), source_interval.get_max());
+        let (min, max) = (source_interval.min(), source_interval.max());
         if *self < min {
             return UnitValue::MIN;
         }
         if *self > max {
             return UnitValue::MAX;
         }
-        unsafe { UnitValue::new_unchecked((*self - min) / source_interval.get_span()) }
+        unsafe { UnitValue::new_unchecked((*self - min) / source_interval.span()) }
     }
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).
@@ -74,8 +74,8 @@ impl UnitValue {
         &self,
         destination_interval: &Interval<DiscreteValue>,
     ) -> DiscreteValue {
-        let min = destination_interval.get_min().get();
-        let span = destination_interval.get_span();
+        let min = destination_interval.min().get();
+        let span = destination_interval.span();
         DiscreteValue::new(min + (self.get() * span as f64).round() as u32)
     }
 
@@ -131,7 +131,7 @@ impl UnitValue {
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let (min, max) = (interval.get_min(), interval.get_max());
+        let (min, max) = (interval.min(), interval.max());
         if *self < min {
             return if increment.is_positive() { min } else { max };
         }
@@ -156,7 +156,7 @@ impl UnitValue {
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let (min, max) = (interval.get_min(), interval.get_max());
+        let (min, max) = (interval.min(), interval.max());
         if *self < min {
             return min;
         }
@@ -170,13 +170,7 @@ impl UnitValue {
 
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitValue {
-        unsafe {
-            UnitValue::new_unchecked(num::clamp(
-                self.0,
-                interval.get_min().0,
-                interval.get_max().0,
-            ))
-        }
+        unsafe { UnitValue::new_unchecked(num::clamp(self.0, interval.min().0, interval.max().0)) }
     }
 }
 
@@ -198,13 +192,13 @@ impl Sub for UnitValue {
 
 impl Interval<UnitValue> {
     /// Returns the value which is exactly in the middle between the interval bounds.
-    pub fn get_center(&self) -> UnitValue {
-        unsafe { UnitValue::new_unchecked((self.get_min() + self.get_max()) / 2.0) }
+    pub fn center(&self) -> UnitValue {
+        unsafe { UnitValue::new_unchecked((self.min() + self.max()) / 2.0) }
     }
 
     /// Returns whether this interval is the complete unit interval.
     pub fn is_full(&self) -> bool {
-        self.get_min().is_zero() && self.get_max().is_one()
+        self.min().is_zero() && self.max().is_one()
     }
 }
 
@@ -250,7 +244,7 @@ impl UnitIncrement {
     }
 
     /// Returns the signum (-1 if it's a negative increment, otherwise +1).
-    pub fn get_signum(&self) -> i32 {
+    pub fn signum(&self) -> i32 {
         if self.is_positive() { 1 } else { -1 }
     }
 
@@ -262,6 +256,6 @@ impl UnitIncrement {
     /// Clamps this increment to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitIncrement {
         let clamped_value = self.to_value().clamp_to_interval(interval);
-        clamped_value.to_increment(self.get_signum()).unwrap()
+        clamped_value.to_increment(self.signum()).unwrap()
     }
 }

@@ -9,7 +9,7 @@ pub struct RelativeMode {
     source_value_interval: Interval<UnitValue>,
     step_count_interval: Interval<DiscreteValue>,
     step_size_interval: Interval<UnitValue>,
-    target_value_interval: Interval<UnitValue>,
+    tarvalue_interval: Interval<UnitValue>,
     reverse: bool,
     rotate: bool,
 }
@@ -27,7 +27,7 @@ impl Default for RelativeMode {
             step_size_interval: create_unit_value_interval(0.01, 0.01),
             // Same reasoning like with `step_size_interval`
             step_count_interval: create_discrete_value_interval(1, 1),
-            target_value_interval: full_unit_interval(),
+            tarvalue_interval: full_unit_interval(),
             reverse: false,
             rotate: false,
         }
@@ -51,14 +51,14 @@ impl RelativeMode {
     /// Takes a target value, interprets and transforms it conforming to relative mode rules and
     /// returns an appropriate source value that should be sent to the source. Of course this makes
     /// sense for absolute sources only.
-    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
+    pub fn feedback(&self, tarvalue: UnitValue) -> UnitValue {
         let potentially_inversed_value = if self.reverse {
-            target_value.inverse()
+            tarvalue.inverse()
         } else {
-            target_value
+            tarvalue
         };
         potentially_inversed_value
-            .map_to_unit_interval_from(&self.target_value_interval)
+            .map_to_unit_interval_from(&self.tarvalue_interval)
             .map_from_unit_interval_to(&self.source_value_interval)
     }
 
@@ -84,7 +84,7 @@ impl RelativeMode {
         } else {
             // Target wants absolute values, so we have to do the incrementation ourselves.
             // That gives us lots of options.
-            match target.get_step_size() {
+            match target.step_size() {
                 None => {
                     // Continuous target
                     //
@@ -99,9 +99,9 @@ impl RelativeMode {
                         .map_from_unit_interval_to(&self.step_size_interval);
                     let step_size_increment =
                         step_size_value.to_increment(negative_if(self.reverse))?;
-                    self.hit_target_absolutely_with_unit_increment(
+                    self.hit_tarabsolutely_with_unit_increment(
                         step_size_increment,
-                        self.step_size_interval.get_min(),
+                        self.step_size_interval.min(),
                         target,
                     )
                 }
@@ -116,7 +116,7 @@ impl RelativeMode {
                     // - Target value interval (absolute, important for rotation only, clamped)
                     // - Maximum target step count (enables accurate maximum increment, clamped)
                     let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                    self.hit_discrete_target_absolutely(discrete_increment, step_size, target)
+                    self.hit_discrete_tarabsolutely(discrete_increment, step_size, target)
                 }
             }
         }
@@ -151,7 +151,7 @@ impl RelativeMode {
         } else {
             // Target wants absolute values, so we have to do the incrementation ourselves.
             // That gives us lots of options.
-            match target.get_step_size() {
+            match target.step_size() {
                 None => {
                     // Continuous target
                     //
@@ -167,12 +167,12 @@ impl RelativeMode {
                         discrete_increment
                     };
                     let unit_increment = potentially_reversed_increment
-                        .to_unit_increment(self.step_size_interval.get_min())?;
+                        .to_unit_increment(self.step_size_interval.min())?;
                     let clamped_unit_increment =
                         unit_increment.clamp_to_interval(&self.step_size_interval);
-                    self.hit_target_absolutely_with_unit_increment(
+                    self.hit_tarabsolutely_with_unit_increment(
                         clamped_unit_increment,
-                        self.step_size_interval.get_min(),
+                        self.step_size_interval.min(),
                         target,
                     )
                 }
@@ -187,40 +187,40 @@ impl RelativeMode {
                     // Settings which are necessary in order to support >1-increments:
                     // - Maximum target step count (enables accurate maximum increment, clamped)
                     let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment);
-                    self.hit_discrete_target_absolutely(pepped_up_increment, step_size, target)
+                    self.hit_discrete_tarabsolutely(pepped_up_increment, step_size, target)
                 }
             }
         }
     }
 
-    fn hit_discrete_target_absolutely(
+    fn hit_discrete_tarabsolutely(
         &self,
         discrete_increment: DiscreteIncrement,
-        target_step_size: UnitValue,
+        tarstep_size: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
-        let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
-        self.hit_target_absolutely_with_unit_increment(unit_increment, target_step_size, target)
+        let unit_increment = discrete_increment.to_unit_increment(tarstep_size)?;
+        self.hit_tarabsolutely_with_unit_increment(unit_increment, tarstep_size, target)
     }
 
-    fn hit_target_absolutely_with_unit_increment(
+    fn hit_tarabsolutely_with_unit_increment(
         &self,
         increment: UnitIncrement,
         grid_interval_size: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
-        let current_target_value = target.get_current_value();
+        let current_tarvalue = target.current_value();
         // The add functions doesn't add if the current target value is not within the target
         // interval in the first place. Instead it returns one of the interval bounds. One issue
         // that might occur is that the current target value might only *appear* out-of-range
         // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
         // experiences. Therefore We snap the current target value to grid first.
-        let snapped_current_target_value =
-            current_target_value.snap_to_grid_by_interval_size(grid_interval_size);
-        let incremented_target_value = if self.rotate {
-            snapped_current_target_value.add_rotating(increment, &self.target_value_interval)
+        let snapped_current_tarvalue =
+            current_tarvalue.snap_to_grid_by_interval_size(grid_interval_size);
+        let incremented_tarvalue = if self.rotate {
+            snapped_current_tarvalue.add_rotating(increment, &self.tarvalue_interval)
         } else {
-            snapped_current_target_value.add_clamping(increment, &self.target_value_interval)
+            snapped_current_tarvalue.add_clamping(increment, &self.tarvalue_interval)
         };
         // If the target has a step size (= has discrete values), we already made sure at this point
         // that the unit increment is an exact multiple of that step size. However, it's
@@ -235,12 +235,12 @@ impl RelativeMode {
         // sure that the target value ends up on a perfect unit value denoting a concrete
         // discrete value (snap to grid). round() is the right choice here because floor()
         // has been found to lead to surprising jumps due to slight numerical inaccuracies.
-        let desired_target_value =
-            incremented_target_value.snap_to_grid_by_interval_size(grid_interval_size);
-        if desired_target_value == current_target_value {
+        let desired_tarvalue =
+            incremented_tarvalue.snap_to_grid_by_interval_size(grid_interval_size);
+        if desired_tarvalue == current_tarvalue {
             return None;
         }
-        Some(ControlValue::Absolute(desired_target_value))
+        Some(ControlValue::Absolute(desired_tarvalue))
     }
 
     fn pep_up_discrete_increment(&self, increment: DiscreteIncrement) -> DiscreteIncrement {
@@ -464,10 +464,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min() {
+            fn tarinterval_min() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -486,10 +486,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max() {
+            fn tarinterval_max() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -508,10 +508,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_current_target_value_out_of_range() {
+            fn tarinterval_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -530,10 +530,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_current_target_value_just_appearing_out_of_range() {
+            fn tarinterval_current_tarvalue_just_appearing_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -552,10 +552,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min_rotate() {
+            fn tarinterval_min_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -575,10 +575,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max_rotate() {
+            fn tarinterval_max_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -598,10 +598,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_rotate_current_target_value_out_of_range() {
+            fn tarinterval_rotate_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -822,10 +822,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min() {
+            fn tarinterval_min() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -844,10 +844,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max() {
+            fn tarinterval_max() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -866,10 +866,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_current_target_value_out_of_range() {
+            fn tarinterval_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -888,11 +888,11 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_step_interval_current_target_value_out_of_range() {
+            fn tarinterval_step_interval_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
                     step_count_interval: create_discrete_value_interval(1, 100),
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -911,10 +911,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min_rotate() {
+            fn tarinterval_min_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -934,10 +934,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max_rotate() {
+            fn tarinterval_max_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -957,10 +957,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_rotate_current_target_value_out_of_range() {
+            fn tarinterval_rotate_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -1315,10 +1315,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min() {
+            fn tarinterval_min() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1335,10 +1335,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max() {
+            fn tarinterval_max() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1355,10 +1355,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_current_target_value_out_of_range() {
+            fn tarinterval_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1375,10 +1375,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min_rotate() {
+            fn tarinterval_min_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -1396,10 +1396,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max_rotate() {
+            fn tarinterval_max_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -1417,10 +1417,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_rotate_current_target_value_out_of_range() {
+            fn tarinterval_rotate_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -1438,10 +1438,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_rotate_reverse_current_target_value_out_of_range() {
+            fn tarinterval_rotate_reverse_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
                     ..Default::default()
@@ -1687,10 +1687,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min() {
+            fn tarinterval_min() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1707,10 +1707,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max() {
+            fn tarinterval_max() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1727,10 +1727,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_current_target_value_out_of_range() {
+            fn tarinterval_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1767,11 +1767,11 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_step_interval_current_target_value_out_of_range() {
+            fn tarinterval_step_interval_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
                     step_count_interval: create_discrete_value_interval(1, 100),
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1788,10 +1788,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_min_rotate() {
+            fn tarinterval_min_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -1809,10 +1809,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_max_rotate() {
+            fn tarinterval_max_rotate() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -1830,10 +1830,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_rotate_current_target_value_out_of_range() {
+            fn tarinterval_rotate_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
                 };
@@ -1851,10 +1851,10 @@ mod tests {
             }
 
             #[test]
-            fn target_interval_rotate_reverse_current_target_value_out_of_range() {
+            fn tarinterval_rotate_reverse_current_tarvalue_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    tarvalue_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
                     ..Default::default()
@@ -2028,11 +2028,11 @@ mod tests {
             }
 
             #[test]
-            fn source_and_target_interval() {
+            fn source_and_tarinterval() {
                 // Given
                 let mode = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
-                    target_value_interval: create_unit_value_interval(0.4, 1.0),
+                    tarvalue_interval: create_unit_value_interval(0.4, 1.0),
                     ..Default::default()
                 };
                 // When
