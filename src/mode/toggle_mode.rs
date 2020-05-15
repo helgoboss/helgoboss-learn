@@ -2,13 +2,13 @@ use crate::{full_unit_interval, Interval, Target, UnitValue};
 
 #[derive(Clone, Debug)]
 pub struct ToggleMode {
-    tarvalue_interval: Interval<UnitValue>,
+    target_value_interval: Interval<UnitValue>,
 }
 
 impl Default for ToggleMode {
     fn default() -> Self {
         ToggleMode {
-            tarvalue_interval: full_unit_interval(),
+            target_value_interval: full_unit_interval(),
         }
     }
 }
@@ -20,27 +20,27 @@ impl ToggleMode {
         if control_value.is_zero() {
             return None;
         }
-        let center_tarvalue = self.tarvalue_interval.center();
-        let current_tarvalue = target.current_value();
-        let desired_tarvalue = if current_tarvalue > center_tarvalue {
-            self.tarvalue_interval.min()
+        let center_target_value = self.target_value_interval.center();
+        let current_target_value = target.current_value();
+        let desired_target_value = if current_target_value > center_target_value {
+            self.target_value_interval.min()
         } else {
-            self.tarvalue_interval.max()
+            self.target_value_interval.max()
         };
-        if desired_tarvalue == current_tarvalue {
+        if desired_target_value == current_target_value {
             return None;
         }
-        Some(desired_tarvalue)
+        Some(desired_target_value)
     }
 
     /// Takes a target value, interprets and transforms it conforming to toggle mode rules and
     /// returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, tarvalue: UnitValue) -> UnitValue {
+    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
         // Toggle switches between min and max target value and when doing feedback we want this to
         // translate to min source and max source value. But we also allow feedback of
         // values inbetween. Then users can detect whether a parameter is somewhere between
         // target min and max.
-        tarvalue.map_to_unit_interval_from(&self.tarvalue_interval)
+        target_value.map_to_unit_interval_from(&self.target_value_interval)
     }
 }
 
@@ -53,7 +53,7 @@ mod tests {
     use approx::*;
 
     #[test]
-    fn absolute_value_taroff() {
+    fn absolute_value_target_off() {
         // Given
         let mode = ToggleMode {
             ..Default::default()
@@ -72,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_taron() {
+    fn absolute_value_target_on() {
         // Given
         let mode = ToggleMode {
             ..Default::default()
@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarrather_off() {
+    fn absolute_value_target_rather_off() {
         // Given
         let mode = ToggleMode {
             ..Default::default()
@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarrather_on() {
+    fn absolute_value_target_rather_on() {
         // Given
         let mode = ToggleMode {
             ..Default::default()
@@ -129,10 +129,10 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarinterval_taroff() {
+    fn absolute_value_target_interval_target_off() {
         // Given
         let mode = ToggleMode {
-            tarvalue_interval: create_unit_value_interval(0.3, 0.7),
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
         let target = TestTarget {
@@ -149,10 +149,10 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarinterval_taron() {
+    fn absolute_value_target_interval_target_on() {
         // Given
         let mode = ToggleMode {
-            tarvalue_interval: create_unit_value_interval(0.3, 0.7),
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
         let target = TestTarget {
@@ -169,10 +169,10 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarinterval_tarrather_off() {
+    fn absolute_value_target_interval_target_rather_off() {
         // Given
         let mode = ToggleMode {
-            tarvalue_interval: create_unit_value_interval(0.3, 0.7),
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
         let target = TestTarget {
@@ -189,10 +189,10 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarinterval_tarrather_on() {
+    fn absolute_value_target_interval_target_rather_on() {
         // Given
         let mode = ToggleMode {
-            tarvalue_interval: create_unit_value_interval(0.3, 0.7),
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
         let target = TestTarget {
@@ -209,10 +209,10 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarinterval_tartoo_off() {
+    fn absolute_value_target_interval_target_too_off() {
         // Given
         let mode = ToggleMode {
-            tarvalue_interval: create_unit_value_interval(0.3, 0.7),
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
         let target = TestTarget {
@@ -229,10 +229,10 @@ mod tests {
     }
 
     #[test]
-    fn absolute_value_tarinterval_tartoo_on() {
+    fn absolute_value_target_interval_target_too_on() {
         // Given
         let mode = ToggleMode {
-            tarvalue_interval: create_unit_value_interval(0.3, 0.7),
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
         let target = TestTarget {
@@ -262,10 +262,10 @@ mod tests {
     }
 
     #[test]
-    fn feedback_tarinterval() {
+    fn feedback_target_interval() {
         // Given
         let mode = ToggleMode {
-            tarvalue_interval: create_unit_value_interval(0.3, 0.7),
+            target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
         // When
