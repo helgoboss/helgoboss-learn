@@ -3,15 +3,15 @@ use crate::{full_unit_interval, negative_if, Interval, Target, Transformation, U
 /// Settings for processing control values in absolute mode.
 #[derive(Clone, Debug)]
 pub struct AbsoluteMode<T: Transformation> {
-    source_value_interval: Interval<UnitValue>,
-    target_value_interval: Interval<UnitValue>,
-    jump_interval: Interval<UnitValue>,
-    approach_target_value: bool,
-    reverse_target_value: bool,
-    round_target_value: bool,
-    ignore_out_of_range_source_values: bool,
-    control_transformation: Option<T>,
-    feedback_transformation: Option<T>,
+    pub source_value_interval: Interval<UnitValue>,
+    pub target_value_interval: Interval<UnitValue>,
+    pub jump_interval: Interval<UnitValue>,
+    pub approach_target_value: bool,
+    pub reverse_target_value: bool,
+    pub round_target_value: bool,
+    pub ignore_out_of_range_source_values: bool,
+    pub control_transformation: Option<T>,
+    pub feedback_transformation: Option<T>,
 }
 
 impl<T: Transformation> Default for AbsoluteMode<T> {

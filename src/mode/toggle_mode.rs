@@ -2,7 +2,7 @@ use crate::{full_unit_interval, Interval, Target, UnitValue};
 
 #[derive(Clone, Debug)]
 pub struct ToggleMode {
-    target_value_interval: Interval<UnitValue>,
+    pub target_value_interval: Interval<UnitValue>,
 }
 
 impl Default for ToggleMode {

@@ -6,12 +6,12 @@ use crate::{
 /// Settings for processing control values in relative mode.
 #[derive(Clone, Debug)]
 pub struct RelativeMode {
-    source_value_interval: Interval<UnitValue>,
-    step_count_interval: Interval<DiscreteValue>,
-    step_size_interval: Interval<UnitValue>,
-    target_value_interval: Interval<UnitValue>,
-    reverse: bool,
-    rotate: bool,
+    pub source_value_interval: Interval<UnitValue>,
+    pub step_count_interval: Interval<DiscreteValue>,
+    pub step_size_interval: Interval<UnitValue>,
+    pub target_value_interval: Interval<UnitValue>,
+    pub reverse: bool,
+    pub rotate: bool,
 }
 
 impl Default for RelativeMode {
