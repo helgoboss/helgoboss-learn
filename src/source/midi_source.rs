@@ -1,10 +1,12 @@
 use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 
+use derive_more::Display;
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, ControllerNumber, KeyNumber, ParameterNumberMessage,
     ShortMessage, ShortMessageFactory, ShortMessageType, StructuredShortMessage, U14, U7,
 };
 use std::convert::{TryFrom, TryInto};
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceCharacter {
@@ -15,7 +17,7 @@ pub enum SourceCharacter {
     Encoder3,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Display)]
 pub enum MidiClockTransportMessage {
     Start,
     Continue,

@@ -10,3 +10,4 @@ edition = "2018"
 helgoboss-midi = { version = "0.1.0", path = '../helgoboss-midi-rs' }
 num = "0.2.1"
 approx = "0.3.2"
+derive_more = "0.99.5"
