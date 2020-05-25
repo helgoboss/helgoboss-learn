@@ -1,6 +1,8 @@
 use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
-
 use derive_more::Display;
+use enum_iterator::IntoEnumIterator;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, ControllerNumber, KeyNumber, ParameterNumberMessage,
     ShortMessage, ShortMessageFactory, ShortMessageType, StructuredShortMessage, U14, U7,
@@ -8,20 +10,31 @@ use helgoboss_midi::{
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
+)]
+#[repr(usize)]
 pub enum SourceCharacter {
-    Range,
-    Switch,
-    Encoder1,
-    Encoder2,
-    Encoder3,
+    #[display(fmt = "Knob/Fader")]
+    Range = 0,
+    #[display(fmt = "Switch")]
+    Switch = 1,
+    #[display(fmt = "Encoder (type 1)")]
+    Encoder1 = 2,
+    #[display(fmt = "Encoder (type 2)")]
+    Encoder2 = 3,
+    #[display(fmt = "Encoder (type 3)")]
+    Encoder3 = 4,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Display)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
+)]
+#[repr(usize)]
 pub enum MidiClockTransportMessage {
-    Start,
-    Continue,
-    Stop,
+    Start = 0,
+    Continue = 1,
+    Stop = 2,
 }
 
 impl From<MidiClockTransportMessage> for ShortMessageType {
