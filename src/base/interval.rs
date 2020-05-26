@@ -11,6 +11,10 @@ impl<T: PartialOrd + Copy + Sub> Interval<T> {
     /// Creates an interval. Panics if `min` is greater than `max`.
     pub fn new(min: T, max: T) -> Interval<T> {
         assert!(min <= max);
+        unsafe { Self::new_unchecked(min, max) }
+    }
+
+    pub unsafe fn new_unchecked(min: T, max: T) -> Interval<T> {
         Interval { min, max }
     }
 

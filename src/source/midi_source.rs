@@ -1,4 +1,4 @@
-use crate::{ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
+use crate::{Bpm, ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -25,6 +25,15 @@ pub enum SourceCharacter {
     Encoder2 = 3,
     #[display(fmt = "Encoder (type 3)")]
     Encoder3 = 4,
+}
+
+impl SourceCharacter {
+    /// Returns whether sources with this character emit relative increments instead of absolute
+    /// values.
+    pub fn emits_increments(&self) -> bool {
+        use SourceCharacter::*;
+        matches!(self, Encoder1 | Encoder2 | Encoder3)
+    }
 }
 
 #[derive(
@@ -248,7 +257,7 @@ impl MidiSource {
                 _ => None,
             },
             S::ClockTempo => match value {
-                Tempo { bpm } => Some(abs(UnitValue::new((*bpm - 1.0) / 960.0))),
+                Tempo(bpm) => Some(abs(bpm.to_unit_value())),
                 _ => None,
             },
         }
@@ -391,6 +400,86 @@ impl MidiSource {
             _ => None,
         }
     }
+
+    /// Formats the given absolute control value.
+    ///
+    /// The formatting is done according to how source values of this source type usually look like.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if formatting values is not supported for this source type or if the
+    /// control value type is not compatible with this source type.
+    pub fn format_control_value(&self, value: ControlValue) -> Result<String, &'static str> {
+        use MidiSource::*;
+        let result = match self {
+            ClockTempo => {
+                let bpm = Bpm::from_unit_value(value.as_absolute()?);
+                format!("{:.2}", bpm.get())
+            }
+            ClockTransport { .. } => {
+                return Err("clock transport sources have just one possible control value");
+            }
+            _ => self
+                .convert_control_value_to_midi_value(value.as_absolute()?)?
+                .to_string(),
+        };
+        Ok(result)
+    }
+
+    /// Returns whether this source emits relative increments instead of absolute values.
+    pub fn emits_increments(&self) -> bool {
+        match self {
+            MidiSource::ControlChangeValue {
+                custom_character, ..
+            } if custom_character.emits_increments() => true,
+            _ => false,
+        }
+    }
+
+    /// Converts the given absolute control value to an integer which reflects the MIDI source
+    /// value.
+    ///
+    /// The returned integer is in most cases a 7-bit value. But it can also be 14-bit or even
+    /// negative (if it's an increment). It depends on the source type.
+    ///
+    /// This method is intended for visualization purposes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if it doesn't make sense for this source type (e.g. MIDI clock and sources
+    /// which emit increments).
+    fn convert_control_value_to_midi_value(&self, value: UnitValue) -> Result<i32, &'static str> {
+        use MidiSource::*;
+        let midi_value: i32 = match self {
+            NoteVelocity { .. }
+            | NoteKeyNumber { .. }
+            | PolyphonicKeyPressureAmount { .. }
+            | ProgramChangeNumber { .. }
+            | ChannelPressureAmount { .. } => denormalize_7_bit(value),
+            ControlChangeValue {
+                custom_character, ..
+            } => {
+                if custom_character.emits_increments() {
+                    return Err("not supported for sources which emit increments");
+                }
+                denormalize_7_bit(value)
+            }
+            PitchBendChangeValue { .. } => denormalize_14_bit_centered(value),
+            ControlChange14BitValue { .. } => denormalize_14_bit(value),
+            ParameterNumberValue { is_14_bit, .. } => match *is_14_bit {
+                None => return Err("not clear if 7- or 14-bit"),
+                Some(is_14_bit) => {
+                    if is_14_bit {
+                        denormalize_14_bit(value)
+                    } else {
+                        denormalize_7_bit(value)
+                    }
+                }
+            },
+            ClockTempo | ClockTransport { .. } => return Err("not supported for MIDI clock"),
+        };
+        Ok(midi_value)
+    }
 }
 
 fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> bool {
@@ -434,8 +523,8 @@ fn denormalize_7_bit<T: From<U7>>(value: UnitValue) -> T {
     unsafe { U7::new_unchecked((value.get() * U7::MAX.get() as f64).round() as u8) }.into()
 }
 
-fn denormalize_14_bit(value: UnitValue) -> U14 {
-    unsafe { U14::new_unchecked((value.get() * U14::MAX.get() as f64).round() as u16) }
+fn denormalize_14_bit<T: From<U14>>(value: UnitValue) -> T {
+    unsafe { U14::new_unchecked((value.get() * U14::MAX.get() as f64).round() as u16) }.into()
 }
 
 /// When doing the mapping, this doesn't consider 16383 as maximum value but 16384. However, the
@@ -453,9 +542,9 @@ fn denormalize_14_bit(value: UnitValue) -> U14 {
 ///   Official center is 8192.
 /// - Signed view: Possible pitch bend values go from -8192 to 8191. Exact center would be -0.5.
 ///   Official center is 0.
-fn denormalize_14_bit_centered(value: UnitValue) -> U14 {
+fn denormalize_14_bit_centered<T: From<U14>>(value: UnitValue) -> T {
     let spread = (value.get() * (U14::MAX.get() + 1) as f64).round() as u16;
-    unsafe { U14::new_unchecked(spread.min(16383)) }
+    unsafe { U14::new_unchecked(spread.min(16383)) }.into()
 }
 
 fn abs(value: UnitValue) -> ControlValue {
@@ -519,6 +608,10 @@ mod tests {
         );
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "64"
+        );
     }
 
     #[test]
@@ -582,6 +675,10 @@ mod tests {
         );
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "64"
+        );
     }
 
     #[test]
@@ -654,6 +751,10 @@ mod tests {
         );
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "64"
+        );
     }
 
     #[test]
@@ -728,6 +829,10 @@ mod tests {
         );
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "64"
+        );
     }
 
     #[test]
@@ -818,6 +923,10 @@ mod tests {
         );
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "64"
+        );
     }
 
     #[test]
@@ -885,6 +994,10 @@ mod tests {
         );
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "64"
+        );
     }
 
     #[test]
@@ -976,6 +1089,10 @@ mod tests {
         );
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "8192"
+        );
     }
 
     #[test]
@@ -1063,6 +1180,10 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "8192"
+        );
     }
 
     #[test]
@@ -1163,6 +1284,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert!(source.format_control_value(abs(0.5)).is_err());
     }
 
     #[test]
@@ -1211,6 +1333,10 @@ mod tests {
             source.feedback::<RawShortMessage>(uv(1.0)),
             Some(pn(rpn(7, 3000, 127)))
         );
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "64"
+        );
     }
 
     #[test]
@@ -1244,6 +1370,10 @@ mod tests {
         assert_eq!(
             source.feedback::<RawShortMessage>(uv(1.0)),
             Some(pn(rpn_14_bit(7, 3000, 16383)))
+        );
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "8192"
         );
     }
 
@@ -1293,6 +1423,10 @@ mod tests {
             abs(0.12395833333333334)
         );
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(
+            source.format_control_value(abs(0.5)).expect("bad").as_str(),
+            "480.50"
+        );
     }
 
     #[test]
@@ -1340,6 +1474,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert!(source.format_control_value(abs(0.5)).is_err());
     }
 
     fn abs(value: f64) -> ControlValue {
@@ -1367,6 +1502,6 @@ mod tests {
     }
 
     fn tempo(bpm: f64) -> MidiSourceValue<RawShortMessage> {
-        MidiSourceValue::Tempo { bpm }
+        MidiSourceValue::Tempo(Bpm::new(bpm))
     }
 }
