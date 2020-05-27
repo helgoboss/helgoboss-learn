@@ -426,6 +426,15 @@ impl MidiSource {
         Ok(result)
     }
 
+    /// Interprets the given text as MIDI value and returns the corresponding absolute control
+    /// value.
+    pub fn parse_control_value(&self, text: &str) -> Result<UnitValue, &'static str> {
+        // const double discreteValue = editControlDoubleValue(settingsMinSourceValueEditControl());
+        // const double normalizedValue =
+        // mapping().getSource().normalizeDiscreteValue(discreteValue);
+        todo!()
+    }
+
     /// Returns whether this source emits relative increments instead of absolute values.
     pub fn emits_increments(&self) -> bool {
         match self {
