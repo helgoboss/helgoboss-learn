@@ -12,9 +12,13 @@ impl UnitValue {
     /// 1.0
     pub const MAX: UnitValue = UnitValue(1.0);
 
+    pub fn is_valid(number: f64) -> bool {
+        0.0 <= number && number <= 1.0
+    }
+
     /// Creates the unit value. Panics if the given number is not within the positive unit interval.
     pub fn new(number: f64) -> UnitValue {
-        assert!(0.0 <= number && number <= 1.0);
+        assert!(UnitValue::is_valid(number));
         UnitValue(number)
     }
 
@@ -187,6 +191,18 @@ impl Sub for UnitValue {
 
     fn sub(self, rhs: Self) -> Self::Output {
         self.0 - rhs.0
+    }
+}
+
+impl std::str::FromStr for UnitValue {
+    type Err = &'static str;
+
+    fn from_str(source: &str) -> Result<Self, Self::Err> {
+        let primitive = f64::from_str(source).map_err(|_| "not a valid decimal number")?;
+        if UnitValue::is_valid(primitive) {
+            return Err("not a value between 0.0 and 1.0");
+        }
+        Ok(UnitValue(primitive))
     }
 }
 
