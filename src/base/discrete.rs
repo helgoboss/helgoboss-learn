@@ -8,7 +8,7 @@ pub struct DiscreteValue(u32);
 
 impl DiscreteValue {
     /// Creates the discrete value.
-    pub fn new(value: u32) -> DiscreteValue {
+    pub const fn new(value: u32) -> DiscreteValue {
         DiscreteValue(value)
     }
 
