@@ -24,6 +24,21 @@ impl<T: PartialOrd + Copy + Sub> Interval<T> {
         self.min
     }
 
+    /// Returns a new interval containing the given minimum.
+    ///
+    /// If the given minimum is greater than the current maximum, the maximum will be set to given
+    /// minimum.
+    pub fn with_min(&self, min: T) -> Interval<T> {
+        Interval::new(min, if min <= self.max { self.max } else { min })
+    }
+    /// Returns a new interval containing the given maxium.
+    ///
+    /// If the given maximum is lower than the current minimum, the minimum will be set to the given
+    /// maximum.
+    pub fn with_max(&self, max: T) -> Interval<T> {
+        Interval::new(if self.min <= max { self.min } else { max }, max)
+    }
+
     /// Returns the high bound of this interval.
     pub fn max(&self) -> T {
         self.max
