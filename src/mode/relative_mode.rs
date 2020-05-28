@@ -4,6 +4,19 @@ use crate::{
 };
 
 /// Settings for processing control values in relative mode.
+///
+/// Here's an overview in which cases step counts are used and in which step sizes:
+///   
+/// - Incoming control value is relative:
+///     - Target wants relative increments: Step counts
+///     - Target wants absolute values
+///         - Target is continuous: Step sizes
+///         - Target has a minimum step size: Step counts
+/// - Incoming control value is absolute (= relative one-direction mode)
+///     - Target wants relative increments: Step counts
+///     - Target wants absolute values
+///         - Target is continuous: Step sizes
+///         - Target has a minimum step size: Step counts
 #[derive(Clone, Debug)]
 pub struct RelativeMode {
     pub source_value_interval: Interval<UnitValue>,
