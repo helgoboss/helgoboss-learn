@@ -1,5 +1,6 @@
 use crate::{DiscreteValue, Interval};
 use derive_more::Display;
+use std::convert::TryFrom;
 use std::ops::{Add, Sub};
 
 /// A number within the unit interval `(0.0..=1.0)`.
@@ -192,6 +193,17 @@ impl Sub for UnitValue {
 
     fn sub(self, rhs: Self) -> Self::Output {
         self.0 - rhs.0
+    }
+}
+
+impl TryFrom<f64> for UnitValue {
+    type Error = &'static str;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        if !UnitValue::is_valid(value) {
+            return Err("value is not between 0.0 and 1.0");
+        }
+        Ok(UnitValue(value))
     }
 }
 
