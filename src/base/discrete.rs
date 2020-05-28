@@ -1,9 +1,10 @@
 use crate::{Interval, UnitIncrement, UnitValue};
+use derive_more::Display;
 use helgoboss_midi::U7;
 use std::ops::Sub;
 
 /// A positive discrete number most likely representing a step count.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Display)]
 pub struct DiscreteValue(u32);
 
 impl DiscreteValue {
@@ -34,6 +35,15 @@ impl DiscreteValue {
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<DiscreteValue>) -> DiscreteValue {
         DiscreteValue::new(num::clamp(self.0, interval.min().0, interval.max().0))
+    }
+}
+
+impl std::str::FromStr for DiscreteValue {
+    type Err = &'static str;
+
+    fn from_str(source: &str) -> Result<Self, Self::Err> {
+        let primitive = u32::from_str(source).map_err(|_| "not a valid positive integer")?;
+        Ok(DiscreteValue(primitive))
     }
 }
 

@@ -5,18 +5,24 @@ use crate::{
 
 /// Settings for processing control values in relative mode.
 ///
-/// Here's an overview in which cases step counts are used and in which step sizes:
+/// Here's an overview in which cases step counts are used and in which step sizes.
+/// This is the same, no matter if the source emits relative increments or absolute values
+/// ("relative one-direction mode").
 ///   
-/// - Incoming control value is relative:
-///     - Target wants relative increments: Step counts
-///     - Target wants absolute values
-///         - Target is continuous: Step sizes
-///         - Target has a minimum step size: Step counts
-/// - Incoming control value is absolute (= relative one-direction mode)
-///     - Target wants relative increments: Step counts
-///     - Target wants absolute values
-///         - Target is continuous: Step sizes
-///         - Target has a minimum step size: Step counts
+/// - Target wants relative increments: __Step counts__
+///     - Example: Action with invocation type "Relative"
+///     - Displayed as: "{count} x"
+/// - Target wants absolute values
+///     - Target is continuous: __Step sizes__
+///         - Example: Track volume
+///         - Displayed as: "{size} {unit}"
+///     - Target has a step size
+///         - Target is discrete: __Step counts__
+///             - Example: FX preset, some FX params
+///             - Displayed as: "{count} x" or "{count}" (former if source emits increments)
+///         - Target is not discrete: __Step counts__ TODO Should use step size really!
+///             - Example: Tempo ("preferred" step size of 1 bpm, but still continuous)
+///             - Displayed as: "{size} {unit}"
 #[derive(Clone, Debug)]
 pub struct RelativeMode {
     pub source_value_interval: Interval<UnitValue>,

@@ -1,8 +1,9 @@
 use crate::{DiscreteValue, Interval};
+use derive_more::Display;
 use std::ops::{Add, Sub};
 
 /// A number within the unit interval `(0.0..=1.0)`.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display)]
 pub struct UnitValue(f64);
 
 impl UnitValue {
