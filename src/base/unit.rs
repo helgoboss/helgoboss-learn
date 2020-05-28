@@ -200,7 +200,7 @@ impl std::str::FromStr for UnitValue {
 
     fn from_str(source: &str) -> Result<Self, Self::Err> {
         let primitive = f64::from_str(source).map_err(|_| "not a valid decimal number")?;
-        if UnitValue::is_valid(primitive) {
+        if !UnitValue::is_valid(primitive) {
             return Err("not a value between 0.0 and 1.0");
         }
         Ok(UnitValue(primitive))
