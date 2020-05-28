@@ -1,5 +1,10 @@
 use crate::UnitValue;
 
+// TODO This interface should be improved:
+//  - step_size can be either a hard minimum step size or an optional rounding step size
+//  - There should also be a method which provides all target info at once, with a default
+//    implementation that just delegates to the single methods. Targets can override it for
+//    performance optimization.
 pub trait Target {
     /// Should return the current value of the target.
     fn current_value(&self) -> UnitValue;

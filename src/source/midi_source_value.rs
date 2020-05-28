@@ -22,6 +22,11 @@ impl Bpm {
     /// The maximum possible value (960.0 bpm).
     pub const MAX: Bpm = Bpm(960.0);
 
+    /// Checks if the given value is within the BPM range supported by REAPER.
+    pub fn is_valid(value: f64) -> bool {
+        Bpm::MIN.get() <= value && value <= Bpm::MAX.get()
+    }
+
     /// Creates a BPM value.
     ///
     /// # Panics
@@ -29,7 +34,7 @@ impl Bpm {
     /// This function panics if the given value is not within the BPM range supported by REAPER
     /// `(1.0..=960.0)`.
     pub fn new(value: f64) -> Bpm {
-        assert!(Bpm::MIN.get() <= value && value <= Bpm::MAX.get());
+        assert!(Bpm::is_valid(value));
         Bpm(value)
     }
 
@@ -48,5 +53,17 @@ impl Bpm {
     /// Returns the wrapped value.
     pub const fn get(self) -> f64 {
         self.0
+    }
+}
+
+impl std::str::FromStr for Bpm {
+    type Err = &'static str;
+
+    fn from_str(source: &str) -> Result<Self, Self::Err> {
+        let primitive = f64::from_str(source).map_err(|_| "not a valid decimal number")?;
+        if !Bpm::is_valid(primitive) {
+            return Err("not in the allowed BPM range");
+        }
+        Ok(Bpm(primitive))
     }
 }

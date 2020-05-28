@@ -429,10 +429,21 @@ impl MidiSource {
     /// Interprets the given text as MIDI value and returns the corresponding absolute control
     /// value.
     pub fn parse_control_value(&self, text: &str) -> Result<UnitValue, &'static str> {
-        // const double discreteValue = editControlDoubleValue(settingsMinSourceValueEditControl());
-        // const double normalizedValue =
-        // mapping().getSource().normalizeDiscreteValue(discreteValue);
-        todo!()
+        use MidiSource::*;
+        let unit_value = match self {
+            ClockTempo => {
+                let bpm: Bpm = text.parse()?;
+                bpm.to_unit_value()
+            }
+            ClockTransport { .. } => {
+                return Err("parsing doesn't make sense for clock transport MIDI source");
+            }
+            _ => {
+                let midi_value: i32 = text.parse().map_err(|_| "not a valid integer")?;
+                self.convert_midi_value_to_control_value(midi_value)?
+            }
+        };
+        Ok(unit_value)
     }
 
     /// Returns whether this source emits relative increments instead of absolute values.
@@ -488,6 +499,46 @@ impl MidiSource {
             ClockTempo | ClockTransport { .. } => return Err("not supported for MIDI clock"),
         };
         Ok(midi_value)
+    }
+
+    /// Like `convert_control_value_to_midi_value()` but in other direction.
+    fn convert_midi_value_to_control_value(&self, value: i32) -> Result<UnitValue, &'static str> {
+        use MidiSource::*;
+        let unit_value = match self {
+            NoteVelocity { .. }
+            | NoteKeyNumber { .. }
+            | PolyphonicKeyPressureAmount { .. }
+            | ProgramChangeNumber { .. }
+            | ChannelPressureAmount { .. } => {
+                normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
+            }
+            ControlChangeValue {
+                custom_character, ..
+            } => {
+                if custom_character.emits_increments() {
+                    return Err("not supported for sources which emit increments");
+                }
+                normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
+            }
+            PitchBendChangeValue { .. } => {
+                normalize_14_bit_centered(U14::try_from(value).map_err(|_| "value not 14-bit")?)
+            }
+            ControlChange14BitValue { .. } => {
+                normalize_14_bit(U14::try_from(value).map_err(|_| "value not 14-bit")?)
+            }
+            ParameterNumberValue { is_14_bit, .. } => match *is_14_bit {
+                None => return Err("not clear if 7- or 14-bit"),
+                Some(is_14_bit) => {
+                    if is_14_bit {
+                        normalize_14_bit(U14::try_from(value).map_err(|_| "value not 14-bit")?)
+                    } else {
+                        normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
+                    }
+                }
+            },
+            ClockTempo | ClockTransport { .. } => return Err("not supported for MIDI clock"),
+        };
+        Ok(unit_value)
     }
 }
 
