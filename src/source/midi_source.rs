@@ -7,12 +7,15 @@ use helgoboss_midi::{
     Channel, ControlChange14BitMessage, ControllerNumber, KeyNumber, ParameterNumberMessage,
     ShortMessage, ShortMessageFactory, ShortMessageType, StructuredShortMessage, U14, U7,
 };
+#[cfg(feature = "serde_repr")]
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Display, Formatter};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
 )]
+#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum SourceCharacter {
     #[display(fmt = "Knob/Fader")]
@@ -39,6 +42,7 @@ impl SourceCharacter {
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
 )]
+#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum MidiClockTransportMessage {
     Start = 0,
