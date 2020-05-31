@@ -479,15 +479,8 @@ impl MidiSource {
             | NoteKeyNumber { .. }
             | PolyphonicKeyPressureAmount { .. }
             | ProgramChangeNumber { .. }
-            | ChannelPressureAmount { .. } => denormalize_7_bit(value),
-            ControlChangeValue {
-                custom_character, ..
-            } => {
-                if custom_character.emits_increments() {
-                    return Err("not supported for sources which emit increments");
-                }
-                denormalize_7_bit(value)
-            }
+            | ChannelPressureAmount { .. }
+            | ControlChangeValue { .. } => denormalize_7_bit(value),
             PitchBendChangeValue { .. } => denormalize_14_bit_centered(value),
             ControlChange14BitValue { .. } => denormalize_14_bit(value),
             ParameterNumberValue { is_14_bit, .. } => match *is_14_bit {
