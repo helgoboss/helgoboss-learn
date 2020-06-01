@@ -1,7 +1,7 @@
 use crate::{DiscreteIncrement, UnitValue};
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ControlValue {
     /// Absolute value (e.g. fader position, knob position, key press, key release)
     Absolute(UnitValue),
