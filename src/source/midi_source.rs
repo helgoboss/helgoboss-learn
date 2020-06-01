@@ -481,7 +481,7 @@ impl MidiSource {
             | ProgramChangeNumber { .. }
             | ChannelPressureAmount { .. }
             | ControlChangeValue { .. } => denormalize_7_bit(value),
-            PitchBendChangeValue { .. } => denormalize_14_bit_centered(value),
+            PitchBendChangeValue { .. } => denormalize_14_bit_centered::<i32>(value) - 8192,
             ControlChange14BitValue { .. } => denormalize_14_bit(value),
             ParameterNumberValue { is_14_bit, .. } => match *is_14_bit {
                 None => return Err("not clear if 7- or 14-bit"),
@@ -517,9 +517,9 @@ impl MidiSource {
                 }
                 normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
             }
-            PitchBendChangeValue { .. } => {
-                normalize_14_bit_centered(U14::try_from(value).map_err(|_| "value not 14-bit")?)
-            }
+            PitchBendChangeValue { .. } => normalize_14_bit_centered(
+                U14::try_from(value + 8192).map_err(|_| "value not 14-bit")?,
+            ),
             ControlChange14BitValue { .. } => {
                 normalize_14_bit(U14::try_from(value).map_err(|_| "value not 14-bit")?)
             }
