@@ -27,7 +27,7 @@ impl UnitValue {
 
     /// Creates the unit value. Panics if the given number is not within the positive unit interval.
     pub fn new(number: f64) -> UnitValue {
-        assert!(UnitValue::is_valid(number));
+        assert!(Self::is_valid(number));
         UnitValue(number)
     }
 
@@ -36,7 +36,7 @@ impl UnitValue {
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
     pub unsafe fn new_unchecked(number: f64) -> UnitValue {
-        debug_assert!(0.0 <= number && number <= 1.0);
+        debug_assert!(Self::is_valid(number));
         UnitValue(number)
     }
 
@@ -114,6 +114,7 @@ impl UnitValue {
     /// number of intervals guarantees that each grid interval will have the same size. So if you
     /// have the accurate number of intervals at disposal, use this method.
     pub fn snap_to_grid_by_interval_count(&self, interval_count: u32) -> UnitValue {
+        assert_ne!(interval_count, 0);
         let interval_count = interval_count as f64;
         unsafe { UnitValue::new_unchecked((self.0 * interval_count).round() / interval_count) }
     }
@@ -122,7 +123,12 @@ impl UnitValue {
     // interval size whose multiple doesn't perfectly fit into the unit interval, the last
     // interval will be smaller than all the others. Better don't do that.
     pub fn snap_to_grid_by_interval_size(&self, interval_size: UnitValue) -> UnitValue {
-        unsafe { UnitValue::new_unchecked((self.0 / interval_size.0).round() * interval_size.0) }
+        assert!(!interval_size.is_zero());
+        unsafe {
+            UnitValue::new_unchecked(
+                ((self.0 / interval_size.0).round() * interval_size.0).min(1.0),
+            )
+        }
     }
 
     /// Returns whether this is 0.0.
