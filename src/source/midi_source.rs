@@ -269,6 +269,7 @@ impl MidiSource {
 
     /// Checks if this source consumes the given MIDI message. This is for sources whose events are
     /// composed of multiple MIDI messages, which is 14-bit CC and (N)RPN.
+    // TODO-medium Don't take ShortMessage by reference, never!
     pub fn consumes(&self, msg: &impl ShortMessage) -> bool {
         use MidiSource::*;
         use StructuredShortMessage::*;
