@@ -3,7 +3,7 @@ use derive_more::Display;
 use helgoboss_midi::{ControlChange14BitMessage, ParameterNumberMessage, ShortMessage};
 
 /// Incoming value which might be used to control something
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum MidiSourceValue<M: ShortMessage> {
     Plain(M),
     ParameterNumber(ParameterNumberMessage),
