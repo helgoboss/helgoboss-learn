@@ -114,6 +114,86 @@ pub enum MidiSource {
 }
 
 impl MidiSource {
+    pub fn from_source_value(
+        source_value: MidiSourceValue<impl ShortMessage>,
+    ) -> Option<MidiSource> {
+        use MidiSourceValue::*;
+        let source = match source_value {
+            ParameterNumber(msg) => MidiSource::ParameterNumberValue {
+                channel: Some(msg.channel()),
+                number: Some(msg.number()),
+                is_14_bit: Some(msg.is_14_bit()),
+                is_registered: Some(msg.is_registered()),
+            },
+            ControlChange14Bit(msg) => MidiSource::ControlChange14BitValue {
+                channel: Some(msg.channel()),
+                msb_controller_number: Some(msg.msb_controller_number()),
+            },
+            Tempo(_) => MidiSource::ClockTempo,
+            Plain(msg) => MidiSource::from_short_message(msg)?,
+        };
+        Some(source)
+    }
+
+    fn from_short_message(msg: impl ShortMessage) -> Option<MidiSource> {
+        use StructuredShortMessage::*;
+        let source = match msg.to_structured() {
+            NoteOn {
+                channel,
+                key_number,
+                ..
+            }
+            | NoteOff {
+                channel,
+                key_number,
+                ..
+            } => MidiSource::NoteVelocity {
+                channel: Some(channel),
+                key_number: Some(key_number),
+            },
+            PolyphonicKeyPressure {
+                channel,
+                key_number,
+                ..
+            } => MidiSource::PolyphonicKeyPressureAmount {
+                channel: Some(channel),
+                key_number: Some(key_number),
+            },
+            ControlChange {
+                channel,
+                controller_number,
+                ..
+            } => MidiSource::ControlChangeValue {
+                channel: Some(channel),
+                controller_number: Some(controller_number),
+                custom_character: SourceCharacter::Range,
+            },
+            ProgramChange { channel, .. } => MidiSource::ProgramChangeNumber {
+                channel: Some(channel),
+            },
+            ChannelPressure { channel, .. } => MidiSource::ChannelPressureAmount {
+                channel: Some(channel),
+            },
+            PitchBendChange { channel, .. } => MidiSource::PitchBendChangeValue {
+                channel: Some(channel),
+            },
+            TimingClock => MidiSource::ClockTempo,
+            Start => MidiSource::ClockTransport {
+                message: MidiClockTransportMessage::Start,
+            },
+            Continue => MidiSource::ClockTransport {
+                message: MidiClockTransportMessage::Continue,
+            },
+            Stop => MidiSource::ClockTransport {
+                message: MidiClockTransportMessage::Stop,
+            },
+            _ => {
+                return None;
+            }
+        };
+        Some(source)
+    }
+
     pub fn channel(&self) -> Option<Channel> {
         use MidiSource::*;
         match self {
