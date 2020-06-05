@@ -114,6 +114,22 @@ pub enum MidiSource {
 }
 
 impl MidiSource {
+    pub fn channel(&self) -> Option<Channel> {
+        use MidiSource::*;
+        match self {
+            NoteVelocity { channel, .. }
+            | NoteKeyNumber { channel }
+            | PolyphonicKeyPressureAmount { channel, .. }
+            | ControlChangeValue { channel, .. }
+            | ProgramChangeNumber { channel }
+            | ChannelPressureAmount { channel }
+            | PitchBendChangeValue { channel }
+            | ControlChange14BitValue { channel, .. }
+            | ParameterNumberValue { channel, .. } => *channel,
+            ClockTempo | ClockTransport { .. } => None,
+        }
+    }
+
     /// Determines the appropriate control value from the given MIDI source value. If this source
     /// doesn't process values of that type, it returns None.
     pub fn control<M: ShortMessage>(&self, value: &MidiSourceValue<M>) -> Option<ControlValue> {
