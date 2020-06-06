@@ -1,6 +1,8 @@
 use crate::{DiscreteValue, Interval, UnitValue};
 use derive_more::Display;
-use helgoboss_midi::{ControlChange14BitMessage, ParameterNumberMessage, ShortMessage};
+use helgoboss_midi::{
+    ControlChange14BitMessage, ParameterNumberMessage, ShortMessage, ShortMessageFactory,
+};
 
 /// Incoming value which might be used to control something
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -9,6 +11,20 @@ pub enum MidiSourceValue<M: ShortMessage> {
     ParameterNumber(ParameterNumberMessage),
     ControlChange14Bit(ControlChange14BitMessage),
     Tempo(Bpm),
+}
+
+impl<M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<M> {
+    pub fn to_short_messages(&self) -> [Option<M>; 4] {
+        match self {
+            MidiSourceValue::Plain(msg) => [Some(*msg), None, None, None],
+            MidiSourceValue::ParameterNumber(msg) => msg.to_short_messages(),
+            MidiSourceValue::ControlChange14Bit(msg) => {
+                let inner_shorts = msg.to_short_messages();
+                [Some(inner_shorts[0]), Some(inner_shorts[1]), None, None]
+            }
+            MidiSourceValue::Tempo(_) => [None; 4],
+        }
+    }
 }
 
 /// This represents a tempo measured in beats per minute.
