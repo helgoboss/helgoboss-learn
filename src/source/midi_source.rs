@@ -212,7 +212,7 @@ impl MidiSource {
 
     /// Determines the appropriate control value from the given MIDI source value. If this source
     /// doesn't process values of that type, it returns None.
-    pub fn control<M: ShortMessage>(&self, value: &MidiSourceValue<M>) -> Option<ControlValue> {
+    pub fn control(&self, value: &MidiSourceValue<impl ShortMessage>) -> Option<ControlValue> {
         use MidiSource as S;
         use MidiSourceValue::*;
         use StructuredShortMessage::*;
