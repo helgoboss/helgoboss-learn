@@ -210,6 +210,26 @@ impl MidiSource {
         }
     }
 
+    pub fn character(&self) -> SourceCharacter {
+        use MidiSource::*;
+        match self {
+            NoteVelocity { .. } => SourceCharacter::Switch,
+            // TODO-low Introduce new character "Trigger"
+            ClockTransport { .. } => SourceCharacter::Switch,
+            ControlChangeValue {
+                custom_character, ..
+            } => *custom_character,
+            NoteKeyNumber { .. }
+            | PolyphonicKeyPressureAmount { .. }
+            | ProgramChangeNumber { .. }
+            | ChannelPressureAmount { .. }
+            | PitchBendChangeValue { .. }
+            | ControlChange14BitValue { .. }
+            | ParameterNumberValue { .. }
+            | ClockTempo => SourceCharacter::Range,
+        }
+    }
+
     /// Determines the appropriate control value from the given MIDI source value. If this source
     /// doesn't process values of that type, it returns None.
     pub fn control(&self, value: &MidiSourceValue<impl ShortMessage>) -> Option<ControlValue> {
