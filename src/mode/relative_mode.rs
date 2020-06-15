@@ -236,6 +236,10 @@ impl RelativeMode {
         // experiences. Therefore We snap the current target value to grid first.
         let snapped_current_target_value =
             current_target_value.snap_to_grid_by_interval_size(grid_interval_size);
+        println!(
+            "snapped_current_target_value {:?}",
+            snapped_current_target_value
+        );
         let snapped_target_value_interval = Interval::new(
             self.target_value_interval
                 .min()
@@ -249,6 +253,7 @@ impl RelativeMode {
         } else {
             snapped_current_target_value.add_clamping(increment, &snapped_target_value_interval)
         };
+        println!("desired_target_value {:?}", desired_target_value);
         if desired_target_value == current_target_value {
             return None;
         }
