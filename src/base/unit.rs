@@ -78,6 +78,9 @@ impl UnitValue {
         if *self > max {
             return UnitValue::MAX;
         }
+        if min == max {
+            return min;
+        }
         unsafe { UnitValue::new_unchecked((*self - min) / source_interval.span()) }
     }
 
