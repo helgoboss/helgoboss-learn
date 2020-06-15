@@ -1,5 +1,12 @@
 use crate::UnitValue;
 
+pub enum ControlType {
+    AbsoluteContinuous,
+    AbsoluteContinuousRoundable { rounding_step_size: UnitValue },
+    AbsoluteDiscrete { atomic_step_size: UnitValue },
+    Relative,
+}
+
 // TODO This interface should be improved:
 //  - step_size can be either a hard minimum step size or an optional rounding step size
 //  - There should also be a method which provides all target info at once, with a default
