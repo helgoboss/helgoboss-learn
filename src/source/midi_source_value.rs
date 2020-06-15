@@ -63,7 +63,9 @@ impl Bpm {
 
     /// Creates a BPM value from the given normalized value.
     pub fn to_unit_value(self) -> UnitValue {
-        UnitValue::new((self.get() - Bpm::MIN.get()) / Bpm::MAX.get())
+        let min = Bpm::MIN.get();
+        let span = Bpm::MAX.get() - min;
+        UnitValue::new((self.get() - min) / span)
     }
 
     /// Returns the wrapped value.
