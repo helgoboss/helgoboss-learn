@@ -12,3 +12,6 @@ pub use interval::*;
 
 mod util;
 pub(crate) use util::*;
+
+mod lazy_val;
+pub(crate) use lazy_val::*;
