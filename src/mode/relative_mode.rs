@@ -1,7 +1,7 @@
 use crate::{
-    create_discrete_value_interval, create_unit_value_interval, full_unit_interval, negative_if,
-    ControlType, ControlValue, DiscreteIncrement, DiscreteValue, Interval, Target, UnitIncrement,
-    UnitValue,
+    create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
+    negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue, Interval, Target,
+    UnitIncrement, UnitValue,
 };
 
 /// Settings for processing control values in relative mode.
@@ -14,20 +14,18 @@ use crate::{
 ///     - Example: Action with invocation type "Relative"
 ///     - Displayed as: "{count} x"
 /// - Target wants absolute values
-///     - Target is continuous: __Step sizes__
+///     - Target is continuous, optionally roundable: __Step sizes__
 ///         - Example: Track volume
 ///         - Displayed as: "{size} {unit}"
-///     - Target has a step size
-///         - Target is discrete: __Step counts__
-///             - Example: FX preset, some FX params
-///             - Displayed as: "{count} x" or "{count}" (former if source emits increments)
-///         - Target is not discrete: __Step counts__ TODO Should use step size really!
-///             - Example: Tempo ("preferred" step size of 1 bpm, but still continuous)
-///             - Displayed as: "{size} {unit}"
+///     - Target is discrete: __Step counts__
+///         - Example: FX preset, some FX params
+///         - Displayed as: "{count} x" or "{count}" (former if source emits increments)
 #[derive(Clone, Debug)]
 pub struct RelativeMode {
     pub source_value_interval: Interval<UnitValue>,
-    pub step_count_interval: Interval<DiscreteValue>,
+    /// Negative increments represent fractions (throttling), e.g. -2 fires an increment every
+    /// 2nd time only.
+    pub step_count_interval: Interval<DiscreteIncrement>,
     pub step_size_interval: Interval<UnitValue>,
     pub target_value_interval: Interval<UnitValue>,
     pub reverse: bool,
@@ -46,7 +44,7 @@ impl Default for RelativeMode {
             // such as ugly parameters jumps, especially if the source is not suited for that.
             step_size_interval: create_unit_value_interval(0.01, 0.01),
             // Same reasoning like with `step_size_interval`
-            step_count_interval: create_discrete_value_interval(1, 1),
+            step_count_interval: create_discrete_increment_interval(1, 1),
             target_value_interval: full_unit_interval(),
             reverse: false,
             rotate: false,
@@ -143,10 +141,14 @@ impl RelativeMode {
     }
 
     fn convert_to_discrete_increment(&self, control_value: UnitValue) -> Option<DiscreteIncrement> {
-        let discrete_value = control_value
+        let factor = control_value
             .map_to_unit_interval_from(&self.source_value_interval)
-            .map_from_unit_interval_to_discrete(&self.step_count_interval);
-        discrete_value.to_increment(negative_if(self.reverse))
+            .map_from_unit_interval_to_discrete_increment(&self.step_count_interval);
+        if !factor.is_positive() {
+            // TODO-high In this case we must count every n-th time
+            return None;
+        }
+        factor.to_value().to_increment(negative_if(self.reverse))
     }
 
     // Classic relative mode: We are getting encoder increments from the source.
@@ -193,7 +195,7 @@ impl RelativeMode {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
-                let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment);
+                let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
                 self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, || {
                     target.current_value()
                 })
@@ -206,7 +208,7 @@ impl RelativeMode {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
-                let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment);
+                let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
                 Some(ControlValue::Relative(pepped_up_increment))
             }
         }
@@ -258,13 +260,19 @@ impl RelativeMode {
         Some(ControlValue::Absolute(desired_target_value))
     }
 
-    fn pep_up_discrete_increment(&self, increment: DiscreteIncrement) -> DiscreteIncrement {
-        let clamped_increment = increment.clamp_to_interval(&self.step_count_interval);
-        if self.reverse {
+    fn pep_up_discrete_increment(&self, increment: DiscreteIncrement) -> Option<DiscreteIncrement> {
+        let factor = increment.clamp_to_interval(&self.step_count_interval);
+        if !factor.is_positive() {
+            // TODO-high This must be interpreted as a fraction (throttling)
+            return None;
+        }
+        let clamped_increment = factor.with_direction(increment.signum());
+        let result = if self.reverse {
             clamped_increment.inverse()
         } else {
             clamped_increment
-        }
+        };
+        Some(result)
     }
 }
 
@@ -671,7 +679,7 @@ mod tests {
             fn min_step_count_1() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(4, 100),
+                    step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -695,7 +703,7 @@ mod tests {
             fn min_step_count_2() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(4, 100),
+                    step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -718,7 +726,7 @@ mod tests {
             fn max_step_count_1() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 2),
+                    step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -741,7 +749,7 @@ mod tests {
             fn max_step_count_2() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 2),
+                    step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -902,7 +910,7 @@ mod tests {
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 100),
+                    step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1022,7 +1030,7 @@ mod tests {
             fn min_step_count() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(2, 100),
+                    step_count_interval: create_discrete_increment_interval(2, 100),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1043,7 +1051,7 @@ mod tests {
             fn max_step_count() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 2),
+                    step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1499,7 +1507,7 @@ mod tests {
             fn min_step_count_1() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(4, 8),
+                    step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1520,7 +1528,7 @@ mod tests {
             fn min_step_count_2() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(4, 8),
+                    step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1541,7 +1549,7 @@ mod tests {
             fn max_step_count_1() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 8),
+                    step_count_interval: create_discrete_increment_interval(1, 8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1562,7 +1570,7 @@ mod tests {
             fn max_step_count_2() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 2),
+                    step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1608,7 +1616,7 @@ mod tests {
                 // Given
                 let mode = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
-                    step_count_interval: create_discrete_value_interval(4, 8),
+                    step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1756,7 +1764,7 @@ mod tests {
             fn step_count_interval_exceeded() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 100),
+                    step_count_interval: create_discrete_increment_interval(1, 100),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1777,7 +1785,7 @@ mod tests {
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 100),
+                    step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1910,7 +1918,7 @@ mod tests {
             fn min_step_count() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(2, 8),
+                    step_count_interval: create_discrete_increment_interval(2, 8),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1929,7 +1937,7 @@ mod tests {
             fn max_step_count() {
                 // Given
                 let mode = RelativeMode {
-                    step_count_interval: create_discrete_value_interval(1, 2),
+                    step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1968,7 +1976,7 @@ mod tests {
                 // Given
                 let mode = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
-                    step_count_interval: create_discrete_value_interval(4, 8),
+                    step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
                 let target = TestTarget {

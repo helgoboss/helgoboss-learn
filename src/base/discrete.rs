@@ -1,6 +1,7 @@
 use crate::{Interval, UnitIncrement, UnitValue};
 use derive_more::Display;
 use helgoboss_midi::U7;
+use std::cmp;
 use std::ops::Sub;
 
 /// A positive discrete number most likely representing a step count.
@@ -142,9 +143,26 @@ impl DiscreteIncrement {
     }
 
     /// Clamps this increment to the given interval bounds.
-    pub fn clamp_to_interval(&self, interval: &Interval<DiscreteValue>) -> DiscreteIncrement {
-        let clamped_value = self.to_value().clamp_to_interval(interval);
-        clamped_value.to_increment(self.signum()).unwrap()
+    pub fn clamp_to_interval(
+        &self,
+        destination_interval: &Interval<DiscreteIncrement>,
+    ) -> DiscreteIncrement {
+        // Step count interval: (-3, 4) = -3, -2, -1, 1, 2, 3, 4
+        // -/+ 1 = -3
+        // -/+ 2 = -2
+        // -/+ 7 =  4
+        // TODO-medium Very similar to UnitValue::map_from_unit_interval_to_discrete_increment()
+        let min: i32 = destination_interval.min().get();
+        let max: i32 = destination_interval.max().get();
+        let count: u32 = if min < 0 && max > 0 {
+            (max - min) as u32
+        } else {
+            (max - min) as u32 + 1
+        };
+        let addend: u32 = cmp::max(self.0.abs() as u32 - 1, count - 1);
+        let sum = min + addend as i32;
+        let skip_zero_sum = if min < 0 && sum >= 0 { sum + 1 } else { sum };
+        DiscreteIncrement::new(skip_zero_sum)
     }
 
     /// Converts this discrete increment into a discrete value thereby "losing" its direction.
@@ -155,6 +173,12 @@ impl DiscreteIncrement {
     /// Switches the direction of this increment (makes a positive one negative and vice versa).
     pub fn inverse(&self) -> DiscreteIncrement {
         unsafe { DiscreteIncrement::new_unchecked(-self.0) }
+    }
+
+    pub fn with_direction(&self, signum: i32) -> DiscreteIncrement {
+        let abs = self.0.abs();
+        let inner = if signum >= 0 { abs } else { -1 * abs };
+        DiscreteIncrement::new(inner)
     }
 
     /// Returns the underlying number.
@@ -190,7 +214,7 @@ impl Sub for DiscreteIncrement {
     }
 }
 
-/// Convenience method for creating an interval of discrete values.
-pub fn create_discrete_value_interval(min: u32, max: u32) -> Interval<DiscreteValue> {
-    Interval::new(DiscreteValue::new(min), DiscreteValue::new(max))
+/// Convenience method for creating an interval of discrete increments.
+pub fn create_discrete_increment_interval(min: i32, max: i32) -> Interval<DiscreteIncrement> {
+    Interval::new(DiscreteIncrement::new(min), DiscreteIncrement::new(max))
 }

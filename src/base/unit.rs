@@ -1,4 +1,4 @@
-use crate::{DiscreteValue, Interval};
+use crate::{DiscreteIncrement, DiscreteValue, Interval};
 use derive_more::Display;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -93,6 +93,23 @@ impl UnitValue {
         let min = destination_interval.min().get();
         let span = destination_interval.span();
         DiscreteValue::new(min + (self.get() * span as f64).round() as u32)
+    }
+
+    pub fn map_from_unit_interval_to_discrete_increment(
+        &self,
+        destination_interval: &Interval<DiscreteIncrement>,
+    ) -> DiscreteIncrement {
+        let min: i32 = destination_interval.min().get();
+        let max: i32 = destination_interval.max().get();
+        let count: u32 = if min < 0 && max > 0 {
+            (max - min) as u32
+        } else {
+            (max - min) as u32 + 1
+        };
+        let addend: u32 = (self.0 * (count - 1) as f64).round() as _;
+        let sum = min + addend as i32;
+        let skip_zero_sum = if min < 0 && sum >= 0 { sum + 1 } else { sum };
+        DiscreteIncrement::new(skip_zero_sum)
     }
 
     /// Converts this unit value to a unit increment, either negative or positive depending
@@ -302,5 +319,31 @@ impl UnitIncrement {
     pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitIncrement {
         let clamped_value = self.to_value().clamp_to_interval(interval);
         clamped_value.to_increment(self.signum()).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_from_unit_interval_to_discrete_increment() {
+        // Given
+        // Contains elements -3, -2, -1, 1, 2, 3, 4
+        let interval = Interval::new(DiscreteIncrement::new(-3), DiscreteIncrement::new(4));
+        // When
+        // Then
+        assert_eq!(
+            UnitValue::new(0.0).map_from_unit_interval_to_discrete_increment(&interval),
+            DiscreteIncrement::new(-3)
+        );
+        assert_eq!(
+            UnitValue::new(0.5).map_from_unit_interval_to_discrete_increment(&interval),
+            DiscreteIncrement::new(1)
+        );
+        assert_eq!(
+            UnitValue::new(1.0).map_from_unit_interval_to_discrete_increment(&interval),
+            DiscreteIncrement::new(4)
+        );
     }
 }
