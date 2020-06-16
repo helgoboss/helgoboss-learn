@@ -28,4 +28,6 @@ pub trait Target {
     /// Should return `true` if this target doesn't want to be hit with absolute values but with
     /// relative increments.
     fn wants_increments(&self) -> bool;
+
+    // fn control_type(&self) -> ControlType;
 }

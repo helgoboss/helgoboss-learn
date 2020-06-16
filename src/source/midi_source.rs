@@ -1265,7 +1265,7 @@ mod tests {
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
-            "8192"
+            "0"
         );
     }
 
@@ -1594,7 +1594,7 @@ mod tests {
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_abs_diff_eq!(
             source.control(&tempo(120.0)).unwrap(),
-            abs(0.12395833333333334)
+            abs(0.12408759124087591)
         );
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
         assert_eq!(
