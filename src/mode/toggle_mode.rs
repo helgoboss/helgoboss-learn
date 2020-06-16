@@ -48,8 +48,8 @@ impl ToggleMode {
 mod tests {
     use super::*;
 
-    use crate::create_unit_value_interval;
     use crate::mode::test_util::TestTarget;
+    use crate::{create_unit_value_interval, ControlType};
     use approx::*;
 
     #[test]
@@ -59,9 +59,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::MIN,
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -78,9 +77,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::MAX,
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -97,9 +95,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.333),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -116,9 +113,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -136,9 +132,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.3),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -156,9 +151,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.7),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -176,9 +170,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.4),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -196,9 +189,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.6),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -216,9 +208,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::MIN,
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -236,9 +227,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::MAX,
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then

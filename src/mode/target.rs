@@ -1,33 +1,37 @@
 use crate::UnitValue;
 
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ControlType {
+    /// Targets which don't have a step size.
     AbsoluteContinuous,
+    /// Imagine a "tempo" target: Musical tempo is continuous in nature and still you might want to
+    /// offer the possibility to round on fraction-less bpm values. Discrete and continuous at the
+    /// same time.
     AbsoluteContinuousRoundable { rounding_step_size: UnitValue },
+    /// Targets which have a grid of discrete values.
     AbsoluteDiscrete { atomic_step_size: UnitValue },
+    /// If target wants to be controlled via relative increments.
     Relative,
 }
 
-// TODO This interface should be improved:
-//  - step_size can be either a hard minimum step size or an optional rounding step size
-//  - There should also be a method which provides all target info at once, with a default
-//    implementation that just delegates to the single methods. Targets can override it for
-//    performance optimization.
+impl ControlType {
+    pub fn is_relative(&self) -> bool {
+        *self == ControlType::Relative
+    }
+
+    pub fn step_size(&self) -> Option<UnitValue> {
+        use ControlType::*;
+        match self {
+            AbsoluteContinuousRoundable { rounding_step_size } => Some(*rounding_step_size),
+            AbsoluteDiscrete { atomic_step_size } => Some(*atomic_step_size),
+            _ => None,
+        }
+    }
+}
+
 pub trait Target {
     /// Should return the current value of the target.
     fn current_value(&self) -> UnitValue;
 
-    /// Should return the atomic (minimum) step size if any. Usually there is some if the target
-    /// character is discrete. But some targets are continuous in nature and it still makes sense to
-    /// offer discrete steps. Imagine a "tempo" target: Musical tempo is continuous in nature and
-    /// still you might want to offer the possibility to round on fraction-less bpm values.
-    ///
-    /// The returned value must be part of the unit interval (something from 0.0 to 1.0). Although 1
-    /// doesn't really make sense because that would mean the step size covers the whole interval.
-    fn step_size(&self) -> Option<UnitValue>;
-
-    /// Should return `true` if this target doesn't want to be hit with absolute values but with
-    /// relative increments.
-    fn wants_increments(&self) -> bool;
-
-    // fn control_type(&self) -> ControlType;
+    fn control_type(&self) -> ControlType;
 }

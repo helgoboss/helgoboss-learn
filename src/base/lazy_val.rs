@@ -10,6 +10,10 @@
 use lazycell::LazyCell;
 use std::cell::RefCell;
 
+pub trait Lazy<T> {
+    fn get(&self) -> &T;
+}
+
 pub struct LazyVal<T, F>
 where
     F: FnOnce() -> T,
@@ -28,8 +32,13 @@ where
             evaluate: RefCell::new(Some(evaluate)),
         }
     }
+}
 
-    pub fn get(&self) -> &T {
+impl<T, F> Lazy<T> for LazyVal<T, F>
+where
+    F: FnOnce() -> T,
+{
+    fn get(&self) -> &T {
         if let Some(cached) = self.cached.borrow() {
             cached
         } else {

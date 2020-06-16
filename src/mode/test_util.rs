@@ -1,9 +1,8 @@
-use crate::{Target, UnitValue};
+use crate::{ControlType, Target, UnitValue};
 
 pub struct TestTarget {
-    pub step_size: Option<UnitValue>,
     pub current_value: UnitValue,
-    pub wants_increments: bool,
+    pub control_type: ControlType,
 }
 
 impl Target for TestTarget {
@@ -11,11 +10,7 @@ impl Target for TestTarget {
         self.current_value
     }
 
-    fn step_size(&self) -> Option<UnitValue> {
-        self.step_size
-    }
-
-    fn wants_increments(&self) -> bool {
-        self.wants_increments
+    fn control_type(&self) -> ControlType {
+        self.control_type
     }
 }

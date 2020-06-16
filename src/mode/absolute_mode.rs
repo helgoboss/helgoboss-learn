@@ -1,4 +1,7 @@
-use crate::{full_unit_interval, negative_if, Interval, Target, Transformation, UnitValue};
+use crate::{
+    full_unit_interval, negative_if, ControlType, Interval, Lazy, LazyVal, Target, Transformation,
+    UnitValue,
+};
 
 /// Settings for processing control values in absolute mode.
 #[derive(Clone, Debug)]
@@ -85,7 +88,10 @@ impl<T: Transformation> AbsoluteMode<T> {
             mapped_target_value
         };
         if self.round_target_value {
-            round_to_nearest_discrete_value(target, potentially_inversed_target_value)
+            round_to_nearest_discrete_value(
+                &target.control_type(),
+                potentially_inversed_target_value,
+            )
         } else {
             potentially_inversed_target_value
         }
@@ -137,15 +143,18 @@ impl<T: Transformation> AbsoluteMode<T> {
 }
 
 fn round_to_nearest_discrete_value(
-    target: &impl Target,
+    control_type: &ControlType,
     approximate_control_value: UnitValue,
 ) -> UnitValue {
     // round() is the right choice here vs. floor() because we don't want slight numerical
     // inaccuracies lead to surprising jumps
-    match target.step_size() {
-        None => approximate_control_value,
-        Some(step_size) => approximate_control_value.snap_to_grid_by_interval_size(step_size),
-    }
+    use ControlType::*;
+    let step_size = match control_type {
+        AbsoluteContinuousRoundable { rounding_step_size } => *rounding_step_size,
+        AbsoluteDiscrete { atomic_step_size } => *atomic_step_size,
+        _ => return approximate_control_value,
+    };
+    approximate_control_value.snap_to_grid_by_interval_size(step_size)
 }
 
 #[cfg(test)]
@@ -163,9 +172,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -182,9 +190,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: true,
+            control_type: ControlType::Relative,
         };
         // When
         // Then
@@ -202,9 +209,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -226,9 +232,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -249,9 +254,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -272,9 +276,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -295,9 +298,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -317,9 +319,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -336,9 +337,10 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: Some(UnitValue::new(0.2)),
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteDiscrete {
+                atomic_step_size: UnitValue::new(0.2),
+            },
         };
         // When
         // Then
@@ -359,9 +361,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.5),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -383,9 +384,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.5),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -405,9 +405,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.5),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -428,9 +427,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
@@ -447,9 +445,8 @@ mod tests {
             ..Default::default()
         };
         let target = TestTarget {
-            step_size: None,
             current_value: UnitValue::new(0.777),
-            wants_increments: false,
+            control_type: ControlType::AbsoluteContinuous,
         };
         // When
         // Then
