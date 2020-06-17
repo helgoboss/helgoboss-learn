@@ -1,3 +1,4 @@
+use std::cmp;
 use std::ops::Sub;
 
 /// An interval which has an inclusive min and inclusive max value.
@@ -14,13 +15,20 @@ impl<T: PartialOrd + Copy + Sub> Interval<T> {
         Interval { min, max }
     }
 
+    pub fn new_auto(bound_1: T, bound_2: T) -> Interval<T> {
+        Interval {
+            min: if bound_1 <= bound_2 { bound_1 } else { bound_2 },
+            max: if bound_1 >= bound_2 { bound_1 } else { bound_2 },
+        }
+    }
+
     /// Checks if this interval contains the given value.
     pub fn contains(&self, value: T) -> bool {
         self.min <= value && value <= self.max
     }
 
     /// Returns the low bound of this interval.
-    pub fn min(&self) -> T {
+    pub fn min_val(&self) -> T {
         self.min
     }
 
@@ -40,7 +48,7 @@ impl<T: PartialOrd + Copy + Sub> Interval<T> {
     }
 
     /// Returns the high bound of this interval.
-    pub fn max(&self) -> T {
+    pub fn max_val(&self) -> T {
         self.max
     }
 

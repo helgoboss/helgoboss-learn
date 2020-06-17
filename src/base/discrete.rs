@@ -35,7 +35,11 @@ impl DiscreteValue {
 
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<DiscreteValue>) -> DiscreteValue {
-        DiscreteValue::new(num::clamp(self.0, interval.min().0, interval.max().0))
+        DiscreteValue::new(num::clamp(
+            self.0,
+            interval.min_val().0,
+            interval.max_val().0,
+        ))
     }
 }
 
@@ -152,8 +156,8 @@ impl DiscreteIncrement {
         // -/+ 2 = -2
         // -/+ 7 =  4
         // TODO-medium Very similar to UnitValue::map_from_unit_interval_to_discrete_increment()
-        let min: i32 = destination_interval.min().get();
-        let max: i32 = destination_interval.max().get();
+        let min: i32 = destination_interval.min_val().get();
+        let max: i32 = destination_interval.max_val().get();
         let count: u32 = if min < 0 && max > 0 {
             (max - min) as u32
         } else {

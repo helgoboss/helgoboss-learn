@@ -19,7 +19,8 @@ use crate::{
 ///         - Displayed as: "{size} {unit}"
 ///     - Target is discrete: __Step counts__
 ///         - Example: FX preset, some FX params
-///         - Displayed as: "{count} x" or "{count}" (former if source emits increments)
+///         - Displayed as: "{count} x" or "{count}" (former if source emits increments) TODO I
+///           think now we have only the "x" variant
 #[derive(Clone, Debug)]
 pub struct RelativeMode {
     pub source_value_interval: Interval<UnitValue>,
@@ -116,7 +117,7 @@ impl RelativeMode {
                     step_size_value.to_increment(negative_if(self.reverse))?;
                 self.hit_target_absolutely_with_unit_increment(
                     step_size_increment,
-                    self.step_size_interval.min(),
+                    self.step_size_interval.min_val(),
                     target.current_value(),
                 )
             }
@@ -196,12 +197,12 @@ impl RelativeMode {
                     discrete_increment
                 };
                 let unit_increment = potentially_reversed_increment
-                    .to_unit_increment(self.step_size_interval.min())?;
+                    .to_unit_increment(self.step_size_interval.min_val())?;
                 let clamped_unit_increment =
                     unit_increment.clamp_to_interval(&self.step_size_interval);
                 self.hit_target_absolutely_with_unit_increment(
                     clamped_unit_increment,
-                    self.step_size_interval.min(),
+                    self.step_size_interval.min_val(),
                     target.current_value(),
                 )
             }
@@ -262,10 +263,10 @@ impl RelativeMode {
             current_target_value.snap_to_grid_by_interval_size(grid_interval_size);
         let snapped_target_value_interval = Interval::new(
             self.target_value_interval
-                .min()
+                .min_val()
                 .snap_to_grid_by_interval_size(grid_interval_size),
             self.target_value_interval
-                .max()
+                .max_val()
                 .snap_to_grid_by_interval_size(grid_interval_size),
         );
         let desired_target_value = if self.rotate {
@@ -315,7 +316,7 @@ impl RelativeMode {
             return (true, direction_signum);
         }
         let positive_increment_counter = self.increment_counter.abs() as u32;
-        if positive_increment_counter % nth == 0 {
+        if positive_increment_counter >= nth {
             // After having waited for a few increments, fire again.
             return (true, direction_signum);
         }

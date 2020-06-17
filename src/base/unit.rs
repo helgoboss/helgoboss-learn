@@ -5,6 +5,94 @@ use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::ops::{Add, Sub};
 
+/// A number within the negative and positive unit interval `(-1.0..=1.0)`.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display)]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(try_from = "f64")
+)]
+pub struct SymmetricUnitValue(f64);
+
+impl SymmetricUnitValue {
+    /// -1.0
+    pub const MIN: SymmetricUnitValue = SymmetricUnitValue(-1.0);
+
+    /// 1.0
+    pub const MAX: SymmetricUnitValue = SymmetricUnitValue(1.0);
+
+    pub fn is_valid(number: f64) -> bool {
+        -1.0 <= number && number <= 1.0
+    }
+
+    /// Creates the symmetric unit value. Panics if the given number is not within the positive unit
+    /// interval.
+    pub fn new(number: f64) -> SymmetricUnitValue {
+        assert!(Self::is_valid(number));
+        SymmetricUnitValue(number)
+    }
+
+    /// Returns the underlying number.
+    pub fn get(&self) -> f64 {
+        self.0
+    }
+
+    pub fn abs(&self) -> UnitValue {
+        UnitValue::new(self.0.abs())
+    }
+
+    pub fn map_to_positive_unit_interval(&self) -> UnitValue {
+        UnitValue::new((self.0 + 1.0) / 2.0)
+    }
+
+    pub fn clamp_to_positive_unit_interval(&self) -> UnitValue {
+        if self.0 < 0.0 {
+            UnitValue::MIN
+        } else {
+            UnitValue::new(self.0)
+        }
+    }
+}
+
+impl Add for SymmetricUnitValue {
+    type Output = f64;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.0 + rhs.0
+    }
+}
+
+impl Sub for SymmetricUnitValue {
+    type Output = f64;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.0 - rhs.0
+    }
+}
+
+impl TryFrom<f64> for SymmetricUnitValue {
+    type Error = &'static str;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        if !SymmetricUnitValue::is_valid(value) {
+            return Err("value is not between -1.0 and 1.0");
+        }
+        Ok(SymmetricUnitValue(value))
+    }
+}
+
+impl std::str::FromStr for SymmetricUnitValue {
+    type Err = &'static str;
+
+    fn from_str(source: &str) -> Result<Self, Self::Err> {
+        let primitive = f64::from_str(source).map_err(|_| "not a valid decimal number")?;
+        if !SymmetricUnitValue::is_valid(primitive) {
+            return Err("not a value between -1.0 and 1.0");
+        }
+        Ok(SymmetricUnitValue(primitive))
+    }
+}
+
 /// A number within the unit interval `(0.0..=1.0)`.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display)]
 #[cfg_attr(
@@ -46,6 +134,14 @@ impl UnitValue {
         self.0
     }
 
+    pub fn to_symmetric(&self) -> SymmetricUnitValue {
+        SymmetricUnitValue::new(self.0)
+    }
+
+    pub fn map_to_symmetric_unit_interval(&self) -> SymmetricUnitValue {
+        SymmetricUnitValue::new((self.0 * 2.0) - 1.0)
+    }
+
     /// Tests if this value is within the given interval.
     pub fn is_within_interval(&self, interval: &Interval<UnitValue>) -> bool {
         interval.contains(*self)
@@ -62,7 +158,7 @@ impl UnitValue {
         &self,
         destination_interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let min = destination_interval.min().get();
+        let min = destination_interval.min_val().get();
         let span = destination_interval.span();
         unsafe { UnitValue::new_unchecked(min + self.get() * span) }
     }
@@ -71,7 +167,7 @@ impl UnitValue {
     /// source interval. If this value is outside the source interval, this method returns either
     /// 0.0 or 1.0.
     pub fn map_to_unit_interval_from(&self, source_interval: &Interval<UnitValue>) -> UnitValue {
-        let (min, max) = (source_interval.min(), source_interval.max());
+        let (min, max) = (source_interval.min_val(), source_interval.max_val());
         if *self < min {
             return UnitValue::MIN;
         }
@@ -90,7 +186,7 @@ impl UnitValue {
         &self,
         destination_interval: &Interval<DiscreteValue>,
     ) -> DiscreteValue {
-        let min = destination_interval.min().get();
+        let min = destination_interval.min_val().get();
         let span = destination_interval.span();
         DiscreteValue::new(min + (self.get() * span as f64).round() as u32)
     }
@@ -99,8 +195,8 @@ impl UnitValue {
         &self,
         destination_interval: &Interval<DiscreteIncrement>,
     ) -> DiscreteIncrement {
-        let min: i32 = destination_interval.min().get();
-        let max: i32 = destination_interval.max().get();
+        let min: i32 = destination_interval.min_val().get();
+        let max: i32 = destination_interval.max_val().get();
         let count: u32 = if min < 0 && max > 0 {
             (max - min) as u32
         } else {
@@ -170,7 +266,7 @@ impl UnitValue {
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let (min, max) = (interval.min(), interval.max());
+        let (min, max) = (interval.min_val(), interval.max_val());
         if *self < min {
             return if increment.is_positive() { min } else { max };
         }
@@ -195,7 +291,7 @@ impl UnitValue {
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
     ) -> UnitValue {
-        let (min, max) = (interval.min(), interval.max());
+        let (min, max) = (interval.min_val(), interval.max_val());
         if *self < min {
             return min;
         }
@@ -209,7 +305,13 @@ impl UnitValue {
 
     /// Clamps this value to the given interval bounds.
     pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitValue {
-        unsafe { UnitValue::new_unchecked(num::clamp(self.0, interval.min().0, interval.max().0)) }
+        unsafe {
+            UnitValue::new_unchecked(num::clamp(
+                self.0,
+                interval.min_val().0,
+                interval.max_val().0,
+            ))
+        }
     }
 }
 
@@ -255,12 +357,12 @@ impl std::str::FromStr for UnitValue {
 impl Interval<UnitValue> {
     /// Returns the value which is exactly in the middle between the interval bounds.
     pub fn center(&self) -> UnitValue {
-        unsafe { UnitValue::new_unchecked((self.min() + self.max()) / 2.0) }
+        unsafe { UnitValue::new_unchecked((self.min_val() + self.max_val()) / 2.0) }
     }
 
     /// Returns whether this interval is the complete unit interval.
     pub fn is_full(&self) -> bool {
-        self.min().is_zero() && self.max().is_one()
+        self.min_val().is_zero() && self.max_val().is_one()
     }
 }
 

@@ -42,10 +42,10 @@ impl<T: Transformation> AbsoluteMode<T> {
             if self.ignore_out_of_range_source_values {
                 return None;
             }
-            let target_bound_value = if control_value < self.source_value_interval.min() {
-                self.target_value_interval.min()
+            let target_bound_value = if control_value < self.source_value_interval.min_val() {
+                self.target_value_interval.min_val()
             } else {
-                self.target_value_interval.max()
+                self.target_value_interval.max_val()
             };
             return self.hitting_target_considering_max_jump(target_bound_value, target);
         }
@@ -108,7 +108,7 @@ impl<T: Transformation> AbsoluteMode<T> {
         }
         let current_target_value = target.current_value();
         let distance = control_value.calc_distance_from(current_target_value);
-        if distance > self.jump_interval.max() {
+        if distance > self.jump_interval.max_val() {
             // Distance is too large
             if !self.approach_target_value {
                 // Scaling not desired. Do nothing.
@@ -123,7 +123,7 @@ impl<T: Transformation> AbsoluteMode<T> {
             return self.hit_if_changed(final_target_value, current_target_value);
         }
         // Distance is not too large
-        if distance < self.jump_interval.min() {
+        if distance < self.jump_interval.min_val() {
             return None;
         }
         // Distance is also not too small

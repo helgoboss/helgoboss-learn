@@ -23,9 +23,9 @@ impl ToggleMode {
         let center_target_value = self.target_value_interval.center();
         let current_target_value = target.current_value();
         let desired_target_value = if current_target_value > center_target_value {
-            self.target_value_interval.min()
+            self.target_value_interval.min_val()
         } else {
-            self.target_value_interval.max()
+            self.target_value_interval.max_val()
         };
         if desired_target_value == current_target_value {
             return None;
