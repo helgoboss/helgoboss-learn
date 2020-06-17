@@ -147,26 +147,30 @@ impl DiscreteIncrement {
     }
 
     /// Clamps this increment to the given interval bounds.
-    pub fn clamp_to_interval(
-        &self,
-        destination_interval: &Interval<DiscreteIncrement>,
-    ) -> DiscreteIncrement {
+    pub fn clamp_to_interval(&self, interval: &Interval<DiscreteIncrement>) -> DiscreteIncrement {
         // Step count interval: (-3, 4) = -3, -2, -1, 1, 2, 3, 4
-        // -/+ 1 = -3
-        // -/+ 2 = -2
-        // -/+ 7 =  4
-        // TODO-medium Very similar to UnitValue::map_from_unit_interval_to_discrete_increment()
-        let min: i32 = destination_interval.min_val().get();
-        let max: i32 = destination_interval.max_val().get();
+        // 1 => -3
+        // 2 => -2
+        // 7 =>  4
+        // 8 =>  4
+        // Step count interval: (4, 10) = 4, 5, 6, 7, 8, 9, 10
+        // 1 => 4
+        // 2 => 5
+        // 7 => 10
+        // 8 => 10
+        let positive_increment = self.0.abs() as u32;
+        let min: i32 = interval.min_val().get();
+        let max: i32 = interval.max_val().get();
         let count: u32 = if min < 0 && max > 0 {
             (max - min) as u32
         } else {
             (max - min) as u32 + 1
         };
-        let addend: u32 = cmp::max(self.0.abs() as u32 - 1, count - 1);
+        let addend: u32 = cmp::min(positive_increment - 1, count - 1);
         let sum = min + addend as i32;
         let skip_zero_sum = if min < 0 && sum >= 0 { sum + 1 } else { sum };
-        DiscreteIncrement::new(skip_zero_sum)
+        let clamped = cmp::min(skip_zero_sum, max);
+        DiscreteIncrement::new(clamped)
     }
 
     /// Converts this discrete increment into a discrete value thereby "losing" its direction.

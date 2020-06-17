@@ -70,8 +70,8 @@ impl RelativeMode {
         target: &impl Target,
     ) -> Option<ControlValue> {
         match control_value {
-            ControlValue::Relative(i) => self.process_relative(i, target),
-            ControlValue::Absolute(v) => self.process_absolute(v, target),
+            ControlValue::Relative(i) => self.control_relative(i, target),
+            ControlValue::Absolute(v) => self.control_absolute(v, target),
         }
     }
 
@@ -90,7 +90,7 @@ impl RelativeMode {
     }
 
     /// Relative one-direction mode (convert absolute button presses to relative increments)
-    fn process_absolute(
+    fn control_absolute(
         &mut self,
         control_value: UnitValue,
         target: &impl Target,
@@ -175,7 +175,7 @@ impl RelativeMode {
     // We don't need source min/max config in this case. At least I can't think of a use case
     // where one would like to totally ignore especially slow or especially fast encoder movements,
     // I guess that possibility would rather cause irritation.
-    fn process_relative(
+    fn control_relative(
         &mut self,
         discrete_increment: DiscreteIncrement,
         target: &impl Target,
@@ -741,10 +741,11 @@ mod tests {
                 assert!(mode.control(rel(-10), &target).is_none());
                 assert!(mode.control(rel(-2), &target).is_none());
                 assert!(mode.control(rel(-1), &target).is_none());
-                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.2));
-                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), abs(0.2));
-                assert_abs_diff_eq!(mode.control(rel(6), &target).unwrap(), abs(0.3));
-                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), abs(0.5));
+                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.20)); // 4x
+                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), abs(0.25)); // 5x
+                assert_abs_diff_eq!(mode.control(rel(4), &target).unwrap(), abs(0.35)); // 7x
+                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), abs(0.65)); // 13x
+                assert_abs_diff_eq!(mode.control(rel(100), &target).unwrap(), abs(1.00)); // 100x
             }
 
             #[test]
@@ -762,9 +763,9 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), abs(0.5));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), abs(0.8));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), abs(0.8));
+                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), abs(0.35)); // 13x
+                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), abs(0.75)); // 5x
+                assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), abs(0.8)); // 4x
                 assert!(mode.control(rel(1), &target).is_none());
                 assert!(mode.control(rel(2), &target).is_none());
                 assert!(mode.control(rel(10), &target).is_none());
@@ -791,6 +792,34 @@ mod tests {
                 assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.05));
                 assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), abs(0.10));
                 assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), abs(0.10));
+            }
+
+            #[test]
+            fn max_step_count_throttle() {
+                // Given
+                let mut mode = RelativeMode {
+                    step_count_interval: create_discrete_increment_interval(-2, -2),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: UnitValue::MIN,
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(0.05),
+                    },
+                };
+                // When
+                // Then
+                // No effect because already min
+                assert!(mode.control(rel(-10), &target).is_none());
+                assert!(mode.control(rel(-10), &target).is_none());
+                assert!(mode.control(rel(-10), &target).is_none());
+                assert!(mode.control(rel(-10), &target).is_none());
+                // Every 2nd time
+                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.05));
+                assert!(mode.control(rel(1), &target).is_none());
+                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.05));
+                assert!(mode.control(rel(2), &target).is_none());
+                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), abs(0.05));
             }
 
             #[test]
@@ -1066,12 +1095,12 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), rel(-1));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), rel(-1));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), rel(-1));
-                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), rel(1));
-                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), rel(1));
-                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), rel(1));
+                assert_eq!(mode.control(rel(-10), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(-2), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(-1), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(1), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(2), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(10), &target), Some(rel(1)));
             }
 
             #[test]
@@ -1087,12 +1116,47 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), rel(-10));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), rel(-2));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), rel(-2));
-                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), rel(2));
-                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), rel(2));
-                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), rel(10));
+                assert_eq!(mode.control(rel(-10), &target), Some(rel(-11)));
+                assert_eq!(mode.control(rel(-2), &target), Some(rel(-3)));
+                assert_eq!(mode.control(rel(-1), &target), Some(rel(-2)));
+                assert_eq!(mode.control(rel(1), &target), Some(rel(2)));
+                assert_eq!(mode.control(rel(2), &target), Some(rel(3)));
+                assert_eq!(mode.control(rel(10), &target), Some(rel(11)));
+            }
+
+            #[test]
+            fn min_step_count_throttle() {
+                // Given
+                let mut mode = RelativeMode {
+                    step_count_interval: create_discrete_increment_interval(-4, 100),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: UnitValue::MIN,
+                    control_type: ControlType::Relative,
+                };
+                // When
+                // Then
+                // So intense that reaching speedup area
+                assert_eq!(mode.control(rel(-10), &target), Some(rel(-6)));
+                // Every 3rd time
+                assert_eq!(mode.control(rel(-2), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(-2), &target), None);
+                assert_eq!(mode.control(rel(-2), &target), None);
+                assert_eq!(mode.control(rel(-2), &target), Some(rel(-1)));
+                // Every 4th time (but fired before)
+                assert_eq!(mode.control(rel(-1), &target), None);
+                assert_eq!(mode.control(rel(-1), &target), None);
+                assert_eq!(mode.control(rel(-1), &target), None);
+                assert_eq!(mode.control(rel(-1), &target), Some(rel(-1)));
+                // Direction change
+                assert_eq!(mode.control(rel(1), &target), Some(rel(1)));
+                // Every 3rd time (but fired before)
+                assert_eq!(mode.control(rel(2), &target), None);
+                assert_eq!(mode.control(rel(2), &target), None);
+                assert_eq!(mode.control(rel(2), &target), Some(rel(1)));
+                // So intense that reaching speedup area
+                assert_eq!(mode.control(rel(10), &target), Some(rel(6)));
             }
 
             #[test]
@@ -1108,12 +1172,48 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), rel(-2));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), rel(-2));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), rel(-1));
-                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), rel(1));
-                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), rel(2));
-                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), rel(2));
+                assert_eq!(mode.control(rel(-10), &target), Some(rel(-2)));
+                assert_eq!(mode.control(rel(-2), &target), Some(rel(-2)));
+                assert_eq!(mode.control(rel(-1), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(1), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(2), &target), Some(rel(2)));
+                assert_eq!(mode.control(rel(10), &target), Some(rel(2)));
+            }
+
+            #[test]
+            fn max_step_count_throttle() {
+                // Given
+                let mut mode = RelativeMode {
+                    step_count_interval: create_discrete_increment_interval(-10, -4),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: UnitValue::MIN,
+                    control_type: ControlType::Relative,
+                };
+                // When
+                // Then
+                // Every 4th time
+                assert_eq!(mode.control(rel(-10), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(-10), &target), None);
+                assert_eq!(mode.control(rel(-10), &target), None);
+                assert_eq!(mode.control(rel(-10), &target), None);
+                assert_eq!(mode.control(rel(-10), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(-10), &target), None);
+                assert_eq!(mode.control(rel(-10), &target), None);
+                assert_eq!(mode.control(rel(-10), &target), None);
+                // Every 10th time
+                assert_eq!(mode.control(rel(1), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), Some(rel(1)));
             }
 
             #[test]
@@ -1129,12 +1229,12 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), rel(1));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), rel(1));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), rel(1));
-                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), rel(-1));
-                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), rel(-1));
-                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), rel(-1));
+                assert_eq!(mode.control(rel(-10), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(-2), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(-1), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(1), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(2), &target), Some(rel(-1)));
+                assert_eq!(mode.control(rel(10), &target), Some(rel(-1)));
             }
         }
     }
@@ -1570,6 +1670,30 @@ mod tests {
                 assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.2));
                 assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.3));
                 assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.4));
+            }
+
+            #[test]
+            fn min_step_count_throttle() {
+                // Given
+                let mut mode = RelativeMode {
+                    step_count_interval: create_discrete_increment_interval(-4, -4),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: UnitValue::MIN,
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(0.05),
+                    },
+                };
+                // When
+                // Then
+                assert!(mode.control(abs(0.0), &target).is_none());
+                // Every 4th time
+                assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.05));
+                assert!(mode.control(abs(0.1), &target).is_none());
+                assert!(mode.control(abs(0.1), &target).is_none());
+                assert!(mode.control(abs(0.1), &target).is_none());
+                assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.05));
             }
 
             #[test]
