@@ -119,6 +119,17 @@ impl UnitValue {
         UnitValue(number)
     }
 
+    pub fn new_clamped(number: f64) -> UnitValue {
+        let actual_number = if number > 1.0 {
+            1.0
+        } else if number < 0.0 {
+            0.0
+        } else {
+            number
+        };
+        UnitValue(actual_number)
+    }
+
     /// Checks preconditions only in debug build. Should only be used if you want to squeeze out
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
@@ -239,7 +250,9 @@ impl UnitValue {
     // interval size whose multiple doesn't perfectly fit into the unit interval, the last
     // interval will be smaller than all the others. Better don't do that.
     pub fn snap_to_grid_by_interval_size(&self, interval_size: UnitValue) -> UnitValue {
-        assert!(!interval_size.is_zero());
+        if interval_size.is_zero() {
+            return *self;
+        }
         unsafe {
             UnitValue::new_unchecked(
                 ((self.0 / interval_size.0).round() * interval_size.0).min(1.0),
