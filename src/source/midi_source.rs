@@ -628,12 +628,7 @@ impl MidiSource {
             }
             ControlChangeValue {
                 custom_character, ..
-            } => {
-                if custom_character.emits_increments() {
-                    return Err("not supported for sources which emit increments");
-                }
-                normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
-            }
+            } => normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?),
             PitchBendChangeValue { .. } => normalize_14_bit_centered(
                 U14::try_from(value + 8192).map_err(|_| "value not 14-bit")?,
             ),
