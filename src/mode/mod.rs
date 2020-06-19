@@ -8,6 +8,8 @@ mod toggle_mode;
 pub use toggle_mode::*;
 mod transformation;
 pub use transformation::*;
+mod press_duration_processor;
+pub use press_duration_processor::*;
 
 #[cfg(test)]
 mod test_util;

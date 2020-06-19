@@ -1,7 +1,8 @@
 use crate::{
-    full_unit_interval, negative_if, ControlType, Interval, Lazy, LazyVal, Target, Transformation,
-    UnitValue,
+    full_unit_interval, negative_if, ControlType, Interval, Lazy, LazyVal, PressDurationProcessor,
+    Target, Transformation, UnitValue,
 };
+use std::time::Duration;
 
 /// Settings for processing control values in absolute mode.
 #[derive(Clone, Debug)]
@@ -9,6 +10,8 @@ pub struct AbsoluteMode<T: Transformation> {
     pub source_value_interval: Interval<UnitValue>,
     pub target_value_interval: Interval<UnitValue>,
     pub jump_interval: Interval<UnitValue>,
+    // TODO-low Not cool to make this public. Maybe derive a builder for this beast.
+    pub press_duration_processor: PressDurationProcessor,
     pub approach_target_value: bool,
     pub reverse_target_value: bool,
     pub round_target_value: bool,
@@ -23,6 +26,7 @@ impl<T: Transformation> Default for AbsoluteMode<T> {
             source_value_interval: full_unit_interval(),
             target_value_interval: full_unit_interval(),
             jump_interval: full_unit_interval(),
+            press_duration_processor: Default::default(),
             approach_target_value: false,
             reverse_target_value: false,
             round_target_value: false,
@@ -36,8 +40,13 @@ impl<T: Transformation> Default for AbsoluteMode<T> {
 impl<T: Transformation> AbsoluteMode<T> {
     /// Processes the given control value in absolute mode and maybe returns an appropriate target
     /// value.
-    pub fn control(&self, control_value: UnitValue, target: &impl Target) -> Option<UnitValue> {
-        if !control_value.is_within_interval(&self.source_value_interval) {
+    pub fn control(&mut self, control_value: UnitValue, target: &impl Target) -> Option<UnitValue> {
+        let control_value = self.press_duration_processor.process(control_value)?;
+        if control_value.is_within_interval(&self.source_value_interval) {
+            // Control value is within source value interval
+            let pepped_up_control_value = self.pep_up_control_value(control_value, target);
+            self.hitting_target_considering_max_jump(pepped_up_control_value, target)
+        } else {
             // Control value is outside source value interval
             if self.ignore_out_of_range_source_values {
                 return None;
@@ -49,9 +58,6 @@ impl<T: Transformation> AbsoluteMode<T> {
             };
             return self.hitting_target_considering_max_jump(target_bound_value, target);
         }
-        // Control value is within source value interval
-        let pepped_up_control_value = self.pep_up_control_value(control_value, target);
-        self.hitting_target_considering_max_jump(pepped_up_control_value, target)
     }
 
     /// Takes a target value, interprets and transforms it conforming to absolute mode rules and
@@ -168,7 +174,7 @@ mod tests {
     #[test]
     fn default() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             ..Default::default()
         };
         let target = TestTarget {
@@ -186,7 +192,7 @@ mod tests {
     #[test]
     fn relative_target() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             ..Default::default()
         };
         let target = TestTarget {
@@ -204,7 +210,7 @@ mod tests {
     #[test]
     fn source_interval() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
         };
@@ -226,7 +232,7 @@ mod tests {
     #[test]
     fn source_interval_ignore() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             ignore_out_of_range_source_values: true,
             ..Default::default()
@@ -249,7 +255,7 @@ mod tests {
     #[test]
     fn target_interval() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             target_value_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
         };
@@ -270,7 +276,7 @@ mod tests {
     #[test]
     fn source_and_target_interval() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             target_value_interval: create_unit_value_interval(0.2, 0.6),
             ..Default::default()
@@ -292,7 +298,7 @@ mod tests {
     #[test]
     fn source_and_target_interval_shifted() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
             target_value_interval: create_unit_value_interval(0.4, 0.8),
             ..Default::default()
@@ -314,7 +320,7 @@ mod tests {
     #[test]
     fn reverse() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             reverse_target_value: true,
             ..Default::default()
         };
@@ -332,7 +338,7 @@ mod tests {
     #[test]
     fn round() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             round_target_value: true,
             ..Default::default()
         };
@@ -356,7 +362,7 @@ mod tests {
     #[test]
     fn jump_interval() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             jump_interval: create_unit_value_interval(0.0, 0.2),
             ..Default::default()
         };
@@ -379,7 +385,7 @@ mod tests {
     #[test]
     fn jump_interval_min() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             jump_interval: create_unit_value_interval(0.1, 1.0),
             ..Default::default()
         };
@@ -399,7 +405,7 @@ mod tests {
     #[test]
     fn jump_interval_approach() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             jump_interval: create_unit_value_interval(0.0, 0.2),
             approach_target_value: true,
             ..Default::default()
@@ -422,7 +428,7 @@ mod tests {
     #[test]
     fn transformation_ok() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             control_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
             ..Default::default()
         };
@@ -440,7 +446,7 @@ mod tests {
     #[test]
     fn transformation_err() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             control_transformation: Some(TestTransformation::new(|_| Err(()))),
             ..Default::default()
         };
@@ -458,7 +464,7 @@ mod tests {
     #[test]
     fn feedback() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             ..Default::default()
         };
         // When
@@ -471,7 +477,7 @@ mod tests {
     #[test]
     fn feedback_reverse() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             reverse_target_value: true,
             ..Default::default()
         };
@@ -485,7 +491,7 @@ mod tests {
     #[test]
     fn feedback_source_and_target_interval() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.8),
             target_value_interval: create_unit_value_interval(0.4, 1.0),
             ..Default::default()
@@ -501,7 +507,7 @@ mod tests {
     #[test]
     fn feedback_transformation() {
         // Given
-        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             feedback_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
             ..Default::default()
         };
