@@ -1,17 +1,21 @@
 use std::cmp;
+use std::fmt::Debug;
 use std::ops::Sub;
 
 /// An interval which has an inclusive min and inclusive max value.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub struct Interval<T: PartialOrd + Copy + Sub> {
+pub struct Interval<T: PartialOrd + Copy + Sub + Debug> {
     min: T,
     max: T,
 }
 
-impl<T: PartialOrd + Copy + Sub> Interval<T> {
+impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     /// Creates an interval. Panics if `min` is greater than `max`.
     pub fn new(min: T, max: T) -> Interval<T> {
-        assert!(min <= max);
+        assert!(
+            min <= max,
+            format!("min = {:?} is greater than max = {:?}", min, max)
+        );
         Interval { min, max }
     }
 

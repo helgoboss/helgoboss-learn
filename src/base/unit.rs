@@ -28,7 +28,10 @@ impl SymmetricUnitValue {
     /// Creates the symmetric unit value. Panics if the given number is not within the positive unit
     /// interval.
     pub fn new(number: f64) -> SymmetricUnitValue {
-        assert!(Self::is_valid(number));
+        assert!(
+            Self::is_valid(number),
+            format!("{} is not a valid symmetric unit value", number)
+        );
         SymmetricUnitValue(number)
     }
 
@@ -115,7 +118,10 @@ impl UnitValue {
 
     /// Creates the unit value. Panics if the given number is not within the positive unit interval.
     pub fn new(number: f64) -> UnitValue {
-        assert!(Self::is_valid(number));
+        assert!(
+            Self::is_valid(number),
+            format!("{} is not a valid unit value", number)
+        );
         UnitValue(number)
     }
 
@@ -135,7 +141,10 @@ impl UnitValue {
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
     pub unsafe fn new_unchecked(number: f64) -> UnitValue {
-        debug_assert!(Self::is_valid(number));
+        debug_assert!(
+            Self::is_valid(number),
+            format!("{} is not a valid unit value", number)
+        );
         UnitValue(number)
     }
 
