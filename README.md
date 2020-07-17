@@ -9,4 +9,4 @@ currently the only downstream crate. Therefore you won't find it on [crates.io](
 [docs.rs](https://docs.rs/).
 
 However, it's designed to be completely independent of ReaLearn and REAPER. So if in future another potential
-downstream crate pop ups, it will be easy to make *helgoboss-learn* and independent library.     
+downstream crate pops up, it will be easy to make *helgoboss-learn* and independent library.     
