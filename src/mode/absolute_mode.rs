@@ -1,6 +1,6 @@
 use crate::{
-    full_unit_interval, negative_if, ControlType, Interval, Lazy, LazyVal, PressDurationProcessor,
-    Target, Transformation, UnitValue,
+    full_unit_interval, mode::feedback_util, negative_if, ControlType, Interval, Lazy, LazyVal,
+    PressDurationProcessor, Target, Transformation, UnitValue,
 };
 use std::time::Duration;
 
@@ -63,19 +63,13 @@ impl<T: Transformation> AbsoluteMode<T> {
     /// Takes a target value, interprets and transforms it conforming to absolute mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
     pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
-        let potentially_inversed_value = if self.reverse_target_value {
-            target_value.inverse()
-        } else {
-            target_value
-        };
-        let transformed_value = self
-            .feedback_transformation
-            .as_ref()
-            .and_then(|t| t.transform(potentially_inversed_value).ok())
-            .unwrap_or(potentially_inversed_value);
-        transformed_value
-            .map_to_unit_interval_from(&self.target_value_interval)
-            .map_from_unit_interval_to(&self.source_value_interval)
+        feedback_util::feedback(
+            target_value,
+            self.reverse_target_value,
+            &self.feedback_transformation,
+            &self.source_value_interval,
+            &self.target_value_interval,
+        )
     }
 
     fn pep_up_control_value(&self, control_value: UnitValue, target: &impl Target) -> UnitValue {
@@ -168,7 +162,7 @@ mod tests {
     use super::*;
 
     use crate::create_unit_value_interval;
-    use crate::mode::test_util::TestTarget;
+    use crate::mode::test_util::{TestTarget, TestTransformation};
     use approx::*;
 
     #[test]
@@ -520,25 +514,5 @@ mod tests {
 
     fn abs(number: f64) -> UnitValue {
         UnitValue::new(number)
-    }
-
-    struct TestTransformation {
-        transformer: Box<dyn Fn(UnitValue) -> Result<UnitValue, ()>>,
-    }
-
-    impl TestTransformation {
-        pub fn new(
-            transformer: impl Fn(UnitValue) -> Result<UnitValue, ()> + 'static,
-        ) -> TestTransformation {
-            Self {
-                transformer: Box::new(transformer),
-            }
-        }
-    }
-
-    impl Transformation for TestTransformation {
-        fn transform(&self, input_value: UnitValue) -> Result<UnitValue, ()> {
-            (self.transformer)(input_value)
-        }
     }
 }

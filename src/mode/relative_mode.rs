@@ -1,7 +1,7 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue, Interval, Target,
-    UnitIncrement, UnitValue,
+    mode::feedback_util, negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue,
+    Interval, Target, Transformation, UnitIncrement, UnitValue,
 };
 
 /// Settings for processing control values in relative mode.
@@ -22,7 +22,7 @@ use crate::{
 ///         - Displayed as: "{count} x" or "{count}" (former if source emits increments) TODO I
 ///           think now we have only the "x" variant
 #[derive(Clone, Debug)]
-pub struct RelativeMode {
+pub struct RelativeMode<T: Transformation> {
     pub source_value_interval: Interval<UnitValue>,
     /// Negative increments represent fractions (throttling), e.g. -2 fires an increment every
     /// 2nd time only.
@@ -38,9 +38,10 @@ pub struct RelativeMode {
     /// when the last change was a positive increment and negative when the last change was a
     /// negative increment.
     pub increment_counter: i32,
+    pub feedback_transformation: Option<T>,
 }
 
-impl Default for RelativeMode {
+impl<T: Transformation> Default for RelativeMode<T> {
     fn default() -> Self {
         RelativeMode {
             source_value_interval: full_unit_interval(),
@@ -57,11 +58,12 @@ impl Default for RelativeMode {
             reverse: false,
             rotate: false,
             increment_counter: 0,
+            feedback_transformation: None,
         }
     }
 }
 
-impl RelativeMode {
+impl<T: Transformation> RelativeMode<T> {
     /// Processes the given control value in relative mode and maybe returns an appropriate target
     /// control value.
     pub fn control(
@@ -79,14 +81,13 @@ impl RelativeMode {
     /// returns an appropriate source value that should be sent to the source. Of course this makes
     /// sense for absolute sources only.
     pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
-        let potentially_inversed_value = if self.reverse {
-            target_value.inverse()
-        } else {
-            target_value
-        };
-        potentially_inversed_value
-            .map_to_unit_interval_from(&self.target_value_interval)
-            .map_from_unit_interval_to(&self.source_value_interval)
+        feedback_util::feedback(
+            target_value,
+            self.reverse,
+            &self.feedback_transformation,
+            &self.source_value_interval,
+            &self.target_value_interval,
+        )
     }
 
     /// Relative one-direction mode (convert absolute button presses to relative increments)
@@ -329,7 +330,7 @@ mod tests {
     use super::*;
 
     use crate::create_unit_value_interval;
-    use crate::mode::test_util::TestTarget;
+    use crate::mode::test_util::{TestTarget, TestTransformation};
     use approx::*;
 
     mod relative_value {
@@ -341,7 +342,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -361,7 +362,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -381,7 +382,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -402,7 +403,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -423,7 +424,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -444,7 +445,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -465,7 +466,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -486,7 +487,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -507,7 +508,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -528,7 +529,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -549,7 +550,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -570,7 +571,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -591,7 +592,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_just_appearing_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -612,7 +613,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -634,7 +635,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -656,7 +657,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -682,7 +683,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -704,7 +705,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -726,7 +727,7 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
@@ -751,7 +752,7 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
@@ -774,7 +775,7 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -797,7 +798,7 @@ mod tests {
             #[test]
             fn max_step_count_throttle() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(-2, -2),
                     ..Default::default()
                 };
@@ -825,7 +826,7 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -848,7 +849,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -871,7 +872,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -894,7 +895,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -917,7 +918,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -940,7 +941,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -963,7 +964,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -986,7 +987,7 @@ mod tests {
             #[test]
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -1010,7 +1011,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1034,7 +1035,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1058,7 +1059,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1086,7 +1087,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1106,7 +1107,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(2, 100),
                     ..Default::default()
                 };
@@ -1127,7 +1128,7 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(-4, 100),
                     ..Default::default()
                 };
@@ -1162,7 +1163,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -1183,7 +1184,7 @@ mod tests {
             #[test]
             fn max_step_count_throttle() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(-10, -4),
                     ..Default::default()
                 };
@@ -1219,7 +1220,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -1247,7 +1248,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1264,7 +1265,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1281,7 +1282,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -1300,7 +1301,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -1318,7 +1319,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -1338,7 +1339,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -1356,7 +1357,7 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -1376,7 +1377,7 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_size_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
@@ -1397,7 +1398,7 @@ mod tests {
             #[test]
             fn reverse_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -1415,7 +1416,7 @@ mod tests {
             #[test]
             fn reverse_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -1434,7 +1435,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1453,7 +1454,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1472,7 +1473,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1491,7 +1492,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1510,7 +1511,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1529,7 +1530,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1549,7 +1550,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1569,7 +1570,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1589,7 +1590,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -1614,7 +1615,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1634,7 +1635,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1654,7 +1655,7 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
@@ -1675,7 +1676,7 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(-4, -4),
                     ..Default::default()
                 };
@@ -1699,7 +1700,7 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
@@ -1720,7 +1721,7 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 8),
                     ..Default::default()
                 };
@@ -1741,7 +1742,7 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -1764,7 +1765,7 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -1786,7 +1787,7 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -1809,7 +1810,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -1830,7 +1831,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1851,7 +1852,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1872,7 +1873,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1893,7 +1894,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1914,7 +1915,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1935,7 +1936,7 @@ mod tests {
             #[test]
             fn step_count_interval_exceeded() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     ..Default::default()
                 };
@@ -1956,7 +1957,7 @@ mod tests {
             #[test]
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -1978,7 +1979,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2000,7 +2001,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2022,7 +2023,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2044,7 +2045,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -2071,7 +2072,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -2089,7 +2090,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(2, 8),
                     ..Default::default()
                 };
@@ -2108,7 +2109,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -2127,7 +2128,7 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -2146,7 +2147,7 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -2166,7 +2167,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -2189,7 +2190,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 // When
@@ -2202,7 +2203,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -2216,7 +2217,7 @@ mod tests {
             #[test]
             fn source_and_target_interval() {
                 // Given
-                let mut mode = RelativeMode {
+                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
                     target_value_interval: create_unit_value_interval(0.4, 1.0),
                     ..Default::default()

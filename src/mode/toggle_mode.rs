@@ -1,21 +1,28 @@
-use crate::{full_unit_interval, Interval, PressDurationProcessor, Target, UnitValue};
+use crate::{
+    full_unit_interval, mode::feedback_util, Interval, PressDurationProcessor, Target,
+    Transformation, UnitValue,
+};
 
 #[derive(Clone, Debug)]
-pub struct ToggleMode {
+pub struct ToggleMode<T: Transformation> {
+    pub source_value_interval: Interval<UnitValue>,
     pub target_value_interval: Interval<UnitValue>,
     pub press_duration_processor: PressDurationProcessor,
+    pub feedback_transformation: Option<T>,
 }
 
-impl Default for ToggleMode {
+impl<T: Transformation> Default for ToggleMode<T> {
     fn default() -> Self {
         ToggleMode {
+            source_value_interval: full_unit_interval(),
             target_value_interval: full_unit_interval(),
             press_duration_processor: Default::default(),
+            feedback_transformation: None,
         }
     }
 }
 
-impl ToggleMode {
+impl<T: Transformation> ToggleMode<T> {
     /// Processes the given control value in toggle mode and maybe returns an appropriate target
     /// control value.
     pub fn control(&mut self, control_value: UnitValue, target: &impl Target) -> Option<UnitValue> {
@@ -41,9 +48,15 @@ impl ToggleMode {
     pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
         // Toggle switches between min and max target value and when doing feedback we want this to
         // translate to min source and max source value. But we also allow feedback of
-        // values inbetween. Then users can detect whether a parameter is somewhere between
+        // values in between. Then users can detect whether a parameter is somewhere between
         // target min and max.
-        target_value.map_to_unit_interval_from(&self.target_value_interval)
+        feedback_util::feedback(
+            target_value,
+            false,
+            &self.feedback_transformation,
+            &self.source_value_interval,
+            &self.target_value_interval,
+        )
     }
 }
 
@@ -51,14 +64,14 @@ impl ToggleMode {
 mod tests {
     use super::*;
 
-    use crate::mode::test_util::TestTarget;
+    use crate::mode::test_util::{TestTarget, TestTransformation};
     use crate::{create_unit_value_interval, ControlType};
     use approx::*;
 
     #[test]
     fn absolute_value_target_off() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             ..Default::default()
         };
         let target = TestTarget {
@@ -76,7 +89,7 @@ mod tests {
     #[test]
     fn absolute_value_target_on() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             ..Default::default()
         };
         let target = TestTarget {
@@ -94,7 +107,7 @@ mod tests {
     #[test]
     fn absolute_value_target_rather_off() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             ..Default::default()
         };
         let target = TestTarget {
@@ -112,7 +125,7 @@ mod tests {
     #[test]
     fn absolute_value_target_rather_on() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             ..Default::default()
         };
         let target = TestTarget {
@@ -130,7 +143,7 @@ mod tests {
     #[test]
     fn absolute_value_target_interval_target_off() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
@@ -149,7 +162,7 @@ mod tests {
     #[test]
     fn absolute_value_target_interval_target_on() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
@@ -168,7 +181,7 @@ mod tests {
     #[test]
     fn absolute_value_target_interval_target_rather_off() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
@@ -187,7 +200,7 @@ mod tests {
     #[test]
     fn absolute_value_target_interval_target_rather_on() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
@@ -206,7 +219,7 @@ mod tests {
     #[test]
     fn absolute_value_target_interval_target_too_off() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
@@ -225,7 +238,7 @@ mod tests {
     #[test]
     fn absolute_value_target_interval_target_too_on() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
@@ -244,7 +257,7 @@ mod tests {
     #[test]
     fn feedback() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             ..Default::default()
         };
         // When
@@ -257,7 +270,7 @@ mod tests {
     #[test]
     fn feedback_target_interval() {
         // Given
-        let mut mode = ToggleMode {
+        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
