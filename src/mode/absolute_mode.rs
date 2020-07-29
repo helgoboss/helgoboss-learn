@@ -42,10 +42,12 @@ impl<T: Transformation> AbsoluteMode<T> {
     /// value.
     pub fn control(&mut self, control_value: UnitValue, target: &impl Target) -> Option<UnitValue> {
         let control_value = self.press_duration_processor.process(control_value)?;
+        let current_target_value = target.current_value();
         if control_value.is_within_interval(&self.source_value_interval) {
             // Control value is within source value interval
-            let pepped_up_control_value = self.pep_up_control_value(control_value, target);
-            self.hitting_target_considering_max_jump(pepped_up_control_value, target)
+            let pepped_up_control_value =
+                self.pep_up_control_value(control_value, target, current_target_value);
+            self.hitting_target_considering_max_jump(pepped_up_control_value, current_target_value)
         } else {
             // Control value is outside source value interval
             if self.ignore_out_of_range_source_values {
@@ -56,7 +58,8 @@ impl<T: Transformation> AbsoluteMode<T> {
             } else {
                 self.target_value_interval.max_val()
             };
-            return self.hitting_target_considering_max_jump(target_bound_value, target);
+            return self
+                .hitting_target_considering_max_jump(target_bound_value, current_target_value);
         }
     }
 
@@ -72,13 +75,18 @@ impl<T: Transformation> AbsoluteMode<T> {
         )
     }
 
-    fn pep_up_control_value(&self, control_value: UnitValue, target: &impl Target) -> UnitValue {
+    fn pep_up_control_value(
+        &self,
+        control_value: UnitValue,
+        target: &impl Target,
+        current_target_value: UnitValue,
+    ) -> UnitValue {
         let mapped_control_value =
             control_value.map_to_unit_interval_from(&self.source_value_interval);
         let transformed_source_value = self
             .control_transformation
             .as_ref()
-            .and_then(|t| t.transform(mapped_control_value).ok())
+            .and_then(|t| t.transform(mapped_control_value, current_target_value).ok())
             .unwrap_or(mapped_control_value);
         let mapped_target_value =
             transformed_source_value.map_from_unit_interval_to(&self.target_value_interval);
@@ -100,13 +108,12 @@ impl<T: Transformation> AbsoluteMode<T> {
     fn hitting_target_considering_max_jump(
         &self,
         control_value: UnitValue,
-        target: &impl Target,
+        current_target_value: UnitValue,
     ) -> Option<UnitValue> {
         if self.jump_interval.is_full() {
             // No jump restrictions whatsoever
             return Some(control_value);
         }
-        let current_target_value = target.current_value();
         let distance = control_value.calc_distance_from(current_target_value);
         if distance > self.jump_interval.max_val() {
             // Distance is too large

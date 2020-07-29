@@ -30,7 +30,7 @@ impl TestTransformation {
 }
 
 impl Transformation for TestTransformation {
-    fn transform(&self, input_value: UnitValue) -> Result<UnitValue, ()> {
+    fn transform(&self, input_value: UnitValue, _: UnitValue) -> Result<UnitValue, ()> {
         (self.transformer)(input_value)
     }
 }

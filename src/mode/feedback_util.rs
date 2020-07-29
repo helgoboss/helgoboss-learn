@@ -14,7 +14,10 @@ pub fn feedback<T: Transformation>(
     };
     let transformed_value = transformation
         .as_ref()
-        .and_then(|t| t.transform(potentially_inversed_value).ok())
+        .and_then(|t| {
+            t.transform(potentially_inversed_value, potentially_inversed_value)
+                .ok()
+        })
         .unwrap_or(potentially_inversed_value);
     transformed_value
         .map_to_unit_interval_from(target_value_interval)
