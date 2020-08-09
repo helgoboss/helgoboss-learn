@@ -3,7 +3,6 @@ use crate::{
     PressDurationProcessor, Target, Transformation, UnitValue,
 };
 
-
 /// Settings for processing control values in absolute mode.
 #[derive(Clone, Debug)]
 pub struct AbsoluteMode<T: Transformation> {
