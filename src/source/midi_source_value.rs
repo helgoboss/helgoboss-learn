@@ -1,4 +1,4 @@
-use crate::{DiscreteValue, Interval, UnitValue};
+use crate::{UnitValue};
 use derive_more::Display;
 use helgoboss_midi::{
     ControlChange14BitMessage, ParameterNumberMessage, ShortMessage, ShortMessageFactory,

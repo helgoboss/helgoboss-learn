@@ -1,4 +1,4 @@
-use crate::{ControlValue, Interval, UnitValue};
+use crate::{Interval, UnitValue};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]

@@ -2190,7 +2190,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mode: RelativeMode<TestTransformation> = RelativeMode {
                     ..Default::default()
                 };
                 // When
@@ -2203,7 +2203,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mode: RelativeMode<TestTransformation> = RelativeMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -2217,7 +2217,7 @@ mod tests {
             #[test]
             fn source_and_target_interval() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mode: RelativeMode<TestTransformation> = RelativeMode {
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
                     target_value_interval: create_unit_value_interval(0.4, 1.0),
                     ..Default::default()

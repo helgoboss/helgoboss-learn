@@ -1,8 +1,8 @@
 use crate::{
-    full_unit_interval, mode::feedback_util, negative_if, ControlType, Interval, Lazy, LazyVal,
+    full_unit_interval, mode::feedback_util, negative_if, ControlType, Interval,
     PressDurationProcessor, Target, Transformation, UnitValue,
 };
-use std::time::Duration;
+
 
 /// Settings for processing control values in absolute mode.
 #[derive(Clone, Debug)]
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn feedback() {
         // Given
-        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             ..Default::default()
         };
         // When
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn feedback_reverse() {
         // Given
-        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             reverse_target_value: true,
             ..Default::default()
         };
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn feedback_source_and_target_interval() {
         // Given
-        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.8),
             target_value_interval: create_unit_value_interval(0.4, 1.0),
             ..Default::default()
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn feedback_transformation() {
         // Given
-        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             feedback_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
             ..Default::default()
         };

@@ -9,8 +9,8 @@ use helgoboss_midi::{
 };
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::convert::{TryFrom, TryInto};
-use std::fmt::{Display, Formatter};
+use std::convert::{TryFrom};
+
 
 #[derive(
     Clone,
@@ -645,7 +645,7 @@ impl MidiSource {
                 normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
             }
             ControlChangeValue {
-                custom_character, ..
+                custom_character: _, ..
             } => normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?),
             PitchBendChangeValue { .. } => normalize_14_bit_centered(
                 U14::try_from(value + 8192).map_err(|_| "value not 14-bit")?,

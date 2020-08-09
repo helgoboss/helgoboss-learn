@@ -257,7 +257,7 @@ mod tests {
     #[test]
     fn feedback() {
         // Given
-        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
+        let mode: ToggleMode<TestTransformation> = ToggleMode {
             ..Default::default()
         };
         // When
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn feedback_target_interval() {
         // Given
-        let mut mode: ToggleMode<TestTransformation> = ToggleMode {
+        let mode: ToggleMode<TestTransformation> = ToggleMode {
             target_value_interval: create_unit_value_interval(0.3, 0.7),
             ..Default::default()
         };
