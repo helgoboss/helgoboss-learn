@@ -506,35 +506,36 @@ impl MidiSource {
                 number: Some(n),
                 is_14_bit: Some(is_14_bit),
                 is_registered: Some(is_registered),
-            } => Some(ParameterNumber(if *is_registered {
-                if *is_14_bit {
+            } => {
+                let n = if !*is_registered && !*is_14_bit {
+                    ParameterNumberMessage::non_registered_7_bit(
+                        *ch,
+                        *n,
+                        denormalize_7_bit(feedback_value),
+                    )
+                } else if !*is_registered && *is_14_bit {
+                    ParameterNumberMessage::non_registered_14_bit(
+                        *ch,
+                        *n,
+                        denormalize_14_bit(feedback_value),
+                    )
+                } else if *is_registered && !*is_14_bit {
+                    ParameterNumberMessage::registered_7_bit(
+                        *ch,
+                        *n,
+                        denormalize_7_bit(feedback_value),
+                    )
+                } else if *is_registered && *is_14_bit {
                     ParameterNumberMessage::registered_14_bit(
                         *ch,
                         *n,
                         denormalize_14_bit(feedback_value),
                     )
                 } else {
-                    ParameterNumberMessage::registered_7_bit(
-                        *ch,
-                        *n,
-                        denormalize_7_bit(feedback_value),
-                    )
-                }
-            } else {
-                if *is_14_bit {
-                    ParameterNumberMessage::non_registered_14_bit(
-                        *ch,
-                        *n,
-                        denormalize_14_bit(feedback_value),
-                    )
-                } else {
-                    ParameterNumberMessage::non_registered_7_bit(
-                        *ch,
-                        *n,
-                        denormalize_7_bit(feedback_value),
-                    )
-                }
-            })),
+                    unreachable!()
+                };
+                Some(ParameterNumber(n))
+            }
             _ => None,
         }
     }

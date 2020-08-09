@@ -57,8 +57,7 @@ impl<T: Transformation> AbsoluteMode<T> {
             } else {
                 self.target_value_interval.max_val()
             };
-            return self
-                .hitting_target_considering_max_jump(target_bound_value, current_target_value);
+            self.hitting_target_considering_max_jump(target_bound_value, current_target_value)
         }
     }
 

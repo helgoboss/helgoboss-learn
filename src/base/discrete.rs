@@ -76,6 +76,10 @@ impl DiscreteIncrement {
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
+    ///
+    /// # Safety
+    ///
+    /// Make sure the given increment is not zero.
     pub unsafe fn new_unchecked(increment: i32) -> DiscreteIncrement {
         debug_assert_ne!(increment, 0);
         DiscreteIncrement(increment)
@@ -97,7 +101,7 @@ impl DiscreteIncrement {
             value as i32
         } else {
             // Decrement
-            -1 * (128 - value) as i32
+            -((128 - value) as i32)
         };
         Ok(unsafe { DiscreteIncrement::new_unchecked(increment) })
     }
@@ -119,7 +123,7 @@ impl DiscreteIncrement {
             (value - 64) as i32
         } else {
             // Decrement
-            -1 * (64 - value) as i32
+            -((64 - value) as i32)
         };
         Ok(unsafe { DiscreteIncrement::new_unchecked(increment) })
     }
@@ -141,7 +145,7 @@ impl DiscreteIncrement {
             value as i32
         } else {
             // Decrement
-            -1 * (value - 64) as i32
+            -((value - 64) as i32)
         };
         Ok(unsafe { DiscreteIncrement::new_unchecked(increment) })
     }
@@ -185,7 +189,7 @@ impl DiscreteIncrement {
 
     pub fn with_direction(&self, signum: i32) -> DiscreteIncrement {
         let abs = self.0.abs();
-        let inner = if signum >= 0 { abs } else { -1 * abs };
+        let inner = if signum >= 0 { abs } else { -abs };
         DiscreteIncrement::new(inner)
     }
 

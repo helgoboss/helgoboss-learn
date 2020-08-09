@@ -140,6 +140,10 @@ impl UnitValue {
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
+    ///
+    /// # Safety
+    ///
+    /// You need to make sure that the given number is a valid unit value.
     pub unsafe fn new_unchecked(number: f64) -> UnitValue {
         debug_assert!(
             Self::is_valid(number),
@@ -269,12 +273,14 @@ impl UnitValue {
         }
     }
 
-    /// Returns whether this is 0.0.
+    /// Returns whether this is exactly 0.0.
+    #[allow(clippy::float_cmp)]
     pub fn is_zero(&self) -> bool {
         self.0 == 0.0
     }
 
-    /// Returns whether this is 1.0.
+    /// Returns whether this is exactly 1.0.
+    #[allow(clippy::float_cmp)]
     pub fn is_one(&self) -> bool {
         self.0 == 1.0
     }
@@ -405,6 +411,7 @@ pub struct UnitIncrement(f64);
 
 impl UnitIncrement {
     /// Creates the unit increment. Panics if the given number is 0.0.
+    #[allow(clippy::float_cmp)]
     pub fn new(increment: f64) -> UnitIncrement {
         assert_ne!(increment, 0.0);
         UnitIncrement(increment)
@@ -414,6 +421,11 @@ impl UnitIncrement {
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
     /// values will be constructed in audio thread.
+    ///
+    /// # Safety
+    ///
+    /// Make sure the given increment is not zero.
+    #[allow(clippy::float_cmp)]
     pub unsafe fn new_unchecked(increment: f64) -> UnitIncrement {
         debug_assert_ne!(increment, 0.0);
         UnitIncrement(increment)
