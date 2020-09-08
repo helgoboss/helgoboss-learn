@@ -28,7 +28,7 @@ use std::convert::TryFrom;
 pub enum SourceCharacter {
     #[display(fmt = "Knob/Fader")]
     Range = 0,
-    #[display(fmt = "Switch")]
+    #[display(fmt = "Momentary switch")]
     Switch = 1,
     #[display(fmt = "Encoder (type 1)")]
     Encoder1 = 2,
