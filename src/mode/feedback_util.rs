@@ -1,4 +1,4 @@
-use crate::{Interval, Transformation, UnitValue};
+use crate::{Interval, Transformation, UnitValue, FEEDBACK_EPSILON};
 
 pub fn feedback<T: Transformation>(
     target_value: UnitValue,
@@ -7,10 +7,12 @@ pub fn feedback<T: Transformation>(
     source_value_interval: &Interval<UnitValue>,
     target_value_interval: &Interval<UnitValue>,
 ) -> UnitValue {
+    let rounded_target_value =
+        UnitValue::new_clamped((target_value.get() / FEEDBACK_EPSILON).round() * FEEDBACK_EPSILON);
     let potentially_inversed_value = if reverse {
-        target_value.inverse()
+        rounded_target_value.inverse()
     } else {
-        target_value
+        rounded_target_value
     };
     let transformed_value = transformation
         .as_ref()
