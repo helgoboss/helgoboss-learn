@@ -189,7 +189,7 @@ impl UnitValue {
 
     /// Maps this value to the unit interval assuming that this value currently exhausts the given
     /// source interval. If this value is outside the source interval, this method returns either
-    /// 0.0 or 1.0.
+    /// 0.0 or 1.0. If value == min == max, it returns 1.0.
     pub fn map_to_unit_interval_from(&self, source_interval: &Interval<UnitValue>) -> UnitValue {
         let (min, max) = (source_interval.min_val(), source_interval.max_val());
         if *self < min {
@@ -199,7 +199,7 @@ impl UnitValue {
             return UnitValue::MAX;
         }
         if min == max {
-            return min;
+            return UnitValue::MAX;
         }
         unsafe { UnitValue::new_unchecked((*self - min) / source_interval.span()) }
     }
