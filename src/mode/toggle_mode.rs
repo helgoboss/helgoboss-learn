@@ -1,6 +1,6 @@
 use crate::{
-    full_unit_interval, mode::feedback_util, Interval, PressDurationProcessor, Target,
-    Transformation, UnitValue,
+    full_unit_interval, mode::feedback_util, Interval, OutOfRangeBehavior, PressDurationProcessor,
+    Target, Transformation, UnitValue,
 };
 
 #[derive(Clone, Debug)]
@@ -9,6 +9,7 @@ pub struct ToggleMode<T: Transformation> {
     pub target_value_interval: Interval<UnitValue>,
     pub press_duration_processor: PressDurationProcessor,
     pub feedback_transformation: Option<T>,
+    pub out_of_range_behavior: OutOfRangeBehavior,
 }
 
 impl<T: Transformation> Default for ToggleMode<T> {
@@ -18,6 +19,7 @@ impl<T: Transformation> Default for ToggleMode<T> {
             target_value_interval: full_unit_interval(),
             press_duration_processor: Default::default(),
             feedback_transformation: None,
+            out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
         }
     }
 }
@@ -45,7 +47,7 @@ impl<T: Transformation> ToggleMode<T> {
 
     /// Takes a target value, interprets and transforms it conforming to toggle mode rules and
     /// returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
+    pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
         // Toggle switches between min and max target value and when doing feedback we want this to
         // translate to min source and max source value. But we also allow feedback of
         // values in between. Then users can detect whether a parameter is somewhere between
@@ -56,6 +58,7 @@ impl<T: Transformation> ToggleMode<T> {
             &self.feedback_transformation,
             &self.source_value_interval,
             &self.target_value_interval,
+            self.out_of_range_behavior,
         )
     }
 }
@@ -262,9 +265,9 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.0));
-        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
-        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(1.0));
     }
 
     #[test]
@@ -276,10 +279,10 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.0));
-        assert_abs_diff_eq!(mode.feedback(abs(0.4)), abs(0.25));
-        assert_abs_diff_eq!(mode.feedback(abs(0.7)), abs(1.0));
-        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.4)).unwrap(), abs(0.25));
+        assert_abs_diff_eq!(mode.feedback(abs(0.7)).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(1.0));
     }
 
     fn abs(number: f64) -> UnitValue {

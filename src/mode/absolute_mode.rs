@@ -1,6 +1,6 @@
 use crate::{
-    full_unit_interval, mode::feedback_util, negative_if, ControlType, Interval,
-    PressDurationProcessor, Target, Transformation, UnitValue,
+    full_unit_interval, mode::feedback_util, negative_if, ControlType, Interval, MinIsMaxBehavior,
+    OutOfRangeBehavior, PressDurationProcessor, Target, Transformation, UnitValue,
 };
 
 /// Settings for processing control values in absolute mode.
@@ -14,7 +14,7 @@ pub struct AbsoluteMode<T: Transformation> {
     pub approach_target_value: bool,
     pub reverse_target_value: bool,
     pub round_target_value: bool,
-    pub ignore_out_of_range_source_values: bool,
+    pub out_of_range_behavior: OutOfRangeBehavior,
     pub control_transformation: Option<T>,
     pub feedback_transformation: Option<T>,
 }
@@ -29,7 +29,7 @@ impl<T: Transformation> Default for AbsoluteMode<T> {
             approach_target_value: false,
             reverse_target_value: false,
             round_target_value: false,
-            ignore_out_of_range_source_values: false,
+            out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
             control_transformation: None,
             feedback_transformation: None,
         }
@@ -41,35 +41,55 @@ impl<T: Transformation> AbsoluteMode<T> {
     /// value.
     pub fn control(&mut self, control_value: UnitValue, target: &impl Target) -> Option<UnitValue> {
         let control_value = self.press_duration_processor.process(control_value)?;
-        let current_target_value = target.current_value();
-        if control_value.is_within_interval(&self.source_value_interval) {
-            // Control value is within source value interval
-            let pepped_up_control_value =
-                self.pep_up_control_value(control_value, target, current_target_value);
-            self.hitting_target_considering_max_jump(pepped_up_control_value, current_target_value)
-        } else {
-            // Control value is outside source value interval
-            if self.ignore_out_of_range_source_values {
-                return None;
-            }
-            let target_bound_value = if control_value < self.source_value_interval.min_val() {
-                self.target_value_interval.min_val()
+        let (source_bound_value, min_is_max_behavior) =
+            if control_value.is_within_interval(&self.source_value_interval) {
+                // Control value is within source value interval
+                (control_value, MinIsMaxBehavior::PreferOne)
             } else {
-                self.target_value_interval.max_val()
+                // Control value is outside source value interval
+                use OutOfRangeBehavior::*;
+                match self.out_of_range_behavior {
+                    MinOrMax => {
+                        if control_value < self.source_value_interval.min_val() {
+                            (
+                                self.source_value_interval.min_val(),
+                                MinIsMaxBehavior::PreferZero,
+                            )
+                        } else {
+                            (
+                                self.source_value_interval.max_val(),
+                                MinIsMaxBehavior::PreferOne,
+                            )
+                        }
+                    }
+                    Min => (
+                        self.source_value_interval.min_val(),
+                        MinIsMaxBehavior::PreferZero,
+                    ),
+                    Ignore => return None,
+                }
             };
-            self.hitting_target_considering_max_jump(target_bound_value, current_target_value)
-        }
+        let current_target_value = target.current_value();
+        // Control value is within source value interval
+        let pepped_up_control_value = self.pep_up_control_value(
+            source_bound_value,
+            target,
+            current_target_value,
+            min_is_max_behavior,
+        );
+        self.hitting_target_considering_max_jump(pepped_up_control_value, current_target_value)
     }
 
     /// Takes a target value, interprets and transforms it conforming to absolute mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
+    pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
         feedback_util::feedback(
             target_value,
             self.reverse_target_value,
             &self.feedback_transformation,
             &self.source_value_interval,
             &self.target_value_interval,
+            self.out_of_range_behavior,
         )
     }
 
@@ -78,9 +98,10 @@ impl<T: Transformation> AbsoluteMode<T> {
         control_value: UnitValue,
         target: &impl Target,
         current_target_value: UnitValue,
+        min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
-        let mapped_control_value =
-            control_value.map_to_unit_interval_from(&self.source_value_interval);
+        let mapped_control_value = control_value
+            .map_to_unit_interval_from(&self.source_value_interval, min_is_max_behavior);
         let transformed_source_value = self
             .control_transformation
             .as_ref()
@@ -229,11 +250,11 @@ mod tests {
     }
 
     #[test]
-    fn source_interval_ignore() {
+    fn source_interval_out_of_range_ignore() {
         // Given
         let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
             source_value_interval: create_unit_value_interval(0.2, 0.6),
-            ignore_out_of_range_source_values: true,
+            out_of_range_behavior: OutOfRangeBehavior::Ignore,
             ..Default::default()
         };
         let target = TestTarget {
@@ -249,6 +270,92 @@ mod tests {
         assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
         assert!(mode.control(abs(0.8), &target).is_none());
         assert!(mode.control(abs(1.0), &target).is_none());
+    }
+
+    #[test]
+    fn source_interval_out_of_range_min() {
+        // Given
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            source_value_interval: create_unit_value_interval(0.2, 0.6),
+            out_of_range_behavior: OutOfRangeBehavior::Min,
+            ..Default::default()
+        };
+        let target = TestTarget {
+            current_value: UnitValue::new(0.777),
+            control_type: ControlType::AbsoluteContinuous,
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+    }
+
+    #[test]
+    fn source_interval_out_of_range_ignore_source_one_value() {
+        // Given
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            source_value_interval: create_unit_value_interval(0.5, 0.5),
+            out_of_range_behavior: OutOfRangeBehavior::Ignore,
+            ..Default::default()
+        };
+        let target = TestTarget {
+            current_value: UnitValue::new(0.777),
+            control_type: ControlType::AbsoluteContinuous,
+        };
+        // When
+        // Then
+        assert!(mode.control(abs(0.0), &target).is_none());
+        assert!(mode.control(abs(0.4), &target).is_none());
+        assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+        assert!(mode.control(abs(0.6), &target).is_none());
+        assert!(mode.control(abs(1.0), &target).is_none());
+    }
+
+    #[test]
+    fn source_interval_out_of_range_min_source_one_value() {
+        // Given
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            source_value_interval: create_unit_value_interval(0.5, 0.5),
+            out_of_range_behavior: OutOfRangeBehavior::Min,
+            ..Default::default()
+        };
+        let target = TestTarget {
+            current_value: UnitValue::new(0.777),
+            control_type: ControlType::AbsoluteContinuous,
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+    }
+
+    #[test]
+    fn source_interval_out_of_range_min_max_source_one_value() {
+        // Given
+        let mut mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            source_value_interval: create_unit_value_interval(0.5, 0.5),
+            out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
+            ..Default::default()
+        };
+        let target = TestTarget {
+            current_value: UnitValue::new(0.777),
+            control_type: ControlType::AbsoluteContinuous,
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
     }
 
     #[test]
@@ -468,9 +575,9 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.0));
-        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
-        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(1.0));
     }
 
     #[test]
@@ -482,9 +589,9 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(1.0));
-        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
-        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(0.0));
     }
 
     #[test]
@@ -497,10 +604,92 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(0.2));
-        assert_abs_diff_eq!(mode.feedback(abs(0.4)), abs(0.2));
-        assert_abs_diff_eq!(mode.feedback(abs(0.7)), abs(0.5));
-        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(0.8));
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(0.2));
+        assert_abs_diff_eq!(mode.feedback(abs(0.4)).unwrap(), abs(0.2));
+        assert_abs_diff_eq!(mode.feedback(abs(0.7)).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(0.8));
+    }
+
+    #[test]
+    fn feedback_out_of_range_ignore() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            target_value_interval: create_unit_value_interval(0.2, 0.8),
+            out_of_range_behavior: OutOfRangeBehavior::Ignore,
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert!(mode.feedback(abs(0.0)).is_none());
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(0.5));
+        assert!(mode.feedback(abs(1.0)).is_none());
+    }
+
+    #[test]
+    fn feedback_out_of_range_min() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            target_value_interval: create_unit_value_interval(0.2, 0.8),
+            out_of_range_behavior: OutOfRangeBehavior::Min,
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.1)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(0.9)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(0.0));
+    }
+
+    #[test]
+    fn feedback_out_of_range_min_target_one_value() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            target_value_interval: create_unit_value_interval(0.5, 0.5),
+            out_of_range_behavior: OutOfRangeBehavior::Min,
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.1)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.9)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(0.0));
+    }
+
+    #[test]
+    fn feedback_out_of_range_min_max_target_one_value() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            target_value_interval: create_unit_value_interval(0.5, 0.5),
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.1)).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.9)).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(1.0));
+    }
+
+    #[test]
+    fn feedback_out_of_range_ignore_target_one_value() {
+        // Given
+        let mode: AbsoluteMode<TestTransformation> = AbsoluteMode {
+            target_value_interval: create_unit_value_interval(0.5, 0.5),
+            out_of_range_behavior: OutOfRangeBehavior::Ignore,
+            ..Default::default()
+        };
+        // When
+        // Then
+        assert!(mode.feedback(abs(0.0)).is_none());
+        assert!(mode.feedback(abs(0.1)).is_none());
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(1.0));
+        assert!(mode.feedback(abs(0.9)).is_none());
+        assert!(mode.feedback(abs(1.0)).is_none());
     }
 
     #[test]
@@ -512,9 +701,9 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(mode.feedback(abs(0.0)), abs(1.0));
-        assert_abs_diff_eq!(mode.feedback(abs(0.5)), abs(0.5));
-        assert_abs_diff_eq!(mode.feedback(abs(1.0)), abs(0.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.0)).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(mode.feedback(abs(0.5)).unwrap(), abs(0.5));
+        assert_abs_diff_eq!(mode.feedback(abs(1.0)).unwrap(), abs(0.0));
     }
 
     fn abs(number: f64) -> UnitValue {

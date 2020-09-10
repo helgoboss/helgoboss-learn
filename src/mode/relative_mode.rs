@@ -1,7 +1,8 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     mode::feedback_util, negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue,
-    Interval, Target, Transformation, UnitIncrement, UnitValue,
+    Interval, MinIsMaxBehavior, OutOfRangeBehavior, Target, Transformation, UnitIncrement,
+    UnitValue,
 };
 
 /// Settings for processing control values in relative mode.
@@ -39,6 +40,7 @@ pub struct RelativeMode<T: Transformation> {
     /// negative increment.
     pub increment_counter: i32,
     pub feedback_transformation: Option<T>,
+    pub out_of_range_behavior: OutOfRangeBehavior,
 }
 
 impl<T: Transformation> Default for RelativeMode<T> {
@@ -59,6 +61,7 @@ impl<T: Transformation> Default for RelativeMode<T> {
             rotate: false,
             increment_counter: 0,
             feedback_transformation: None,
+            out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
         }
     }
 }
@@ -80,13 +83,14 @@ impl<T: Transformation> RelativeMode<T> {
     /// Takes a target value, interprets and transforms it conforming to relative mode rules and
     /// returns an appropriate source value that should be sent to the source. Of course this makes
     /// sense for absolute sources only.
-    pub fn feedback(&self, target_value: UnitValue) -> UnitValue {
+    pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
         feedback_util::feedback(
             target_value,
             self.reverse,
             &self.feedback_transformation,
             &self.source_value_interval,
             &self.target_value_interval,
+            self.out_of_range_behavior,
         )
     }
 
@@ -112,7 +116,10 @@ impl<T: Transformation> RelativeMode<T> {
                 // - Maximum target step size (enables accurate maximum increment, clamped)
                 // - Target value interval (absolute, important for rotation only, clamped)
                 let step_size_value = control_value
-                    .map_to_unit_interval_from(&self.source_value_interval)
+                    .map_to_unit_interval_from(
+                        &self.source_value_interval,
+                        MinIsMaxBehavior::PreferOne,
+                    )
                     .map_from_unit_interval_to(&self.step_size_interval);
                 let step_size_increment =
                     step_size_value.to_increment(negative_if(self.reverse))?;
@@ -155,7 +162,7 @@ impl<T: Transformation> RelativeMode<T> {
         control_value: UnitValue,
     ) -> Option<DiscreteIncrement> {
         let factor = control_value
-            .map_to_unit_interval_from(&self.source_value_interval)
+            .map_to_unit_interval_from(&self.source_value_interval, MinIsMaxBehavior::PreferOne)
             .map_from_unit_interval_to_discrete_increment(&self.step_count_interval);
         // This mode supports positive increment only.
         let discrete_value = if factor.is_positive() {
@@ -2195,9 +2202,9 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.feedback(uv(0.0)), uv(0.0));
-                assert_abs_diff_eq!(mode.feedback(uv(0.5)), uv(0.5));
-                assert_abs_diff_eq!(mode.feedback(uv(1.0)), uv(1.0));
+                assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+                assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+                assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(1.0));
             }
 
             #[test]
@@ -2209,9 +2216,9 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.feedback(uv(0.0)), uv(1.0));
-                assert_abs_diff_eq!(mode.feedback(uv(0.5)), uv(0.5));
-                assert_abs_diff_eq!(mode.feedback(uv(1.0)), uv(0.0));
+                assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(1.0));
+                assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+                assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.0));
             }
 
             #[test]
@@ -2224,10 +2231,10 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.feedback(uv(0.0)), uv(0.2));
-                assert_abs_diff_eq!(mode.feedback(uv(0.4)), uv(0.2));
-                assert_abs_diff_eq!(mode.feedback(uv(0.7)), uv(0.5));
-                assert_abs_diff_eq!(mode.feedback(uv(1.0)), uv(0.8));
+                assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.2));
+                assert_abs_diff_eq!(mode.feedback(uv(0.4)).unwrap(), uv(0.2));
+                assert_abs_diff_eq!(mode.feedback(uv(0.7)).unwrap(), uv(0.5));
+                assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.8));
             }
         }
     }
