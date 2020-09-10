@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 #[repr(usize)]
 pub enum OutOfRangeBehavior {
     /// Yields range minimum if lower than range minimum and range maximum if greater.
-    #[cfg_attr(feature = "serde", serde(rename = "min-or-max"))]
+    #[cfg_attr(feature = "serde", serde(rename = "minOrMax"))]
     #[display(fmt = "Min or max")]
     MinOrMax,
     /// Yields range minimum if out-of-range.
