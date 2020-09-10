@@ -26,10 +26,10 @@ use std::convert::TryFrom;
 #[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum SourceCharacter {
-    #[display(fmt = "Knob/Fader")]
+    #[display(fmt = "Range element (knob, fader, etc.)")]
     Range = 0,
-    #[display(fmt = "Momentary switch")]
-    Switch = 1,
+    #[display(fmt = "Button (momentary)")]
+    Button = 1,
     #[display(fmt = "Encoder (type 1)")]
     Encoder1 = 2,
     #[display(fmt = "Encoder (type 2)")]
@@ -230,9 +230,9 @@ impl MidiSource {
     pub fn character(&self) -> SourceCharacter {
         use MidiSource::*;
         match self {
-            NoteVelocity { .. } => SourceCharacter::Switch,
+            NoteVelocity { .. } => SourceCharacter::Button,
             // TODO-low Introduce new character "Trigger"
-            ClockTransport { .. } => SourceCharacter::Switch,
+            ClockTransport { .. } => SourceCharacter::Button,
             ControlChangeValue {
                 custom_character, ..
             } => *custom_character,
