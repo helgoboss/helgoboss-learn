@@ -2,18 +2,26 @@ use crate::UnitValue;
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ControlType {
+    AbsoluteTrigger,
+    AbsoluteSwitch,
     /// Targets which don't have a step size.
     AbsoluteContinuous,
     /// Imagine a "tempo" target: Musical tempo is continuous in nature and still you might want to
     /// offer the possibility to round on fraction-less bpm values. Discrete and continuous at the
     /// same time.
-    AbsoluteContinuousRoundable { rounding_step_size: UnitValue },
+    AbsoluteContinuousRoundable {
+        rounding_step_size: UnitValue,
+    },
     /// Targets which have a grid of discrete values.
-    AbsoluteDiscrete { atomic_step_size: UnitValue },
+    AbsoluteDiscrete {
+        atomic_step_size: UnitValue,
+    },
     /// If target wants to be controlled via relative increments.
     Relative,
-    /// For virtual targets that don't know about the nature of the real target.
-    Virtual,
+    /// For virtual continuous targets (that don't know about the nature of the real target).
+    VirtualMulti,
+    /// For virtual button targets (that don't know about the nature of the real target).
+    VirtualButton,
 }
 
 impl ControlType {

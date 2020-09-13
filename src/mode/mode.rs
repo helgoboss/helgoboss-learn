@@ -196,7 +196,10 @@ impl<T: Transformation> Mode<T> {
         }
         use ControlType::*;
         match target.control_type() {
-            AbsoluteContinuous | AbsoluteContinuousRoundable { .. } | Virtual => {
+            AbsoluteContinuous
+            | AbsoluteContinuousRoundable { .. }
+            | AbsoluteTrigger
+            | AbsoluteSwitch => {
                 // Continuous target
                 //
                 // Settings:
@@ -244,6 +247,7 @@ impl<T: Transformation> Mode<T> {
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
                 Some(ControlValue::Relative(discrete_increment))
             }
+            VirtualButton | VirtualMulti => todo!(),
         }
     }
 
@@ -280,7 +284,10 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<ControlValue> {
         use ControlType::*;
         match target.control_type() {
-            AbsoluteContinuous | AbsoluteContinuousRoundable { .. } => {
+            AbsoluteContinuous
+            | AbsoluteContinuousRoundable { .. }
+            | AbsoluteSwitch
+            | AbsoluteTrigger => {
                 // Continuous target
                 //
                 // Settings which are always necessary:
@@ -318,7 +325,7 @@ impl<T: Transformation> Mode<T> {
                     target.current_value()
                 })
             }
-            Relative | Virtual => {
+            Relative => {
                 // Target wants increments so we just forward them after some preprocessing
                 //
                 // Settings which are always necessary:
@@ -329,6 +336,7 @@ impl<T: Transformation> Mode<T> {
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
                 Some(ControlValue::Relative(pepped_up_increment))
             }
+            VirtualMulti | VirtualButton => todo!(),
         }
     }
 
