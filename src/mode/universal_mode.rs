@@ -1,11 +1,13 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     mode::feedback_util, negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue,
-    Interval, MinIsMaxBehavior, OutOfRangeBehavior, Target, Transformation, UnitIncrement,
-    UnitValue,
+    Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, Target, Transformation,
+    UnitIncrement, UnitValue,
 };
 
-/// Settings for processing control values in relative mode.
+/// Settings for processing all kinds of control values.
+///
+/// ## How relative control values are processed (or button taps interpreted as increments).
 ///
 /// Here's an overview in which cases step counts are used and in which step sizes.
 /// This is the same, no matter if the source emits relative increments or absolute values
@@ -23,15 +25,24 @@ use crate::{
 ///         - Displayed as: "{count} x" or "{count}" (former if source emits increments) TODO I
 ///           think now we have only the "x" variant
 #[derive(Clone, Debug)]
-pub struct RelativeMode<T: Transformation> {
+pub struct UniversalMode<T: Transformation> {
+    pub absolute_interpretation: AbsoluteInterpretation,
     pub source_value_interval: Interval<UnitValue>,
+    pub target_value_interval: Interval<UnitValue>,
     /// Negative increments represent fractions (throttling), e.g. -2 fires an increment every
     /// 2nd time only.
     pub step_count_interval: Interval<DiscreteIncrement>,
     pub step_size_interval: Interval<UnitValue>,
-    pub target_value_interval: Interval<UnitValue>,
+    pub jump_interval: Interval<UnitValue>,
+    // TODO-low Not cool to make this public. Maybe derive a builder for this beast.
+    pub press_duration_processor: PressDurationProcessor,
+    pub approach_target_value: bool,
     pub reverse: bool,
     pub rotate: bool,
+    pub round_target_value: bool,
+    pub out_of_range_behavior: OutOfRangeBehavior,
+    pub control_transformation: Option<T>,
+    pub feedback_transformation: Option<T>,
     /// Counter for implementing throttling.
     ///
     /// Throttling is implemented by spitting out control values only every nth time. The counter
@@ -39,14 +50,21 @@ pub struct RelativeMode<T: Transformation> {
     /// when the last change was a positive increment and negative when the last change was a
     /// negative increment.
     pub increment_counter: i32,
-    pub feedback_transformation: Option<T>,
-    pub out_of_range_behavior: OutOfRangeBehavior,
 }
 
-impl<T: Transformation> Default for RelativeMode<T> {
+#[derive(Clone, Debug)]
+pub enum AbsoluteInterpretation {
+    Normal,
+    ButtonsToRelative,
+    Toggle,
+}
+
+impl<T: Transformation> Default for UniversalMode<T> {
     fn default() -> Self {
-        RelativeMode {
+        UniversalMode {
+            absolute_interpretation: AbsoluteInterpretation::Normal,
             source_value_interval: full_unit_interval(),
+            target_value_interval: full_unit_interval(),
             // 0.01 has been chosen as default minimum step size because it corresponds to 1%.
             // 0.01 has also been chosen as default maximum step size because most users probably
             // want to start easy, that is without using the "press harder = more increments"
@@ -56,19 +74,22 @@ impl<T: Transformation> Default for RelativeMode<T> {
             step_size_interval: create_unit_value_interval(0.01, 0.01),
             // Same reasoning like with `step_size_interval`
             step_count_interval: create_discrete_increment_interval(1, 1),
-            target_value_interval: full_unit_interval(),
+            jump_interval: full_unit_interval(),
+            press_duration_processor: Default::default(),
+            approach_target_value: false,
             reverse: false,
+            round_target_value: false,
+            out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
+            control_transformation: None,
+            feedback_transformation: None,
             rotate: false,
             increment_counter: 0,
-            feedback_transformation: None,
-            out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
         }
     }
 }
 
-impl<T: Transformation> RelativeMode<T> {
-    /// Processes the given control value in relative mode and maybe returns an appropriate target
-    /// control value.
+impl<T: Transformation> UniversalMode<T> {
+    /// Processes the given control value and maybe returns an appropriate target control value.
     pub fn control(
         &mut self,
         control_value: ControlValue,
@@ -76,13 +97,23 @@ impl<T: Transformation> RelativeMode<T> {
     ) -> Option<ControlValue> {
         match control_value {
             ControlValue::Relative(i) => self.control_relative(i, target),
-            ControlValue::Absolute(v) => self.control_absolute(v, target),
+            ControlValue::Absolute(v) => {
+                use AbsoluteInterpretation::*;
+                match self.absolute_interpretation {
+                    Normal => self
+                        .control_absolute_normal(v, target)
+                        .map(ControlValue::Absolute),
+                    ButtonsToRelative => self.control_absolute_to_relative(v, target),
+                    Toggle => self
+                        .control_absolute_toggle(v, target)
+                        .map(ControlValue::Absolute),
+                }
+            }
         }
     }
 
-    /// Takes a target value, interprets and transforms it conforming to relative mode rules and
-    /// returns an appropriate source value that should be sent to the source. Of course this makes
-    /// sense for absolute sources only.
+    /// Takes a target value, interprets and transforms it conforming to mode rules and
+    /// maybe returns an appropriate source value that should be sent to the source.
     pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
         feedback_util::feedback(
             target_value,
@@ -94,8 +125,55 @@ impl<T: Transformation> RelativeMode<T> {
         )
     }
 
+    /// Processes the given control value in absolute mode and maybe returns an appropriate target
+    /// value.
+    fn control_absolute_normal(
+        &mut self,
+        control_value: UnitValue,
+        target: &impl Target,
+    ) -> Option<UnitValue> {
+        let control_value = self.press_duration_processor.process(control_value)?;
+        let (source_bound_value, min_is_max_behavior) =
+            if control_value.is_within_interval(&self.source_value_interval) {
+                // Control value is within source value interval
+                (control_value, MinIsMaxBehavior::PreferOne)
+            } else {
+                // Control value is outside source value interval
+                use OutOfRangeBehavior::*;
+                match self.out_of_range_behavior {
+                    MinOrMax => {
+                        if control_value < self.source_value_interval.min_val() {
+                            (
+                                self.source_value_interval.min_val(),
+                                MinIsMaxBehavior::PreferZero,
+                            )
+                        } else {
+                            (
+                                self.source_value_interval.max_val(),
+                                MinIsMaxBehavior::PreferOne,
+                            )
+                        }
+                    }
+                    Min => (
+                        self.source_value_interval.min_val(),
+                        MinIsMaxBehavior::PreferZero,
+                    ),
+                    Ignore => return None,
+                }
+            };
+        let current_target_value = target.current_value();
+        // Control value is within source value interval
+        let pepped_up_control_value = self.pep_up_control_value(
+            source_bound_value,
+            target,
+            current_target_value,
+            min_is_max_behavior,
+        );
+        self.hitting_target_considering_max_jump(pepped_up_control_value, current_target_value)
+    }
+
     /// Relative one-direction mode (convert absolute button presses to relative increments)
-    fn control_absolute(
+    fn control_absolute_to_relative(
         &mut self,
         control_value: UnitValue,
         target: &impl Target,
@@ -157,26 +235,26 @@ impl<T: Transformation> RelativeMode<T> {
         }
     }
 
-    fn convert_to_discrete_increment(
+    fn control_absolute_toggle(
         &mut self,
         control_value: UnitValue,
-    ) -> Option<DiscreteIncrement> {
-        let factor = control_value
-            .map_to_unit_interval_from(&self.source_value_interval, MinIsMaxBehavior::PreferOne)
-            .map_from_unit_interval_to_discrete_increment(&self.step_count_interval);
-        // This mode supports positive increment only.
-        let discrete_value = if factor.is_positive() {
-            factor.to_value()
+        target: &impl Target,
+    ) -> Option<UnitValue> {
+        let control_value = self.press_duration_processor.process(control_value)?;
+        if control_value.is_zero() {
+            return None;
+        }
+        let center_target_value = self.target_value_interval.center();
+        let current_target_value = target.current_value();
+        let desired_target_value = if current_target_value > center_target_value {
+            self.target_value_interval.min_val()
         } else {
-            let nth = factor.get().abs() as u32;
-            let (fire, new_counter_value) = self.its_time_to_fire(nth, 1);
-            self.increment_counter = new_counter_value;
-            if !fire {
-                return None;
-            }
-            DiscreteValue::new(1)
+            self.target_value_interval.max_val()
         };
-        discrete_value.to_increment(negative_if(self.reverse))
+        if desired_target_value == current_target_value {
+            return None;
+        }
+        Some(desired_target_value)
     }
 
     // Classic relative mode: We are getting encoder increments from the source.
@@ -240,6 +318,80 @@ impl<T: Transformation> RelativeMode<T> {
                 Some(ControlValue::Relative(pepped_up_increment))
             }
         }
+    }
+
+    fn pep_up_control_value(
+        &self,
+        control_value: UnitValue,
+        target: &impl Target,
+        current_target_value: UnitValue,
+        min_is_max_behavior: MinIsMaxBehavior,
+    ) -> UnitValue {
+        let mapped_control_value = control_value
+            .map_to_unit_interval_from(&self.source_value_interval, min_is_max_behavior);
+        let transformed_source_value = self
+            .control_transformation
+            .as_ref()
+            .and_then(|t| t.transform(mapped_control_value, current_target_value).ok())
+            .unwrap_or(mapped_control_value);
+        let mapped_target_value =
+            transformed_source_value.map_from_unit_interval_to(&self.target_value_interval);
+        let potentially_inversed_target_value = if self.reverse {
+            mapped_target_value.inverse()
+        } else {
+            mapped_target_value
+        };
+        if self.round_target_value {
+            round_to_nearest_discrete_value(
+                &target.control_type(),
+                potentially_inversed_target_value,
+            )
+        } else {
+            potentially_inversed_target_value
+        }
+    }
+
+    fn hitting_target_considering_max_jump(
+        &self,
+        control_value: UnitValue,
+        current_target_value: UnitValue,
+    ) -> Option<UnitValue> {
+        if self.jump_interval.is_full() {
+            // No jump restrictions whatsoever
+            return Some(control_value);
+        }
+        let distance = control_value.calc_distance_from(current_target_value);
+        if distance > self.jump_interval.max_val() {
+            // Distance is too large
+            if !self.approach_target_value {
+                // Scaling not desired. Do nothing.
+                return None;
+            }
+            // Scaling desired
+            let approach_distance = distance.map_from_unit_interval_to(&self.jump_interval);
+            let approach_increment = approach_distance
+                .to_increment(negative_if(control_value < current_target_value))?;
+            let final_target_value =
+                current_target_value.add_clamping(approach_increment, &self.target_value_interval);
+            return self.hit_if_changed(final_target_value, current_target_value);
+        }
+        // Distance is not too large
+        if distance < self.jump_interval.min_val() {
+            return None;
+        }
+        // Distance is also not too small
+        self.hit_if_changed(control_value, current_target_value)
+    }
+
+    fn hit_if_changed(
+        &self,
+        desired_target_value: UnitValue,
+        current_target_value: UnitValue,
+    ) -> Option<UnitValue> {
+        if current_target_value == desired_target_value {
+            return None;
+        }
+        Some(desired_target_value)
     }
 
     fn hit_discrete_target_absolutely(
@@ -330,17 +482,804 @@ impl<T: Transformation> RelativeMode<T> {
         }
         (false, self.increment_counter + direction_signum)
     }
+
+    fn convert_to_discrete_increment(
+        &mut self,
+        control_value: UnitValue,
+    ) -> Option<DiscreteIncrement> {
+        let factor = control_value
+            .map_to_unit_interval_from(&self.source_value_interval, MinIsMaxBehavior::PreferOne)
+            .map_from_unit_interval_to_discrete_increment(&self.step_count_interval);
+        // This mode supports positive increment only.
+        let discrete_value = if factor.is_positive() {
+            factor.to_value()
+        } else {
+            let nth = factor.get().abs() as u32;
+            let (fire, new_counter_value) = self.its_time_to_fire(nth, 1);
+            self.increment_counter = new_counter_value;
+            if !fire {
+                return None;
+            }
+            DiscreteValue::new(1)
+        };
+        discrete_value.to_increment(negative_if(self.reverse))
+    }
+}
+
+fn round_to_nearest_discrete_value(
+    control_type: &ControlType,
+    approximate_control_value: UnitValue,
+) -> UnitValue {
+    // round() is the right choice here vs. floor() because we don't want slight numerical
+    // inaccuracies lead to surprising jumps
+    use ControlType::*;
+    let step_size = match control_type {
+        AbsoluteContinuousRoundable { rounding_step_size } => *rounding_step_size,
+        AbsoluteDiscrete { atomic_step_size } => *atomic_step_size,
+        _ => return approximate_control_value,
+    };
+    approximate_control_value.snap_to_grid_by_interval_size(step_size)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::create_unit_value_interval;
     use crate::mode::test_util::{TestTarget, TestTransformation};
+    use crate::{create_unit_value_interval, ControlType};
     use approx::*;
 
-    mod relative_value {
+    mod absolute_normal {
+        use super::*;
+
+        #[test]
+        fn default() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.777), &target).unwrap(), abs(0.777));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn relative_target() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::Relative,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.777), &target).unwrap(), abs(0.777));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn source_interval() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.2, 0.6),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn source_interval_out_of_range_ignore() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.2, 0.6),
+                out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert!(mode.control(abs(0.1), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+            assert!(mode.control(abs(0.8), &target).is_none());
+            assert!(mode.control(abs(1.0), &target).is_none());
+        }
+
+        #[test]
+        fn source_interval_out_of_range_min() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.2, 0.6),
+                out_of_range_behavior: OutOfRangeBehavior::Min,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+        }
+
+        #[test]
+        fn source_interval_out_of_range_ignore_source_one_value() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.5, 0.5),
+                out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert!(mode.control(abs(0.4), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+            assert!(mode.control(abs(0.6), &target).is_none());
+            assert!(mode.control(abs(1.0), &target).is_none());
+        }
+
+        #[test]
+        fn source_interval_out_of_range_min_source_one_value() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.5, 0.5),
+                out_of_range_behavior: OutOfRangeBehavior::Min,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+        }
+
+        #[test]
+        fn source_interval_out_of_range_min_max_source_one_value() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.5, 0.5),
+                out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn target_interval() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                target_value_interval: create_unit_value_interval(0.2, 0.6),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.28));
+            assert_abs_diff_eq!(mode.control(abs(0.25), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.75), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
+        }
+
+        #[test]
+        fn source_and_target_interval() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.2, 0.6),
+                target_value_interval: create_unit_value_interval(0.2, 0.6),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
+        }
+
+        #[test]
+        fn source_and_target_interval_shifted() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.2, 0.6),
+                target_value_interval: create_unit_value_interval(0.4, 0.8),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.8));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.8));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.8));
+        }
+
+        #[test]
+        fn reverse() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                reverse: true,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+        }
+
+        #[test]
+        fn round() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                round_target_value: true,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteDiscrete {
+                    atomic_step_size: UnitValue::new(0.2),
+                },
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.11), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.19), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.2), &target).unwrap(), abs(0.2));
+            assert_abs_diff_eq!(mode.control(abs(0.35), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.49), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn jump_interval() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                jump_interval: create_unit_value_interval(0.0, 0.2),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.5),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert!(mode.control(abs(0.1), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.7), &target).unwrap(), abs(0.7));
+            assert!(mode.control(abs(0.8), &target).is_none());
+            assert!(mode.control(abs(0.9), &target).is_none());
+            assert!(mode.control(abs(1.0), &target).is_none());
+        }
+
+        #[test]
+        fn jump_interval_min() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                jump_interval: create_unit_value_interval(0.1, 1.0),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.5),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.1));
+            assert!(mode.control(abs(0.4), &target).is_none());
+            assert!(mode.control(abs(0.5), &target).is_none());
+            assert!(mode.control(abs(0.6), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn jump_interval_approach() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                jump_interval: create_unit_value_interval(0.0, 0.2),
+                approach_target_value: true,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.5),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.42));
+            assert_abs_diff_eq!(mode.control(abs(0.4), &target).unwrap(), abs(0.4));
+            assert_abs_diff_eq!(mode.control(abs(0.6), &target).unwrap(), abs(0.6));
+            assert_abs_diff_eq!(mode.control(abs(0.7), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(0.8), &target).unwrap(), abs(0.56));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
+        }
+
+        #[test]
+        fn transformation_ok() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                control_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+        }
+
+        #[test]
+        fn transformation_err() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                control_transformation: Some(TestTransformation::new(|_| Err(()))),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn feedback() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(1.0));
+        }
+
+        #[test]
+        fn feedback_reverse() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                reverse: true,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.0));
+        }
+
+        #[test]
+        fn feedback_source_and_target_interval() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                source_value_interval: create_unit_value_interval(0.2, 0.8),
+                target_value_interval: create_unit_value_interval(0.4, 1.0),
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.2));
+            assert_abs_diff_eq!(mode.feedback(uv(0.4)).unwrap(), uv(0.2));
+            assert_abs_diff_eq!(mode.feedback(uv(0.7)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.8));
+        }
+
+        #[test]
+        fn feedback_out_of_range_ignore() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                target_value_interval: create_unit_value_interval(0.2, 0.8),
+                out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert!(mode.feedback(uv(0.0)).is_none());
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+            assert!(mode.feedback(uv(1.0)).is_none());
+        }
+
+        #[test]
+        fn feedback_out_of_range_min() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                target_value_interval: create_unit_value_interval(0.2, 0.8),
+                out_of_range_behavior: OutOfRangeBehavior::Min,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.1)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(0.9)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.0));
+        }
+
+        #[test]
+        fn feedback_out_of_range_min_target_one_value() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                target_value_interval: create_unit_value_interval(0.5, 0.5),
+                out_of_range_behavior: OutOfRangeBehavior::Min,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.1)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.9)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.0));
+        }
+
+        #[test]
+        fn feedback_out_of_range_min_max_target_one_value() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                target_value_interval: create_unit_value_interval(0.5, 0.5),
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.1)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.9)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(1.0));
+        }
+
+        #[test]
+        fn feedback_out_of_range_ignore_target_one_value() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                target_value_interval: create_unit_value_interval(0.5, 0.5),
+                out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert!(mode.feedback(uv(0.0)).is_none());
+            assert!(mode.feedback(uv(0.1)).is_none());
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(1.0));
+            assert!(mode.feedback(uv(0.9)).is_none());
+            assert!(mode.feedback(uv(1.0)).is_none());
+        }
+
+        #[test]
+        fn feedback_transformation() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                feedback_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.0));
+        }
+    }
+
+    mod absolute_toggle {
+
+        use super::*;
+
+        #[test]
+        fn absolute_value_target_off() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::MIN,
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn absolute_value_target_on() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::MAX,
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+        }
+
+        #[test]
+        fn absolute_value_target_rather_off() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.333),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn absolute_value_target_rather_on() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.777),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+        }
+
+        #[test]
+        fn absolute_value_target_interval_target_off() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                target_value_interval: create_unit_value_interval(0.3, 0.7),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.3),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.7));
+        }
+
+        #[test]
+        fn absolute_value_target_interval_target_on() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                target_value_interval: create_unit_value_interval(0.3, 0.7),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.7),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.3));
+        }
+
+        #[test]
+        fn absolute_value_target_interval_target_rather_off() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                target_value_interval: create_unit_value_interval(0.3, 0.7),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.4),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.7));
+        }
+
+        #[test]
+        fn absolute_value_target_interval_target_rather_on() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                target_value_interval: create_unit_value_interval(0.3, 0.7),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::new(0.6),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.3));
+        }
+
+        #[test]
+        fn absolute_value_target_interval_target_too_off() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                target_value_interval: create_unit_value_interval(0.3, 0.7),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::MIN,
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.7));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.7));
+        }
+
+        #[test]
+        fn absolute_value_target_interval_target_too_on() {
+            // Given
+            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                target_value_interval: create_unit_value_interval(0.3, 0.7),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: UnitValue::MAX,
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert!(mode.control(abs(0.0), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.3));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.3));
+        }
+
+        #[test]
+        fn feedback() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.5)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(1.0));
+        }
+
+        #[test]
+        fn feedback_target_interval() {
+            // Given
+            let mode: UniversalMode<TestTransformation> = UniversalMode {
+                absolute_interpretation: AbsoluteInterpretation::Toggle,
+                target_value_interval: create_unit_value_interval(0.3, 0.7),
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.4)).unwrap(), uv(0.25));
+            assert_abs_diff_eq!(mode.feedback(uv(0.7)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(1.0));
+        }
+    }
+
+    mod relative {
         use super::*;
 
         mod absolute_continuous_target {
@@ -349,7 +1288,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -369,7 +1308,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -389,7 +1328,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -410,7 +1349,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -431,7 +1370,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -452,7 +1391,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -473,7 +1412,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -494,7 +1433,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -515,7 +1454,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -536,7 +1475,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -557,7 +1496,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -578,7 +1517,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -599,7 +1538,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_just_appearing_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -620,7 +1559,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -642,7 +1581,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -664,7 +1603,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -690,7 +1629,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -712,7 +1651,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -734,7 +1673,7 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
@@ -759,7 +1698,7 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
@@ -782,7 +1721,7 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -805,7 +1744,7 @@ mod tests {
             #[test]
             fn max_step_count_throttle() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(-2, -2),
                     ..Default::default()
                 };
@@ -833,7 +1772,7 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -856,7 +1795,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -879,7 +1818,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -902,7 +1841,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -925,7 +1864,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -948,7 +1887,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -971,7 +1910,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -994,7 +1933,7 @@ mod tests {
             #[test]
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -1018,7 +1957,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1042,7 +1981,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1066,7 +2005,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1094,7 +2033,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1114,7 +2053,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(2, 100),
                     ..Default::default()
                 };
@@ -1135,7 +2074,7 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(-4, 100),
                     ..Default::default()
                 };
@@ -1170,7 +2109,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -1191,7 +2130,7 @@ mod tests {
             #[test]
             fn max_step_count_throttle() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     step_count_interval: create_discrete_increment_interval(-10, -4),
                     ..Default::default()
                 };
@@ -1227,7 +2166,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -1246,7 +2185,8 @@ mod tests {
             }
         }
     }
-    mod absolute_value {
+
+    mod absolute_to_relative {
         use super::*;
 
         mod absolute_continuous_target {
@@ -1255,7 +2195,8 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1272,7 +2213,8 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1289,7 +2231,8 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -1308,7 +2251,8 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -1326,7 +2270,8 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -1346,7 +2291,8 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -1364,7 +2310,8 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -1384,7 +2331,8 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_size_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
@@ -1405,7 +2353,8 @@ mod tests {
             #[test]
             fn reverse_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     reverse: true,
                     ..Default::default()
                 };
@@ -1423,7 +2372,8 @@ mod tests {
             #[test]
             fn reverse_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     reverse: true,
                     ..Default::default()
                 };
@@ -1442,7 +2392,8 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     rotate: true,
                     ..Default::default()
                 };
@@ -1461,7 +2412,8 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     rotate: true,
                     ..Default::default()
                 };
@@ -1480,7 +2432,8 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1499,7 +2452,8 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1518,7 +2472,8 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1537,7 +2492,8 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1557,7 +2513,8 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1577,7 +2534,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1597,7 +2555,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -1622,7 +2581,8 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1642,7 +2602,8 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1662,7 +2623,8 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
@@ -1683,7 +2645,8 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(-4, -4),
                     ..Default::default()
                 };
@@ -1707,7 +2670,8 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
@@ -1728,7 +2692,8 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(1, 8),
                     ..Default::default()
                 };
@@ -1749,7 +2714,8 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -1772,7 +2738,8 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -1794,7 +2761,8 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -1817,7 +2785,8 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     reverse: true,
                     ..Default::default()
                 };
@@ -1838,7 +2807,8 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     rotate: true,
                     ..Default::default()
                 };
@@ -1859,7 +2829,8 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     rotate: true,
                     ..Default::default()
                 };
@@ -1880,7 +2851,8 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1901,7 +2873,8 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1922,7 +2895,8 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1943,7 +2917,8 @@ mod tests {
             #[test]
             fn step_count_interval_exceeded() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     ..Default::default()
                 };
@@ -1964,7 +2939,8 @@ mod tests {
             #[test]
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -1986,7 +2962,8 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2008,7 +2985,8 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2030,7 +3008,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2052,7 +3031,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -2079,7 +3059,8 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -2097,7 +3078,8 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(2, 8),
                     ..Default::default()
                 };
@@ -2116,7 +3098,8 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -2135,7 +3118,8 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -2154,7 +3138,8 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -2174,7 +3159,8 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     reverse: true,
                     ..Default::default()
                 };
@@ -2197,7 +3183,8 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     ..Default::default()
                 };
                 // When
@@ -2210,7 +3197,8 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     reverse: true,
                     ..Default::default()
                 };
@@ -2224,7 +3212,8 @@ mod tests {
             #[test]
             fn source_and_target_interval() {
                 // Given
-                let mode: RelativeMode<TestTransformation> = RelativeMode {
+                let mode: UniversalMode<TestTransformation> = UniversalMode {
+                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
                     target_value_interval: create_unit_value_interval(0.4, 1.0),
                     ..Default::default()
@@ -2239,15 +3228,15 @@ mod tests {
         }
     }
 
+    fn uv(number: f64) -> UnitValue {
+        UnitValue::new(number)
+    }
+
     fn abs(number: f64) -> ControlValue {
         ControlValue::absolute(number)
     }
 
     fn rel(increment: i32) -> ControlValue {
         ControlValue::relative(increment)
-    }
-
-    fn uv(number: f64) -> UnitValue {
-        UnitValue::new(number)
     }
 }
