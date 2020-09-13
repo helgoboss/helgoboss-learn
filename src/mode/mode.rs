@@ -4,6 +4,11 @@ use crate::{
     Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, Target, Transformation,
     UnitIncrement, UnitValue,
 };
+use derive_more::Display;
+use enum_iterator::IntoEnumIterator;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+#[cfg(feature = "serde_repr")]
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
 /// Settings for processing all kinds of control values.
 ///
@@ -25,8 +30,8 @@ use crate::{
 ///         - Displayed as: "{count} x" or "{count}" (former if source emits increments) TODO I
 ///           think now we have only the "x" variant
 #[derive(Clone, Debug)]
-pub struct UniversalMode<T: Transformation> {
-    pub absolute_interpretation: AbsoluteInterpretation,
+pub struct Mode<T: Transformation> {
+    pub absolute_mode: AbsoluteMode,
     pub source_value_interval: Interval<UnitValue>,
     pub target_value_interval: Interval<UnitValue>,
     /// Negative increments represent fractions (throttling), e.g. -2 fires an increment every
@@ -52,17 +57,24 @@ pub struct UniversalMode<T: Transformation> {
     pub increment_counter: i32,
 }
 
-#[derive(Clone, Debug)]
-pub enum AbsoluteInterpretation {
-    Normal,
-    ButtonsToRelative,
-    Toggle,
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
+)]
+#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
+#[repr(usize)]
+pub enum AbsoluteMode {
+    #[display(fmt = "Normal")]
+    Normal = 0,
+    #[display(fmt = "Incremental buttons")]
+    IncrementalButtons = 1,
+    #[display(fmt = "Toggle buttons")]
+    ToggleButtons = 2,
 }
 
-impl<T: Transformation> Default for UniversalMode<T> {
+impl<T: Transformation> Default for Mode<T> {
     fn default() -> Self {
-        UniversalMode {
-            absolute_interpretation: AbsoluteInterpretation::Normal,
+        Mode {
+            absolute_mode: AbsoluteMode::Normal,
             source_value_interval: full_unit_interval(),
             target_value_interval: full_unit_interval(),
             // 0.01 has been chosen as default minimum step size because it corresponds to 1%.
@@ -88,7 +100,7 @@ impl<T: Transformation> Default for UniversalMode<T> {
     }
 }
 
-impl<T: Transformation> UniversalMode<T> {
+impl<T: Transformation> Mode<T> {
     /// Processes the given control value and maybe returns an appropriate target control value.
     pub fn control(
         &mut self,
@@ -98,14 +110,14 @@ impl<T: Transformation> UniversalMode<T> {
         match control_value {
             ControlValue::Relative(i) => self.control_relative(i, target),
             ControlValue::Absolute(v) => {
-                use AbsoluteInterpretation::*;
-                match self.absolute_interpretation {
+                use AbsoluteMode::*;
+                match self.absolute_mode {
                     Normal => self
                         .control_absolute_normal(v, target)
                         .map(ControlValue::Absolute),
-                    ButtonsToRelative => self.control_absolute_to_relative(v, target),
-                    Toggle => self
-                        .control_absolute_toggle(v, target)
+                    IncrementalButtons => self.control_absolute_incremental_buttons(v, target),
+                    ToggleButtons => self
+                        .control_absolute_toggle_buttons(v, target)
                         .map(ControlValue::Absolute),
                 }
             }
@@ -173,7 +185,7 @@ impl<T: Transformation> UniversalMode<T> {
     }
 
     /// Relative one-direction mode (convert absolute button presses to relative increments)
-    fn control_absolute_to_relative(
+    fn control_absolute_incremental_buttons(
         &mut self,
         control_value: UnitValue,
         target: &impl Target,
@@ -235,7 +247,7 @@ impl<T: Transformation> UniversalMode<T> {
         }
     }
 
-    fn control_absolute_toggle(
+    fn control_absolute_toggle_buttons(
         &mut self,
         control_value: UnitValue,
         target: &impl Target,
@@ -535,7 +547,7 @@ mod tests {
         #[test]
         fn default() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 ..Default::default()
             };
             let target = TestTarget {
@@ -553,7 +565,7 @@ mod tests {
         #[test]
         fn relative_target() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 ..Default::default()
             };
             let target = TestTarget {
@@ -571,7 +583,7 @@ mod tests {
         #[test]
         fn source_interval() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.2, 0.6),
                 ..Default::default()
             };
@@ -593,7 +605,7 @@ mod tests {
         #[test]
         fn source_interval_out_of_range_ignore() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.2, 0.6),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -616,7 +628,7 @@ mod tests {
         #[test]
         fn source_interval_out_of_range_min() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.2, 0.6),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -639,7 +651,7 @@ mod tests {
         #[test]
         fn source_interval_out_of_range_ignore_source_one_value() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.5, 0.5),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -660,7 +672,7 @@ mod tests {
         #[test]
         fn source_interval_out_of_range_min_source_one_value() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.5, 0.5),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -681,7 +693,7 @@ mod tests {
         #[test]
         fn source_interval_out_of_range_min_max_source_one_value() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.5, 0.5),
                 out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
                 ..Default::default()
@@ -702,7 +714,7 @@ mod tests {
         #[test]
         fn target_interval() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 target_value_interval: create_unit_value_interval(0.2, 0.6),
                 ..Default::default()
             };
@@ -723,7 +735,7 @@ mod tests {
         #[test]
         fn source_and_target_interval() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.2, 0.6),
                 target_value_interval: create_unit_value_interval(0.2, 0.6),
                 ..Default::default()
@@ -745,7 +757,7 @@ mod tests {
         #[test]
         fn source_and_target_interval_shifted() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.2, 0.6),
                 target_value_interval: create_unit_value_interval(0.4, 0.8),
                 ..Default::default()
@@ -767,7 +779,7 @@ mod tests {
         #[test]
         fn reverse() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 reverse: true,
                 ..Default::default()
             };
@@ -785,7 +797,7 @@ mod tests {
         #[test]
         fn round() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 round_target_value: true,
                 ..Default::default()
             };
@@ -809,7 +821,7 @@ mod tests {
         #[test]
         fn jump_interval() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 jump_interval: create_unit_value_interval(0.0, 0.2),
                 ..Default::default()
             };
@@ -832,7 +844,7 @@ mod tests {
         #[test]
         fn jump_interval_min() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 jump_interval: create_unit_value_interval(0.1, 1.0),
                 ..Default::default()
             };
@@ -852,7 +864,7 @@ mod tests {
         #[test]
         fn jump_interval_approach() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 jump_interval: create_unit_value_interval(0.0, 0.2),
                 approach_target_value: true,
                 ..Default::default()
@@ -875,7 +887,7 @@ mod tests {
         #[test]
         fn transformation_ok() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 control_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
                 ..Default::default()
             };
@@ -893,7 +905,7 @@ mod tests {
         #[test]
         fn transformation_err() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mut mode: Mode<TestTransformation> = Mode {
                 control_transformation: Some(TestTransformation::new(|_| Err(()))),
                 ..Default::default()
             };
@@ -911,7 +923,7 @@ mod tests {
         #[test]
         fn feedback() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 ..Default::default()
             };
             // When
@@ -924,7 +936,7 @@ mod tests {
         #[test]
         fn feedback_reverse() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 reverse: true,
                 ..Default::default()
             };
@@ -938,7 +950,7 @@ mod tests {
         #[test]
         fn feedback_source_and_target_interval() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 source_value_interval: create_unit_value_interval(0.2, 0.8),
                 target_value_interval: create_unit_value_interval(0.4, 1.0),
                 ..Default::default()
@@ -954,7 +966,7 @@ mod tests {
         #[test]
         fn feedback_out_of_range_ignore() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 target_value_interval: create_unit_value_interval(0.2, 0.8),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -969,7 +981,7 @@ mod tests {
         #[test]
         fn feedback_out_of_range_min() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 target_value_interval: create_unit_value_interval(0.2, 0.8),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -986,7 +998,7 @@ mod tests {
         #[test]
         fn feedback_out_of_range_min_target_one_value() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 target_value_interval: create_unit_value_interval(0.5, 0.5),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -1003,7 +1015,7 @@ mod tests {
         #[test]
         fn feedback_out_of_range_min_max_target_one_value() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 target_value_interval: create_unit_value_interval(0.5, 0.5),
                 ..Default::default()
             };
@@ -1019,7 +1031,7 @@ mod tests {
         #[test]
         fn feedback_out_of_range_ignore_target_one_value() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 target_value_interval: create_unit_value_interval(0.5, 0.5),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -1036,7 +1048,7 @@ mod tests {
         #[test]
         fn feedback_transformation() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
+            let mode: Mode<TestTransformation> = Mode {
                 feedback_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
                 ..Default::default()
             };
@@ -1055,8 +1067,8 @@ mod tests {
         #[test]
         fn absolute_value_target_off() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1074,8 +1086,8 @@ mod tests {
         #[test]
         fn absolute_value_target_on() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1093,8 +1105,8 @@ mod tests {
         #[test]
         fn absolute_value_target_rather_off() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1112,8 +1124,8 @@ mod tests {
         #[test]
         fn absolute_value_target_rather_on() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1131,8 +1143,8 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_off() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             };
@@ -1151,8 +1163,8 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_on() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             };
@@ -1171,8 +1183,8 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_rather_off() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             };
@@ -1191,8 +1203,8 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_rather_on() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             };
@@ -1211,8 +1223,8 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_too_off() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             };
@@ -1231,8 +1243,8 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_too_on() {
             // Given
-            let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             };
@@ -1251,8 +1263,8 @@ mod tests {
         #[test]
         fn feedback() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 ..Default::default()
             };
             // When
@@ -1265,8 +1277,8 @@ mod tests {
         #[test]
         fn feedback_target_interval() {
             // Given
-            let mode: UniversalMode<TestTransformation> = UniversalMode {
-                absolute_interpretation: AbsoluteInterpretation::Toggle,
+            let mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::ToggleButtons,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             };
@@ -1288,7 +1300,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1308,7 +1320,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1328,7 +1340,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -1349,7 +1361,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -1370,7 +1382,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -1391,7 +1403,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -1412,7 +1424,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -1433,7 +1445,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1454,7 +1466,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1475,7 +1487,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1496,7 +1508,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1517,7 +1529,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1538,7 +1550,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_just_appearing_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1559,7 +1571,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1581,7 +1593,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1603,7 +1615,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1629,7 +1641,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1651,7 +1663,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -1673,7 +1685,7 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
@@ -1698,7 +1710,7 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(4, 100),
                     ..Default::default()
                 };
@@ -1721,7 +1733,7 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -1744,7 +1756,7 @@ mod tests {
             #[test]
             fn max_step_count_throttle() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(-2, -2),
                     ..Default::default()
                 };
@@ -1772,7 +1784,7 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -1795,7 +1807,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -1818,7 +1830,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1841,7 +1853,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     rotate: true,
                     ..Default::default()
                 };
@@ -1864,7 +1876,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1887,7 +1899,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1910,7 +1922,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -1933,7 +1945,7 @@ mod tests {
             #[test]
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -1957,7 +1969,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -1981,7 +1993,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2005,7 +2017,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2033,7 +2045,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -2053,7 +2065,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(2, 100),
                     ..Default::default()
                 };
@@ -2074,7 +2086,7 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(-4, 100),
                     ..Default::default()
                 };
@@ -2109,7 +2121,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -2130,7 +2142,7 @@ mod tests {
             #[test]
             fn max_step_count_throttle() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     step_count_interval: create_discrete_increment_interval(-10, -4),
                     ..Default::default()
                 };
@@ -2166,7 +2178,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
+                let mut mode: Mode<TestTransformation> = Mode {
                     reverse: true,
                     ..Default::default()
                 };
@@ -2195,8 +2207,8 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -2213,8 +2225,8 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -2231,8 +2243,8 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -2251,8 +2263,8 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 };
@@ -2270,8 +2282,8 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -2291,8 +2303,8 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 };
@@ -2310,8 +2322,8 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -2331,8 +2343,8 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_size_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
@@ -2353,8 +2365,8 @@ mod tests {
             #[test]
             fn reverse_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     reverse: true,
                     ..Default::default()
                 };
@@ -2372,8 +2384,8 @@ mod tests {
             #[test]
             fn reverse_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     reverse: true,
                     ..Default::default()
                 };
@@ -2392,8 +2404,8 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     rotate: true,
                     ..Default::default()
                 };
@@ -2412,8 +2424,8 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     rotate: true,
                     ..Default::default()
                 };
@@ -2432,8 +2444,8 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -2452,8 +2464,8 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -2472,8 +2484,8 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -2492,8 +2504,8 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2513,8 +2525,8 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2534,8 +2546,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2555,8 +2567,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -2581,8 +2593,8 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -2602,8 +2614,8 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -2623,8 +2635,8 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
@@ -2645,8 +2657,8 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(-4, -4),
                     ..Default::default()
                 };
@@ -2670,8 +2682,8 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 };
@@ -2692,8 +2704,8 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(1, 8),
                     ..Default::default()
                 };
@@ -2714,8 +2726,8 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -2738,8 +2750,8 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -2761,8 +2773,8 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -2785,8 +2797,8 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     reverse: true,
                     ..Default::default()
                 };
@@ -2807,8 +2819,8 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     rotate: true,
                     ..Default::default()
                 };
@@ -2829,8 +2841,8 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     rotate: true,
                     ..Default::default()
                 };
@@ -2851,8 +2863,8 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -2873,8 +2885,8 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -2895,8 +2907,8 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 };
@@ -2917,8 +2929,8 @@ mod tests {
             #[test]
             fn step_count_interval_exceeded() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     ..Default::default()
                 };
@@ -2939,8 +2951,8 @@ mod tests {
             #[test]
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -2962,8 +2974,8 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -2985,8 +2997,8 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -3008,8 +3020,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -3031,8 +3043,8 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -3059,8 +3071,8 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     ..Default::default()
                 };
                 let target = TestTarget {
@@ -3078,8 +3090,8 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(2, 8),
                     ..Default::default()
                 };
@@ -3098,8 +3110,8 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 };
@@ -3118,8 +3130,8 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 };
@@ -3138,8 +3150,8 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -3159,8 +3171,8 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     reverse: true,
                     ..Default::default()
                 };
@@ -3183,8 +3195,8 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     ..Default::default()
                 };
                 // When
@@ -3197,8 +3209,8 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     reverse: true,
                     ..Default::default()
                 };
@@ -3212,8 +3224,8 @@ mod tests {
             #[test]
             fn source_and_target_interval() {
                 // Given
-                let mode: UniversalMode<TestTransformation> = UniversalMode {
-                    absolute_interpretation: AbsoluteInterpretation::ButtonsToRelative,
+                let mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
                     target_value_interval: create_unit_value_interval(0.4, 1.0),
                     ..Default::default()
