@@ -106,7 +106,7 @@ impl<T: Transformation> RelativeMode<T> {
         }
         use ControlType::*;
         match target.control_type() {
-            AbsoluteContinuous | AbsoluteContinuousRoundable { .. } => {
+            AbsoluteContinuous | AbsoluteContinuousRoundable { .. } | Virtual => {
                 // Continuous target
                 //
                 // Settings:
@@ -228,7 +228,7 @@ impl<T: Transformation> RelativeMode<T> {
                     target.current_value()
                 })
             }
-            Relative => {
+            Relative | Virtual => {
                 // Target wants increments so we just forward them after some preprocessing
                 //
                 // Settings which are always necessary:

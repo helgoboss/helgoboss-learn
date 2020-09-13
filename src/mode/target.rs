@@ -12,6 +12,8 @@ pub enum ControlType {
     AbsoluteDiscrete { atomic_step_size: UnitValue },
     /// If target wants to be controlled via relative increments.
     Relative,
+    /// For virtual targets that don't know about the nature of the real target.
+    Virtual,
 }
 
 impl ControlType {
