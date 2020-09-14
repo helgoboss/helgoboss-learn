@@ -198,6 +198,8 @@ impl<T: Transformation> Mode<T> {
         match target.control_type() {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
+            // TODO-low I think trigger and switch targets don't make sense at all here because
+            //  instead of +/- n they need just "trigger!" or "on/off!". 
             | AbsoluteTrigger
             | AbsoluteSwitch => {
                 // Continuous target
@@ -219,7 +221,7 @@ impl<T: Transformation> Mode<T> {
                 self.hit_target_absolutely_with_unit_increment(
                     step_size_increment,
                     self.step_size_interval.min_val(),
-                    target.current_value(),
+                    target.current_value()?,
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -236,7 +238,13 @@ impl<T: Transformation> Mode<T> {
                     target.current_value()
                 })
             }
-            Relative => {
+            Relative
+            // This is cool! With this, we can make controllers without encoders simulate them
+            // by assigning one - button and one + button to the same virtual multi target.
+            // Of course, all we can deliver is increments/decrements since virtual targets 
+            // don't provide a current target value. But we also don't need it because all we
+            // want to do is simulate an encoder.
+            | VirtualMulti => {
                 // Target wants increments so we just generate them e.g. depending on how hard the
                 // button has been pressed
                 //
@@ -247,7 +255,11 @@ impl<T: Transformation> Mode<T> {
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
                 Some(ControlValue::Relative(discrete_increment))
             }
-            VirtualButton | VirtualMulti => todo!(),
+            VirtualButton => {
+                // This doesn't make sense at all. Buttons just need to be triggered, not fed with
+                // +/- n.
+                None
+            },
         }
     }
 
@@ -261,7 +273,9 @@ impl<T: Transformation> Mode<T> {
             return None;
         }
         let center_target_value = self.target_value_interval.center();
-        let current_target_value = target.current_value();
+        // Nothing we can do if we can't get the current target value. This shouldn't happen
+        // usually because virtual targets are not supposed to be used with toggle mode.
+        let current_target_value = target.current_value()?;
         let desired_target_value = if current_target_value > center_target_value {
             self.target_value_interval.min_val()
         } else {
@@ -286,6 +300,7 @@ impl<T: Transformation> Mode<T> {
         match target.control_type() {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
+            // TODO-low Controlling a switch/trigger target with +/- n doesn't make sense.
             | AbsoluteSwitch
             | AbsoluteTrigger => {
                 // Continuous target
@@ -308,7 +323,7 @@ impl<T: Transformation> Mode<T> {
                 self.hit_target_absolutely_with_unit_increment(
                     clamped_unit_increment,
                     self.step_size_interval.min_val(),
-                    target.current_value(),
+                    target.current_value()?,
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -325,7 +340,7 @@ impl<T: Transformation> Mode<T> {
                     target.current_value()
                 })
             }
-            Relative => {
+            Relative | VirtualMulti => {
                 // Target wants increments so we just forward them after some preprocessing
                 //
                 // Settings which are always necessary:
@@ -336,7 +351,10 @@ impl<T: Transformation> Mode<T> {
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
                 Some(ControlValue::Relative(pepped_up_increment))
             }
-            VirtualMulti | VirtualButton => todo!(),
+            VirtualButton => {
+                // Controlling a button target with +/- n doesn't make sense.
+                None
+            }
         }
     }
 
@@ -344,7 +362,7 @@ impl<T: Transformation> Mode<T> {
         &self,
         control_value: UnitValue,
         target: &impl Target,
-        current_target_value: UnitValue,
+        current_target_value: Option<UnitValue>,
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
         let mapped_control_value = control_value
@@ -352,7 +370,13 @@ impl<T: Transformation> Mode<T> {
         let transformed_source_value = self
             .control_transformation
             .as_ref()
-            .and_then(|t| t.transform(mapped_control_value, current_target_value).ok())
+            .and_then(|t| {
+                t.transform(
+                    mapped_control_value,
+                    current_target_value.unwrap_or(UnitValue::MIN),
+                )
+                .ok()
+            })
             .unwrap_or(mapped_control_value);
         let mapped_target_value =
             transformed_source_value.map_from_unit_interval_to(&self.target_value_interval);
@@ -374,11 +398,16 @@ impl<T: Transformation> Mode<T> {
     fn hitting_target_considering_max_jump(
         &self,
         control_value: UnitValue,
-        current_target_value: UnitValue,
+        current_target_value: Option<UnitValue>,
     ) -> Option<UnitValue> {
+        let current_target_value = match current_target_value {
+            // No target value available ... just deliver! Virtual targets take this shortcut.
+            None => return Some(control_value),
+            Some(v) => v,
+        };
         if self.jump_interval.is_full() {
             // No jump restrictions whatsoever
-            return Some(control_value);
+            return self.hit_if_changed(control_value, current_target_value);
         }
         let distance = control_value.calc_distance_from(current_target_value);
         if distance > self.jump_interval.max_val() {
@@ -418,13 +447,13 @@ impl<T: Transformation> Mode<T> {
         &self,
         discrete_increment: DiscreteIncrement,
         target_step_size: UnitValue,
-        current_value: impl Fn() -> UnitValue,
+        current_value: impl Fn() -> Option<UnitValue>,
     ) -> Option<ControlValue> {
         let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
         self.hit_target_absolutely_with_unit_increment(
             unit_increment,
             target_step_size,
-            current_value(),
+            current_value()?,
         )
     }
 
@@ -536,7 +565,8 @@ fn round_to_nearest_discrete_value(
     let step_size = match control_type {
         AbsoluteContinuousRoundable { rounding_step_size } => *rounding_step_size,
         AbsoluteDiscrete { atomic_step_size } => *atomic_step_size,
-        _ => return approximate_control_value,
+        AbsoluteTrigger | AbsoluteSwitch | AbsoluteContinuous | Relative | VirtualMulti
+        | VirtualButton => return approximate_control_value,
     };
     approximate_control_value.snap_to_grid_by_interval_size(step_size)
 }
@@ -559,7 +589,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -577,7 +607,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::Relative,
             };
             // When
@@ -596,7 +626,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -619,7 +649,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -642,7 +672,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -665,7 +695,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -686,7 +716,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -707,7 +737,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -727,7 +757,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -749,7 +779,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -771,7 +801,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -792,7 +822,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -810,7 +840,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteDiscrete {
                     atomic_step_size: UnitValue::new(0.2),
                 },
@@ -834,7 +864,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.5),
+                current_value: Some(UnitValue::new(0.5)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -857,7 +887,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.5),
+                current_value: Some(UnitValue::new(0.5)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -878,7 +908,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.5),
+                current_value: Some(UnitValue::new(0.5)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -900,7 +930,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -918,7 +948,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1080,7 +1110,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::MIN,
+                current_value: Some(UnitValue::MIN),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1099,7 +1129,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::MAX,
+                current_value: Some(UnitValue::MAX),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1118,7 +1148,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.333),
+                current_value: Some(UnitValue::new(0.333)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1137,7 +1167,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.777),
+                current_value: Some(UnitValue::new(0.777)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1157,7 +1187,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.3),
+                current_value: Some(UnitValue::new(0.3)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1177,7 +1207,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.7),
+                current_value: Some(UnitValue::new(0.7)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1197,7 +1227,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.4),
+                current_value: Some(UnitValue::new(0.4)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1217,7 +1247,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::new(0.6),
+                current_value: Some(UnitValue::new(0.6)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1237,7 +1267,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::MIN,
+                current_value: Some(UnitValue::MIN),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1257,7 +1287,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: UnitValue::MAX,
+                current_value: Some(UnitValue::MAX),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1312,7 +1342,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1332,7 +1362,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1353,7 +1383,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1374,7 +1404,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1395,7 +1425,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1416,7 +1446,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1437,7 +1467,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1458,7 +1488,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1479,7 +1509,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1500,7 +1530,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1521,7 +1551,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1542,7 +1572,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1563,7 +1593,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.199999999999),
+                    current_value: Some(UnitValue::new(0.199999999999)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1585,7 +1615,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1607,7 +1637,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1629,7 +1659,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -1653,7 +1683,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1675,7 +1705,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1698,7 +1728,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1723,7 +1753,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1746,7 +1776,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1769,7 +1799,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1797,7 +1827,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1820,7 +1850,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1843,7 +1873,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1866,7 +1896,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1889,7 +1919,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1912,7 +1942,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1935,7 +1965,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1959,7 +1989,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -1983,7 +2013,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2007,7 +2037,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2031,7 +2061,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2057,7 +2087,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -2078,7 +2108,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -2099,7 +2129,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -2134,7 +2164,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -2155,7 +2185,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -2191,7 +2221,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -2220,7 +2250,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2238,7 +2268,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2257,7 +2287,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2277,7 +2307,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2296,7 +2326,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2317,7 +2347,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2336,7 +2366,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2358,7 +2388,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2379,7 +2409,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2398,7 +2428,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2418,7 +2448,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2438,7 +2468,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2458,7 +2488,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2478,7 +2508,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2498,7 +2528,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2519,7 +2549,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2540,7 +2570,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2561,7 +2591,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2583,7 +2613,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteContinuous,
                 };
                 // When
@@ -2606,7 +2636,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2627,7 +2657,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2649,7 +2679,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2671,7 +2701,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2696,7 +2726,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2718,7 +2748,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2740,7 +2770,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2764,7 +2794,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2788,7 +2818,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2811,7 +2841,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2833,7 +2863,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2855,7 +2885,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MAX,
+                    current_value: Some(UnitValue::MAX),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2877,7 +2907,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2899,7 +2929,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2921,7 +2951,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2943,7 +2973,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2966,7 +2996,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -2989,7 +3019,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.2),
+                    current_value: Some(UnitValue::new(0.2)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -3012,7 +3042,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::new(0.8),
+                    current_value: Some(UnitValue::new(0.8)),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -3035,7 +3065,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -3059,7 +3089,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                     },
@@ -3084,7 +3114,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -3104,7 +3134,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -3124,7 +3154,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -3144,7 +3174,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -3165,7 +3195,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When
@@ -3185,7 +3215,7 @@ mod tests {
                     ..Default::default()
                 };
                 let target = TestTarget {
-                    current_value: UnitValue::MIN,
+                    current_value: Some(UnitValue::MIN),
                     control_type: ControlType::Relative,
                 };
                 // When

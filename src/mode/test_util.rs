@@ -1,12 +1,12 @@
 use crate::{ControlType, Target, Transformation, UnitValue};
 
 pub struct TestTarget {
-    pub current_value: UnitValue,
+    pub current_value: Option<UnitValue>,
     pub control_type: ControlType,
 }
 
 impl Target for TestTarget {
-    fn current_value(&self) -> UnitValue {
+    fn current_value(&self) -> Option<UnitValue> {
         self.current_value
     }
 

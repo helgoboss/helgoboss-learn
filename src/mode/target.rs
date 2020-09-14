@@ -41,7 +41,13 @@ impl ControlType {
 
 pub trait Target {
     /// Should return the current value of the target.
-    fn current_value(&self) -> UnitValue;
+    ///
+    /// Some targets don't have the notion of a current value, e.g. virtual targets (which are just
+    /// mediators really). Other targets might momentarily not be able to return a current value.
+    /// In such cases, `None` should be returned so that the mode can handle this situation
+    /// gracefully. Of course, some mode features won't work without knowing the current value,
+    /// but others will still work.
+    fn current_value(&self) -> Option<UnitValue>;
 
     fn control_type(&self) -> ControlType;
 }
