@@ -38,6 +38,12 @@ pub enum SourceCharacter {
     Encoder3 = 4,
 }
 
+impl Default for SourceCharacter {
+    fn default() -> Self {
+        SourceCharacter::Range
+    }
+}
+
 impl SourceCharacter {
     /// Returns whether sources with this character emit relative increments instead of absolute
     /// values.
@@ -65,6 +71,12 @@ pub enum MidiClockTransportMessage {
     Start = 0,
     Continue = 1,
     Stop = 2,
+}
+
+impl Default for MidiClockTransportMessage {
+    fn default() -> Self {
+        MidiClockTransportMessage::Start
+    }
 }
 
 impl From<MidiClockTransportMessage> for ShortMessageType {

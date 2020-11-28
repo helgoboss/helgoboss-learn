@@ -71,6 +71,12 @@ pub enum AbsoluteMode {
     ToggleButtons = 2,
 }
 
+impl Default for AbsoluteMode {
+    fn default() -> Self {
+        AbsoluteMode::Normal
+    }
+}
+
 impl<T: Transformation> Default for Mode<T> {
     fn default() -> Self {
         Mode {

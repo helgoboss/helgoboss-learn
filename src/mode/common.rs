@@ -33,3 +33,9 @@ pub enum OutOfRangeBehavior {
     #[display(fmt = "Ignore")]
     Ignore,
 }
+
+impl Default for OutOfRangeBehavior {
+    fn default() -> Self {
+        OutOfRangeBehavior::MinOrMax
+    }
+}

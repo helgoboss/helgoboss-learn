@@ -6,7 +6,7 @@ use std::convert::TryFrom;
 use std::ops::{Add, Sub};
 
 /// A number within the negative and positive unit interval `(-1.0..=1.0)`.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display, Default)]
 #[cfg_attr(
     feature = "serde",
     derive(Serialize, Deserialize),
@@ -103,7 +103,7 @@ pub enum MinIsMaxBehavior {
 }
 
 /// A number within the unit interval `(0.0..=1.0)`.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display, Default)]
 #[cfg_attr(
     feature = "serde",
     derive(Serialize, Deserialize),
