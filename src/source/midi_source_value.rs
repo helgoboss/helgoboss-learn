@@ -3,6 +3,7 @@ use derive_more::Display;
 use helgoboss_midi::{
     ControlChange14BitMessage, ParameterNumberMessage, ShortMessage, ShortMessageFactory,
 };
+use std::convert::TryFrom;
 
 /// Incoming value which might be used to control something
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -83,5 +84,16 @@ impl std::str::FromStr for Bpm {
             return Err("not in the allowed BPM range");
         }
         Ok(Bpm(primitive))
+    }
+}
+
+impl TryFrom<f64> for Bpm {
+    type Error = &'static str;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        if !Self::is_valid(value) {
+            return Err("value must be between 1.0 and 960.0");
+        }
+        Ok(Bpm(value))
     }
 }
