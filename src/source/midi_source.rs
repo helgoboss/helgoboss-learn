@@ -599,12 +599,12 @@ impl MidiSource {
 
     /// Returns whether this source emits relative increments instead of absolute values.
     pub fn emits_increments(&self) -> bool {
-        match self {
+        matches!(
+            self,
             MidiSource::ControlChangeValue {
                 custom_character, ..
-            } if custom_character.emits_increments() => true,
-            _ => false,
-        }
+            } if custom_character.emits_increments()
+        )
     }
 
     /// Converts the given absolute control value to an integer which reflects the MIDI source
@@ -692,7 +692,7 @@ fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> b
 fn calc_control_value_from_control_change(
     character: SourceCharacter,
     cc_control_value: U7,
-) -> Result<ControlValue, ()> {
+) -> Result<ControlValue, &'static str> {
     use SourceCharacter::*;
     let result = match character {
         Encoder1 => rel(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),

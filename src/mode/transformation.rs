@@ -7,5 +7,9 @@ pub trait Transformation {
     ///
     /// Should execute fast.If you use an expression or scripting language, make sure that you
     /// compile the expression before-hand.
-    fn transform(&self, input_value: UnitValue, output_value: UnitValue) -> Result<UnitValue, ()>;
+    fn transform(
+        &self,
+        input_value: UnitValue,
+        output_value: UnitValue,
+    ) -> Result<UnitValue, &'static str>;
 }

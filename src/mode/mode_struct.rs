@@ -950,7 +950,7 @@ mod tests {
         fn transformation_err() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                control_transformation: Some(TestTransformation::new(|_| Err(()))),
+                control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
                 ..Default::default()
             };
             let target = TestTarget {

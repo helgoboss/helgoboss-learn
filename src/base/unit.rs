@@ -22,7 +22,7 @@ impl SymmetricUnitValue {
     pub const MAX: SymmetricUnitValue = SymmetricUnitValue(1.0);
 
     pub fn is_valid(number: f64) -> bool {
-        -1.0 <= number && number <= 1.0
+        (-1.0..=1.0).contains(&number)
     }
 
     /// Creates the symmetric unit value. Panics if the given number is not within the positive unit
@@ -119,7 +119,7 @@ impl UnitValue {
     pub const MAX: UnitValue = UnitValue(1.0);
 
     pub fn is_valid(number: f64) -> bool {
-        0.0 <= number && number <= 1.0
+        (0.0..=1.0).contains(&number)
     }
 
     /// Creates the unit value. Panics if the given number is not within the positive unit interval.
