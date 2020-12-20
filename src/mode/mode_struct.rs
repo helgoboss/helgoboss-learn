@@ -371,8 +371,10 @@ impl<T: Transformation> Mode<T> {
         current_target_value: Option<UnitValue>,
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
+        // 1. Apply source interval
         let mapped_control_value = control_value
             .map_to_unit_interval_from(&self.source_value_interval, min_is_max_behavior);
+        // 2. Apply transformation
         let transformed_source_value = self
             .control_transformation
             .as_ref()
@@ -384,13 +386,16 @@ impl<T: Transformation> Mode<T> {
                 .ok()
             })
             .unwrap_or(mapped_control_value);
+        // 3. Apply target interval
         let mapped_target_value =
             transformed_source_value.map_from_unit_interval_to(&self.target_value_interval);
+        // 4. Apply reverse
         let potentially_inversed_target_value = if self.reverse {
             mapped_target_value.inverse()
         } else {
             mapped_target_value
         };
+        // 5. Apply rounding
         if self.round_target_value {
             round_to_nearest_discrete_value(
                 &target.control_type(),

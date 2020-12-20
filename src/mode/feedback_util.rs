@@ -44,20 +44,21 @@ pub fn feedback<T: Transformation>(
                 Ignore => return None,
             }
         };
+    // 1. Apply reverse
     let potentially_inversed_value = if reverse {
         target_bound_value.inverse()
     } else {
         target_bound_value
     };
+    // 2. Apply target interval
+    let full_interval_value = potentially_inversed_value
+        .map_to_unit_interval_from(target_value_interval, min_is_max_behavior);
+    // 3. Apply transformation
     let transformed_value = transformation
         .as_ref()
-        .and_then(|t| {
-            t.transform(potentially_inversed_value, potentially_inversed_value)
-                .ok()
-        })
-        .unwrap_or(potentially_inversed_value);
-    let full_interval_value =
-        transformed_value.map_to_unit_interval_from(target_value_interval, min_is_max_behavior);
-    let source_value = full_interval_value.map_from_unit_interval_to(source_value_interval);
+        .and_then(|t| t.transform(full_interval_value, full_interval_value).ok())
+        .unwrap_or(full_interval_value);
+    // 4. Apply source interval
+    let source_value = transformed_value.map_from_unit_interval_to(source_value_interval);
     Some(source_value)
 }
