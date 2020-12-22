@@ -14,3 +14,5 @@ enum-iterator = "0.6.0"
 serde = { version = "1.0", features = ["derive"] , optional = true }
 serde_repr = { version = "0.1.5", optional = true }
 lazycell = "1.2"
+# For being able to exclude some fields from the hash function (necessary for ignoring already learned sources)
+derivative = "2.1.1"

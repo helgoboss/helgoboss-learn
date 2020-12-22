@@ -1,4 +1,5 @@
 use crate::{Bpm, ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
+use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -90,7 +91,8 @@ impl From<MidiClockTransportMessage> for ShortMessageType {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(Eq, PartialEq, Hash)]
 pub enum MidiSource {
     NoteVelocity {
         channel: Option<Channel>,
@@ -108,6 +110,7 @@ pub enum MidiSource {
     ControlChangeValue {
         channel: Option<Channel>,
         controller_number: Option<ControllerNumber>,
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
         custom_character: SourceCharacter,
     },
     // ShortMessageType::ProgramChange
