@@ -5,34 +5,27 @@ use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::ops::{Add, Sub};
 
-/// A number within the negative and positive unit interval `(-1.0..=1.0)`.
+/// A number that is primarily within the negative and positive unit interval `(-1.0..=1.0)` but
+/// can also take higher values.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display, Default)]
 #[cfg_attr(
     feature = "serde",
     derive(Serialize, Deserialize),
     serde(try_from = "f64")
 )]
-pub struct SymmetricUnitValue(f64);
+pub struct SoftSymmetricUnitValue(f64);
 
-impl SymmetricUnitValue {
+impl SoftSymmetricUnitValue {
     /// -1.0
-    pub const MIN: SymmetricUnitValue = SymmetricUnitValue(-1.0);
+    pub const SOFT_MIN: SoftSymmetricUnitValue = SoftSymmetricUnitValue(-1.0);
 
     /// 1.0
-    pub const MAX: SymmetricUnitValue = SymmetricUnitValue(1.0);
-
-    pub fn is_valid(number: f64) -> bool {
-        (-1.0..=1.0).contains(&number)
-    }
+    pub const SOFT_MAX: SoftSymmetricUnitValue = SoftSymmetricUnitValue(1.0);
 
     /// Creates the symmetric unit value. Panics if the given number is not within the positive unit
     /// interval.
-    pub fn new(number: f64) -> SymmetricUnitValue {
-        assert!(
-            Self::is_valid(number),
-            format!("{} is not a valid symmetric unit value", number)
-        );
-        SymmetricUnitValue(number)
+    pub fn new(number: f64) -> SoftSymmetricUnitValue {
+        SoftSymmetricUnitValue(number)
     }
 
     /// Returns the underlying number.
@@ -41,23 +34,23 @@ impl SymmetricUnitValue {
     }
 
     pub fn abs(&self) -> UnitValue {
-        UnitValue::new(self.0.abs())
+        UnitValue::new_clamped(self.0.abs())
     }
 
     pub fn map_to_positive_unit_interval(&self) -> UnitValue {
-        UnitValue::new((self.0 + 1.0) / 2.0)
+        UnitValue::new_clamped((self.0 + 1.0) / 2.0)
     }
 
     pub fn clamp_to_positive_unit_interval(&self) -> UnitValue {
         if self.0 < 0.0 {
             UnitValue::MIN
         } else {
-            UnitValue::new(self.0)
+            UnitValue::new_clamped(self.0)
         }
     }
 }
 
-impl Add for SymmetricUnitValue {
+impl Add for SoftSymmetricUnitValue {
     type Output = f64;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -65,7 +58,7 @@ impl Add for SymmetricUnitValue {
     }
 }
 
-impl Sub for SymmetricUnitValue {
+impl Sub for SoftSymmetricUnitValue {
     type Output = f64;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -73,26 +66,18 @@ impl Sub for SymmetricUnitValue {
     }
 }
 
-impl TryFrom<f64> for SymmetricUnitValue {
-    type Error = &'static str;
-
-    fn try_from(value: f64) -> Result<Self, Self::Error> {
-        if !SymmetricUnitValue::is_valid(value) {
-            return Err("value is not between -1.0 and 1.0");
-        }
-        Ok(SymmetricUnitValue(value))
+impl From<f64> for SoftSymmetricUnitValue {
+    fn from(v: f64) -> Self {
+        SoftSymmetricUnitValue(v)
     }
 }
 
-impl std::str::FromStr for SymmetricUnitValue {
+impl std::str::FromStr for SoftSymmetricUnitValue {
     type Err = &'static str;
 
     fn from_str(source: &str) -> Result<Self, Self::Err> {
         let primitive = f64::from_str(source).map_err(|_| "not a valid decimal number")?;
-        if !SymmetricUnitValue::is_valid(primitive) {
-            return Err("not a value between -1.0 and 1.0");
-        }
-        Ok(SymmetricUnitValue(primitive))
+        Ok(SoftSymmetricUnitValue(primitive))
     }
 }
 
@@ -164,12 +149,12 @@ impl UnitValue {
         self.0
     }
 
-    pub fn to_symmetric(&self) -> SymmetricUnitValue {
-        SymmetricUnitValue::new(self.0)
+    pub fn to_symmetric(&self) -> SoftSymmetricUnitValue {
+        SoftSymmetricUnitValue::new(self.0)
     }
 
-    pub fn map_to_symmetric_unit_interval(&self) -> SymmetricUnitValue {
-        SymmetricUnitValue::new((self.0 * 2.0) - 1.0)
+    pub fn map_to_symmetric_unit_interval(&self) -> SoftSymmetricUnitValue {
+        SoftSymmetricUnitValue::new((self.0 * 2.0) - 1.0)
     }
 
     /// Tests if this value is within the given interval.
