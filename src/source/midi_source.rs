@@ -449,7 +449,7 @@ impl MidiSource {
                     ..
                 } => {
                     matches(ch, *channel)
-                        && controller_number.can_be_part_of_14_bit_control_change_message()
+                        && controller_number.is_parameter_number_message_controller_number()
                 }
                 _ => false,
             },
