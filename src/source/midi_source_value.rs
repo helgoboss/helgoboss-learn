@@ -1,7 +1,8 @@
 use crate::UnitValue;
 use derive_more::Display;
 use helgoboss_midi::{
-    ControlChange14BitMessage, ParameterNumberMessage, ShortMessage, ShortMessageFactory,
+    ControlChange14BitMessage, DataEntryByteOrder, ParameterNumberMessage, ShortMessage,
+    ShortMessageFactory,
 };
 use std::convert::TryFrom;
 
@@ -15,10 +16,15 @@ pub enum MidiSourceValue<M: ShortMessage> {
 }
 
 impl<M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<M> {
-    pub fn to_short_messages(&self) -> [Option<M>; 4] {
+    pub fn to_short_messages(
+        &self,
+        nrpn_data_entry_byte_order: DataEntryByteOrder,
+    ) -> [Option<M>; 4] {
         match self {
             MidiSourceValue::Plain(msg) => [Some(*msg), None, None, None],
-            MidiSourceValue::ParameterNumber(msg) => msg.to_short_messages(),
+            MidiSourceValue::ParameterNumber(msg) => {
+                msg.to_short_messages(nrpn_data_entry_byte_order)
+            }
             MidiSourceValue::ControlChange14Bit(msg) => {
                 let inner_shorts = msg.to_short_messages();
                 [Some(inner_shorts[0]), Some(inner_shorts[1]), None, None]
