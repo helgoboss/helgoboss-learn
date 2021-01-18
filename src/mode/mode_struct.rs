@@ -474,13 +474,6 @@ impl<T: Transformation> Mode<T> {
         grid_interval_size: UnitValue,
         current_target_value: UnitValue,
     ) -> Option<ControlValue> {
-        // The add functions doesn't add if the current target value is not within the target
-        // interval in the first place. Instead it returns one of the interval bounds. One issue
-        // that might occur is that the current target value might only *appear* out-of-range
-        // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
-        // experiences. Therefore We snap the current target value to grid first.
-        let snapped_current_target_value =
-            current_target_value.snap_to_grid_by_interval_size(grid_interval_size);
         let snapped_target_value_interval = Interval::new(
             self.target_value_interval
                 .min_val()
@@ -489,6 +482,17 @@ impl<T: Transformation> Mode<T> {
                 .max_val()
                 .snap_to_grid_by_interval_size(grid_interval_size),
         );
+        // The add functions don't add anything if the current target value is not within the target
+        // interval in the first place. Instead they return one of the interval bounds. One issue
+        // that might occur is that the current target value only *appears* out-of-range
+        // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
+        // experiences. Therefore we snap the current target value to grid first in that case.
+        let snapped_current_target_value =
+            if current_target_value.is_within_interval(&snapped_target_value_interval) {
+                current_target_value
+            } else {
+                current_target_value.snap_to_grid_by_interval_size(grid_interval_size)
+            };
         let desired_target_value = if self.rotate {
             snapped_current_target_value.add_rotating(increment, &snapped_target_value_interval)
         } else {
@@ -1615,6 +1619,24 @@ mod tests {
                 assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.21));
                 assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), abs(0.21));
                 assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), abs(0.21));
+            }
+
+            /// See https://github.com/helgoboss/realearn/issues/100.
+            #[test]
+            fn not_get_stuck() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: full_unit_interval(),
+                    step_size_interval: create_unit_value_interval(0.01, 0.01),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(UnitValue::new(0.875)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), abs(0.865));
             }
 
             #[test]
