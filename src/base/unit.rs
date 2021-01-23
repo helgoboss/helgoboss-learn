@@ -179,14 +179,14 @@ impl UnitValue {
     }
 
     /// Maps this value to the unit interval assuming that this value currently exhausts the given
-    /// source interval. If this value is outside the source interval, this method returns either
+    /// current interval. If this value is outside the current interval, this method returns either
     /// 0.0 or 1.0. If value == min == max, it returns 1.0.
     pub fn map_to_unit_interval_from(
         &self,
-        source_interval: &Interval<UnitValue>,
+        current_interval: &Interval<UnitValue>,
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
-        let (min, max) = (source_interval.min_val(), source_interval.max_val());
+        let (min, max) = (current_interval.min_val(), current_interval.max_val());
         if *self < min {
             return UnitValue::MIN;
         }
@@ -200,7 +200,7 @@ impl UnitValue {
                 PreferOne => UnitValue::MAX,
             };
         }
-        unsafe { UnitValue::new_unchecked((*self - min) / source_interval.span()) }
+        unsafe { UnitValue::new_unchecked((*self - min) / current_interval.span()) }
     }
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).
@@ -390,6 +390,11 @@ impl Interval<UnitValue> {
     /// Returns whether this interval is the complete unit interval.
     pub fn is_full(&self) -> bool {
         self.min_val().is_zero() && self.max_val().is_one()
+    }
+
+    /// Inverts the interval.
+    pub fn inverse(&self) -> Interval<UnitValue> {
+        Interval::new(self.max_val().inverse(), self.min_val().inverse())
     }
 }
 

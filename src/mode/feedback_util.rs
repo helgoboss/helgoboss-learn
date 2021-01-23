@@ -19,40 +19,48 @@ pub fn feedback<T: Transformation>(
 ) -> Option<UnitValue> {
     let rounded_target_value =
         UnitValue::new_clamped((target_value.get() / FEEDBACK_EPSILON).round() * FEEDBACK_EPSILON);
+    // 1. Apply reverse
+    let potentially_inversed_value = if reverse {
+        rounded_target_value.inverse()
+    } else {
+        rounded_target_value
+    };
+    let potentially_reversed_target_interval = if reverse {
+        target_value_interval.inverse()
+    } else {
+        *target_value_interval
+    };
+    // 2. Apply target interval
     let (target_bound_value, min_is_max_behavior) =
-        if target_value_interval.contains(rounded_target_value) {
+        if potentially_reversed_target_interval.contains(potentially_inversed_value) {
             // Feedback value is within target value interval
-            (rounded_target_value, MinIsMaxBehavior::PreferOne)
+            (potentially_inversed_value, MinIsMaxBehavior::PreferOne)
         } else {
             // Feedback value is outside target value interval
             use OutOfRangeBehavior::*;
             match out_of_range_behavior {
                 MinOrMax => {
-                    if rounded_target_value < target_value_interval.min_val() {
+                    if potentially_inversed_value < potentially_reversed_target_interval.min_val() {
                         (
-                            target_value_interval.min_val(),
+                            potentially_reversed_target_interval.min_val(),
                             MinIsMaxBehavior::PreferZero,
                         )
                     } else {
-                        (target_value_interval.max_val(), MinIsMaxBehavior::PreferOne)
+                        (
+                            potentially_reversed_target_interval.max_val(),
+                            MinIsMaxBehavior::PreferOne,
+                        )
                     }
                 }
                 Min => (
-                    target_value_interval.min_val(),
+                    potentially_reversed_target_interval.min_val(),
                     MinIsMaxBehavior::PreferZero,
                 ),
                 Ignore => return None,
             }
         };
-    // 1. Apply reverse
-    let potentially_inversed_value = if reverse {
-        target_bound_value.inverse()
-    } else {
-        target_bound_value
-    };
-    // 2. Apply target interval
-    let full_interval_value = potentially_inversed_value
-        .map_to_unit_interval_from(target_value_interval, min_is_max_behavior);
+    let full_interval_value = target_bound_value
+        .map_to_unit_interval_from(&potentially_reversed_target_interval, min_is_max_behavior);
     // 3. Apply transformation
     let transformed_value = transformation
         .as_ref()
