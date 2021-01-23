@@ -196,6 +196,7 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
+        let control_value = self.press_duration_processor.process(control_value)?;
         if control_value.is_zero() || !control_value.is_within_interval(&self.source_value_interval)
         {
             return None;
