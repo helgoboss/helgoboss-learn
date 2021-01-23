@@ -1024,6 +1024,41 @@ mod tests {
         }
 
         #[test]
+        fn feedback_target_interval() {
+            // Given
+            let mode: Mode<TestTransformation> = Mode {
+                target_value_interval: create_unit_value_interval(0.2, 1.0),
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.2)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.4)).unwrap(), uv(0.25));
+            assert_abs_diff_eq!(mode.feedback(uv(0.6)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(0.8)).unwrap(), uv(0.75));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(1.0));
+        }
+
+        #[test]
+        fn feedback_target_interval_reverse() {
+            // Given
+            let mode: Mode<TestTransformation> = Mode {
+                target_value_interval: create_unit_value_interval(0.2, 1.0),
+                reverse: true,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.2)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.4)).unwrap(), uv(0.75));
+            assert_abs_diff_eq!(mode.feedback(uv(0.6)).unwrap(), uv(0.5));
+            assert_abs_diff_eq!(mode.feedback(uv(0.8)).unwrap(), uv(0.25));
+            assert_abs_diff_eq!(mode.feedback(uv(1.0)).unwrap(), uv(0.0));
+        }
+
+        #[test]
         fn feedback_source_and_target_interval() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
