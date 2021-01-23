@@ -29,6 +29,10 @@ impl ControlType {
         *self == ControlType::Relative
     }
 
+    pub fn is_trigger(&self) -> bool {
+        matches!(self, ControlType::AbsoluteTrigger)
+    }
+
     pub fn step_size(&self) -> Option<UnitValue> {
         use ControlType::*;
         match self {

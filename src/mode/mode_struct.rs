@@ -181,13 +181,18 @@ impl<T: Transformation> Mode<T> {
             };
         let current_target_value = target.current_value();
         // Control value is within source value interval
+        let control_type = target.control_type();
         let pepped_up_control_value = self.pep_up_control_value(
             source_bound_value,
-            target,
+            control_type,
             current_target_value,
             min_is_max_behavior,
         );
-        self.hitting_target_considering_max_jump(pepped_up_control_value, current_target_value)
+        self.hitting_target_considering_max_jump(
+            pepped_up_control_value,
+            current_target_value,
+            control_type,
+        )
     }
 
     /// Relative one-direction mode (convert absolute button presses to relative increments)
@@ -368,7 +373,7 @@ impl<T: Transformation> Mode<T> {
     fn pep_up_control_value(
         &self,
         control_value: UnitValue,
-        target: &impl Target,
+        control_type: ControlType,
         current_target_value: Option<UnitValue>,
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
@@ -398,10 +403,7 @@ impl<T: Transformation> Mode<T> {
         };
         // 5. Apply rounding
         if self.round_target_value {
-            round_to_nearest_discrete_value(
-                &target.control_type(),
-                potentially_inversed_target_value,
-            )
+            round_to_nearest_discrete_value(control_type, potentially_inversed_target_value)
         } else {
             potentially_inversed_target_value
         }
@@ -411,6 +413,7 @@ impl<T: Transformation> Mode<T> {
         &self,
         control_value: UnitValue,
         current_target_value: Option<UnitValue>,
+        control_type: ControlType,
     ) -> Option<UnitValue> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
@@ -419,7 +422,7 @@ impl<T: Transformation> Mode<T> {
         };
         if self.jump_interval.is_full() {
             // No jump restrictions whatsoever
-            return self.hit_if_changed(control_value, current_target_value);
+            return self.hit_if_changed(control_value, current_target_value, control_type);
         }
         let distance = control_value.calc_distance_from(current_target_value);
         if distance > self.jump_interval.max_val() {
@@ -434,22 +437,23 @@ impl<T: Transformation> Mode<T> {
                 .to_increment(negative_if(control_value < current_target_value))?;
             let final_target_value =
                 current_target_value.add_clamping(approach_increment, &self.target_value_interval);
-            return self.hit_if_changed(final_target_value, current_target_value);
+            return self.hit_if_changed(final_target_value, current_target_value, control_type);
         }
         // Distance is not too large
         if distance < self.jump_interval.min_val() {
             return None;
         }
         // Distance is also not too small
-        self.hit_if_changed(control_value, current_target_value)
+        self.hit_if_changed(control_value, current_target_value, control_type)
     }
 
     fn hit_if_changed(
         &self,
         desired_target_value: UnitValue,
         current_target_value: UnitValue,
+        control_type: ControlType,
     ) -> Option<UnitValue> {
-        if current_target_value == desired_target_value {
+        if !control_type.is_trigger() && current_target_value == desired_target_value {
             return None;
         }
         Some(desired_target_value)
@@ -572,15 +576,15 @@ impl<T: Transformation> Mode<T> {
 }
 
 fn round_to_nearest_discrete_value(
-    control_type: &ControlType,
+    control_type: ControlType,
     approximate_control_value: UnitValue,
 ) -> UnitValue {
     // round() is the right choice here vs. floor() because we don't want slight numerical
     // inaccuracies lead to surprising jumps
     use ControlType::*;
     let step_size = match control_type {
-        AbsoluteContinuousRoundable { rounding_step_size } => *rounding_step_size,
-        AbsoluteDiscrete { atomic_step_size } => *atomic_step_size,
+        AbsoluteContinuousRoundable { rounding_step_size } => rounding_step_size,
+        AbsoluteDiscrete { atomic_step_size } => atomic_step_size,
         AbsoluteTrigger | AbsoluteSwitch | AbsoluteContinuous | Relative | VirtualMulti
         | VirtualButton => return approximate_control_value,
     };
@@ -613,6 +617,24 @@ mod tests {
             assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
             assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
             assert!(mode.control(abs(0.777), &target).is_none());
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+        }
+
+        #[test]
+        fn default_target_is_trigger() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode {
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: Some(UnitValue::new(0.777)),
+                control_type: ControlType::AbsoluteTrigger,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(0.0));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(0.777), &target).unwrap(), abs(0.777));
             assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
         }
 
