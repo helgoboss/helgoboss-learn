@@ -378,29 +378,27 @@ impl<T: Transformation> Mode<T> {
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
         // 1. Apply source interval
-        let v1 = control_value
+        let mut v = control_value
             .map_to_unit_interval_from(&self.source_value_interval, min_is_max_behavior);
         // 2. Apply transformation
-        let v2 = self
+        v = self
             .control_transformation
             .as_ref()
             .and_then(|t| {
-                t.transform(v1, current_target_value.unwrap_or(UnitValue::MIN))
+                t.transform(v, current_target_value.unwrap_or(UnitValue::MIN))
                     .ok()
             })
-            .unwrap_or(v1);
+            .unwrap_or(v);
         // 3. Apply reverse
-        let v3 = if self.reverse { v2.inverse() } else { v2 };
+        v = if self.reverse { v.inverse() } else { v };
         // 4. Apply target interval
-        let v4 = v3.map_from_unit_interval_to(&self.target_value_interval);
+        v = v.map_from_unit_interval_to(&self.target_value_interval);
         // 5. Apply rounding
-        let v5 = if self.round_target_value {
-            round_to_nearest_discrete_value(control_type, v4)
+        if self.round_target_value {
+            round_to_nearest_discrete_value(control_type, v)
         } else {
-            v4
-        };
-        // Return
-        v5
+            v
+        }
     }
 
     fn hitting_target_considering_max_jump(

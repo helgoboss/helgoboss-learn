@@ -18,25 +18,25 @@ pub fn feedback<T: Transformation>(
     out_of_range_behavior: OutOfRangeBehavior,
 ) -> Option<UnitValue> {
     // 5. Apply rounding (though in a different way than in control direction)
-    let v4 =
+    let mut v =
         UnitValue::new_clamped((target_value.get() / FEEDBACK_EPSILON).round() * FEEDBACK_EPSILON);
     // 3. Apply reverse
-    let v3 = if reverse { v4.inverse() } else { v4 };
+    v = if reverse { v.inverse() } else { v };
     let potentially_reversed_target_interval = if reverse {
         target_value_interval.inverse()
     } else {
         *target_value_interval
     };
     // 4. Apply target interval
-    let (v2_tmp, min_is_max_behavior) = if potentially_reversed_target_interval.contains(v3) {
+    let (mut v, min_is_max_behavior) = if potentially_reversed_target_interval.contains(v) {
         // Feedback value is within target value interval
-        (v3, MinIsMaxBehavior::PreferOne)
+        (v, MinIsMaxBehavior::PreferOne)
     } else {
         // Feedback value is outside target value interval
         use OutOfRangeBehavior::*;
         match out_of_range_behavior {
             MinOrMax => {
-                if v3 < potentially_reversed_target_interval.min_val() {
+                if v < potentially_reversed_target_interval.min_val() {
                     (
                         potentially_reversed_target_interval.min_val(),
                         MinIsMaxBehavior::PreferZero,
@@ -55,15 +55,12 @@ pub fn feedback<T: Transformation>(
             Ignore => return None,
         }
     };
-    let v2 = v2_tmp
-        .map_to_unit_interval_from(&potentially_reversed_target_interval, min_is_max_behavior);
+    v = v.map_to_unit_interval_from(&potentially_reversed_target_interval, min_is_max_behavior);
     // 2. Apply transformation
-    let v1 = transformation
+    v = transformation
         .as_ref()
-        .and_then(|t| t.transform(v2, v2).ok())
-        .unwrap_or(v2);
+        .and_then(|t| t.transform(v, v).ok())
+        .unwrap_or(v);
     // 1. Apply source interval
-    let v0 = v1.map_from_unit_interval_to(source_value_interval);
-    // Return
-    Some(v0)
+    Some(v.map_from_unit_interval_to(source_value_interval))
 }
