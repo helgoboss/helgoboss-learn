@@ -17,56 +17,53 @@ pub fn feedback<T: Transformation>(
     target_value_interval: &Interval<UnitValue>,
     out_of_range_behavior: OutOfRangeBehavior,
 ) -> Option<UnitValue> {
-    let rounded_target_value =
+    // 5. Apply rounding (though in a different way than in control direction)
+    let v4 =
         UnitValue::new_clamped((target_value.get() / FEEDBACK_EPSILON).round() * FEEDBACK_EPSILON);
-    // 1. Apply reverse
-    let potentially_inversed_value = if reverse {
-        rounded_target_value.inverse()
-    } else {
-        rounded_target_value
-    };
+    // 3. Apply reverse
+    let v3 = if reverse { v4.inverse() } else { v4 };
     let potentially_reversed_target_interval = if reverse {
         target_value_interval.inverse()
     } else {
         *target_value_interval
     };
-    // 2. Apply target interval
-    let (target_bound_value, min_is_max_behavior) =
-        if potentially_reversed_target_interval.contains(potentially_inversed_value) {
-            // Feedback value is within target value interval
-            (potentially_inversed_value, MinIsMaxBehavior::PreferOne)
-        } else {
-            // Feedback value is outside target value interval
-            use OutOfRangeBehavior::*;
-            match out_of_range_behavior {
-                MinOrMax => {
-                    if potentially_inversed_value < potentially_reversed_target_interval.min_val() {
-                        (
-                            potentially_reversed_target_interval.min_val(),
-                            MinIsMaxBehavior::PreferZero,
-                        )
-                    } else {
-                        (
-                            potentially_reversed_target_interval.max_val(),
-                            MinIsMaxBehavior::PreferOne,
-                        )
-                    }
+    // 4. Apply target interval
+    let (v2_tmp, min_is_max_behavior) = if potentially_reversed_target_interval.contains(v3) {
+        // Feedback value is within target value interval
+        (v3, MinIsMaxBehavior::PreferOne)
+    } else {
+        // Feedback value is outside target value interval
+        use OutOfRangeBehavior::*;
+        match out_of_range_behavior {
+            MinOrMax => {
+                if v3 < potentially_reversed_target_interval.min_val() {
+                    (
+                        potentially_reversed_target_interval.min_val(),
+                        MinIsMaxBehavior::PreferZero,
+                    )
+                } else {
+                    (
+                        potentially_reversed_target_interval.max_val(),
+                        MinIsMaxBehavior::PreferOne,
+                    )
                 }
-                Min => (
-                    potentially_reversed_target_interval.min_val(),
-                    MinIsMaxBehavior::PreferZero,
-                ),
-                Ignore => return None,
             }
-        };
-    let full_interval_value = target_bound_value
+            Min => (
+                potentially_reversed_target_interval.min_val(),
+                MinIsMaxBehavior::PreferZero,
+            ),
+            Ignore => return None,
+        }
+    };
+    let v2 = v2_tmp
         .map_to_unit_interval_from(&potentially_reversed_target_interval, min_is_max_behavior);
-    // 3. Apply transformation
-    let transformed_value = transformation
+    // 2. Apply transformation
+    let v1 = transformation
         .as_ref()
-        .and_then(|t| t.transform(full_interval_value, full_interval_value).ok())
-        .unwrap_or(full_interval_value);
-    // 4. Apply source interval
-    let source_value = transformed_value.map_from_unit_interval_to(source_value_interval);
-    Some(source_value)
+        .and_then(|t| t.transform(v2, v2).ok())
+        .unwrap_or(v2);
+    // 1. Apply source interval
+    let v0 = v1.map_from_unit_interval_to(source_value_interval);
+    // Return
+    Some(v0)
 }

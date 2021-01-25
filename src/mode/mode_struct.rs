@@ -378,35 +378,29 @@ impl<T: Transformation> Mode<T> {
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
         // 1. Apply source interval
-        let mapped_control_value = control_value
+        let v1 = control_value
             .map_to_unit_interval_from(&self.source_value_interval, min_is_max_behavior);
         // 2. Apply transformation
-        let transformed_source_value = self
+        let v2 = self
             .control_transformation
             .as_ref()
             .and_then(|t| {
-                t.transform(
-                    mapped_control_value,
-                    current_target_value.unwrap_or(UnitValue::MIN),
-                )
-                .ok()
+                t.transform(v1, current_target_value.unwrap_or(UnitValue::MIN))
+                    .ok()
             })
-            .unwrap_or(mapped_control_value);
-        // 3. Apply target interval
-        let mapped_target_value =
-            transformed_source_value.map_from_unit_interval_to(&self.target_value_interval);
-        // 4. Apply reverse
-        let potentially_inversed_target_value = if self.reverse {
-            mapped_target_value.inverse()
-        } else {
-            mapped_target_value
-        };
+            .unwrap_or(v1);
+        // 3. Apply reverse
+        let v3 = if self.reverse { v2.inverse() } else { v2 };
+        // 4. Apply target interval
+        let v4 = v3.map_from_unit_interval_to(&self.target_value_interval);
         // 5. Apply rounding
-        if self.round_target_value {
-            round_to_nearest_discrete_value(control_type, potentially_inversed_target_value)
+        let v5 = if self.round_target_value {
+            round_to_nearest_discrete_value(control_type, v4)
         } else {
-            potentially_inversed_target_value
-        }
+            v4
+        };
+        // Return
+        v5
     }
 
     fn hitting_target_considering_max_jump(
@@ -805,6 +799,27 @@ mod tests {
             assert_abs_diff_eq!(mode.control(abs(0.25), &target).unwrap(), abs(0.3));
             assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.4));
             assert_abs_diff_eq!(mode.control(abs(0.75), &target).unwrap(), abs(0.5));
+            assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
+        }
+
+        #[test]
+        fn target_interval_reverse() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode {
+                target_value_interval: create_unit_value_interval(0.6, 1.0),
+                reverse: true,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: Some(UnitValue::new(0.777)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.control(abs(0.0), &target).unwrap(), abs(1.0));
+            assert_abs_diff_eq!(mode.control(abs(0.25), &target).unwrap(), abs(0.9));
+            assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.8));
+            assert_abs_diff_eq!(mode.control(abs(0.75), &target).unwrap(), abs(0.7));
             assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.6));
         }
 
