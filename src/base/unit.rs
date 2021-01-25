@@ -391,11 +391,6 @@ impl Interval<UnitValue> {
     pub fn is_full(&self) -> bool {
         self.min_val().is_zero() && self.max_val().is_one()
     }
-
-    /// Inverts the interval.
-    pub fn inverse(&self) -> Interval<UnitValue> {
-        Interval::new(self.max_val().inverse(), self.min_val().inverse())
-    }
 }
 
 /// Convenience method for getting the complete unit interval.

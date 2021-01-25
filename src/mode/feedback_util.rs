@@ -18,17 +18,10 @@ pub fn feedback<T: Transformation>(
     out_of_range_behavior: OutOfRangeBehavior,
 ) -> Option<UnitValue> {
     // 5. Apply rounding (though in a different way than in control direction)
-    let mut v =
+    let v =
         UnitValue::new_clamped((target_value.get() / FEEDBACK_EPSILON).round() * FEEDBACK_EPSILON);
-    // 3. Apply reverse
-    v = if reverse { v.inverse() } else { v };
-    let potentially_reversed_target_interval = if reverse {
-        target_value_interval.inverse()
-    } else {
-        *target_value_interval
-    };
     // 4. Apply target interval
-    let (mut v, min_is_max_behavior) = if potentially_reversed_target_interval.contains(v) {
+    let (mut v, min_is_max_behavior) = if target_value_interval.contains(v) {
         // Feedback value is within target value interval
         (v, MinIsMaxBehavior::PreferOne)
     } else {
@@ -36,26 +29,25 @@ pub fn feedback<T: Transformation>(
         use OutOfRangeBehavior::*;
         match out_of_range_behavior {
             MinOrMax => {
-                if v < potentially_reversed_target_interval.min_val() {
+                if v < target_value_interval.min_val() {
                     (
-                        potentially_reversed_target_interval.min_val(),
+                        target_value_interval.min_val(),
                         MinIsMaxBehavior::PreferZero,
                     )
                 } else {
-                    (
-                        potentially_reversed_target_interval.max_val(),
-                        MinIsMaxBehavior::PreferOne,
-                    )
+                    (target_value_interval.max_val(), MinIsMaxBehavior::PreferOne)
                 }
             }
             Min => (
-                potentially_reversed_target_interval.min_val(),
+                target_value_interval.min_val(),
                 MinIsMaxBehavior::PreferZero,
             ),
             Ignore => return None,
         }
     };
-    v = v.map_to_unit_interval_from(&potentially_reversed_target_interval, min_is_max_behavior);
+    v = v.map_to_unit_interval_from(&target_value_interval, min_is_max_behavior);
+    // 3. Apply reverse
+    v = if reverse { v.inverse() } else { v };
     // 2. Apply transformation
     v = transformation
         .as_ref()
