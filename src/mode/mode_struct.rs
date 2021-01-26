@@ -48,6 +48,8 @@ pub struct Mode<T: Transformation> {
     pub out_of_range_behavior: OutOfRangeBehavior,
     pub control_transformation: Option<T>,
     pub feedback_transformation: Option<T>,
+    pub convert_relative_to_absolute: bool,
+    pub current_absolute_value: UnitValue,
     /// Counter for implementing throttling.
     ///
     /// Throttling is implemented by spitting out control values only every nth time. The counter
@@ -102,6 +104,8 @@ impl<T: Transformation> Default for Mode<T> {
             feedback_transformation: None,
             rotate: false,
             increment_counter: 0,
+            convert_relative_to_absolute: false,
+            current_absolute_value: UnitValue::MIN,
         }
     }
 }
@@ -114,7 +118,14 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target,
     ) -> Option<ControlValue> {
         match control_value {
-            ControlValue::Relative(i) => self.control_relative(i, target),
+            ControlValue::Relative(i) => {
+                if self.convert_relative_to_absolute {
+                    self.control_relative_to_absolute(i, target)
+                        .map(ControlValue::Absolute)
+                } else {
+                    self.control_relative(i, target)
+                }
+            }
             ControlValue::Absolute(v) => {
                 use AbsoluteMode::*;
                 match self.absolute_mode {
@@ -297,6 +308,28 @@ impl<T: Transformation> Mode<T> {
             return None;
         }
         Some(desired_target_value)
+    }
+
+    // Relative-to-absolute conversion mode.
+    fn control_relative_to_absolute(
+        &mut self,
+        discrete_increment: DiscreteIncrement,
+        target: &impl Target,
+    ) -> Option<UnitValue> {
+        // Convert to absolute value
+        let mut inc = discrete_increment.to_unit_increment(self.step_size_interval.min_val())?;
+        inc = inc.clamp_to_interval(&self.step_size_interval);
+        let full_unit_interval = full_unit_interval();
+        let abs_input_value = if self.rotate {
+            self.current_absolute_value
+                .add_rotating(inc, &full_unit_interval)
+        } else {
+            self.current_absolute_value
+                .add_clamping(inc, &full_unit_interval)
+        };
+        self.current_absolute_value = abs_input_value;
+        // Do the usual absolute processing
+        self.control_absolute_normal(abs_input_value, target)
     }
 
     // Classic relative mode: We are getting encoder increments from the source.
