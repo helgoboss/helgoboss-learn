@@ -484,21 +484,20 @@ impl<T: Transformation> Mode<T> {
         // that might occur is that the current target value only *appears* out-of-range
         // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
         // experiences. Therefore we snap the current target value to grid first in that case.
-        let snapped_current_target_value =
-            if current_target_value.is_within_interval(&snapped_target_value_interval) {
-                current_target_value
-            } else {
-                current_target_value.snap_to_grid_by_interval_size(grid_interval_size)
-            };
-        let desired_target_value = if self.rotate {
-            snapped_current_target_value.add_rotating(increment, &snapped_target_value_interval)
+        let mut v = if current_target_value.is_within_interval(&snapped_target_value_interval) {
+            current_target_value
         } else {
-            snapped_current_target_value.add_clamping(increment, &snapped_target_value_interval)
+            current_target_value.snap_to_grid_by_interval_size(grid_interval_size)
         };
-        if desired_target_value == current_target_value {
+        v = if self.rotate {
+            v.add_rotating(increment, &snapped_target_value_interval)
+        } else {
+            v.add_clamping(increment, &snapped_target_value_interval)
+        };
+        if v == current_target_value {
             return None;
         }
-        Some(ControlValue::Absolute(desired_target_value))
+        Some(ControlValue::Absolute(v))
     }
 
     fn pep_up_discrete_increment(
