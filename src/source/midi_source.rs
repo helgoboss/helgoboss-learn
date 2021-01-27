@@ -31,11 +31,11 @@ pub enum SourceCharacter {
     Range = 0,
     #[display(fmt = "Button (momentary)")]
     Button = 1,
-    #[display(fmt = "Encoder (type 1)")]
+    #[display(fmt = "Encoder (relative type 1)")]
     Encoder1 = 2,
-    #[display(fmt = "Encoder (type 2)")]
+    #[display(fmt = "Encoder (relative type 2)")]
     Encoder2 = 3,
-    #[display(fmt = "Encoder (type 3)")]
+    #[display(fmt = "Encoder (relative type 3)")]
     Encoder3 = 4,
 }
 
