@@ -10,5 +10,8 @@ pub use discrete::*;
 mod interval;
 pub use interval::*;
 
+mod ui_util;
+pub use ui_util::*;
+
 mod util;
 pub(crate) use util::*;
