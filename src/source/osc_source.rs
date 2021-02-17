@@ -19,7 +19,7 @@ impl OscSource {
         &self.address_pattern
     }
 
-    pub fn control(&self, value: &OscSourceValue) -> Option<ControlValue> {
+    pub fn control(&self, value: OscSourceValue) -> Option<ControlValue> {
         use ControlValue::*;
         let control_value = match value {
             OscSourceValue::Plain(msg) => {

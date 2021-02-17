@@ -1,5 +1,5 @@
 /// Incoming value which might be used to control something
-#[derive(Clone, PartialEq, Debug)]
-pub enum OscSourceValue {
-    Plain(rosc::OscMessage),
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum OscSourceValue<'a> {
+    Plain(&'a rosc::OscMessage),
 }
