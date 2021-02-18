@@ -1,8 +1,8 @@
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, ControlValue, OscSourceValue,
-    SourceCharacter, UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit, ControlValue, SourceCharacter,
+    UnitValue,
 };
-use rosc::OscType;
+use rosc::{OscMessage, OscType};
 use std::convert::TryInto;
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -15,37 +15,33 @@ impl OscSource {
         Self { address_pattern }
     }
 
-    pub fn from_source_value(source_value: OscSourceValue) -> Option<OscSource> {
-        match source_value {
-            OscSourceValue::Plain(s) => Some(OscSource::new(s.addr.clone())),
-        }
+    pub fn from_source_value(msg: OscMessage) -> OscSource {
+        OscSource::new(msg.addr)
     }
 
     pub fn address_pattern(&self) -> &str {
         &self.address_pattern
     }
 
-    pub fn control(&self, value: OscSourceValue) -> Option<ControlValue> {
+    pub fn control(&self, msg: &OscMessage) -> Option<ControlValue> {
         use ControlValue::*;
-        let control_value = match value {
-            OscSourceValue::Plain(msg) => {
-                if msg.addr != self.address_pattern {
-                    return None;
-                }
-                match msg.args.first() {
-                    // No argument - act like a trigger.
-                    None => Absolute(UnitValue::MAX),
-                    Some(osc_type) => {
-                        use OscType::*;
-                        match osc_type {
-                            Float(f) => Absolute(UnitValue::new_clamped(*f as _)),
-                            Double(d) => Absolute(UnitValue::new(*d)),
-                            Bool(on) => Absolute(if *on { UnitValue::MAX } else { UnitValue::MIN }),
-                            // Inifity/impulse or nil/null - act like a trigger.
-                            Inf | Nil => Absolute(UnitValue::MAX),
-                            Int(_) | String(_) | Blob(_) | Time(_) | Long(_) | Char(_)
-                            | Color(_) | Midi(_) | Array(_) => return None,
-                        }
+        let control_value = {
+            if msg.addr != self.address_pattern {
+                return None;
+            }
+            match msg.args.first() {
+                // No argument - act like a trigger.
+                None => Absolute(UnitValue::MAX),
+                Some(osc_type) => {
+                    use OscType::*;
+                    match osc_type {
+                        Float(f) => Absolute(UnitValue::new_clamped(*f as _)),
+                        Double(d) => Absolute(UnitValue::new(*d)),
+                        Bool(on) => Absolute(if *on { UnitValue::MAX } else { UnitValue::MIN }),
+                        // Inifity/impulse or nil/null - act like a trigger.
+                        Inf | Nil => Absolute(UnitValue::MAX),
+                        Int(_) | String(_) | Blob(_) | Time(_) | Long(_) | Char(_) | Color(_)
+                        | Midi(_) | Array(_) => return None,
                     }
                 }
             }
@@ -69,7 +65,7 @@ impl OscSource {
         SourceCharacter::Range
     }
 
-    pub fn feedback(&self, feedback_value: UnitValue) -> Option<OscSourceValue> {
+    pub fn feedback(&self, feedback_value: UnitValue) -> Option<OscMessage> {
         // TODO-high OSC feedback: Create correct source value
         None
     }
