@@ -15,6 +15,12 @@ impl OscSource {
         Self { address_pattern }
     }
 
+    pub fn from_source_value(source_value: OscSourceValue) -> Option<OscSource> {
+        match source_value {
+            OscSourceValue::Plain(s) => Some(OscSource::new(s.addr.clone())),
+        }
+    }
+
     pub fn address_pattern(&self) -> &str {
         &self.address_pattern
     }
