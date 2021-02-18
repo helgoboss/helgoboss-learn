@@ -54,7 +54,7 @@ impl OscSource {
     }
 
     pub fn format_control_value(&self, value: ControlValue) -> Result<String, &'static str> {
-        // TODO-high Format depending on custom character
+        // TODO-high (low) Format depending on custom character
         let absolute_value = value.as_absolute()?;
         Ok(format_percentage_without_unit(absolute_value.get()))
     }
@@ -64,8 +64,8 @@ impl OscSource {
     }
 
     pub fn character(&self) -> SourceCharacter {
-        // TODO-high Add custom character which will also be automatically learned depending on
-        //  Bool vs. Inf|Nil vs. Float|Double.
+        // TODO-high (low) Add custom character which will also be automatically learned depending
+        // on  Bool vs. Inf|Nil vs. Float|Double.
         SourceCharacter::Range
     }
 
