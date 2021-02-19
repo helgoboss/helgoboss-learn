@@ -66,7 +66,12 @@ impl OscSource {
     }
 
     pub fn feedback(&self, feedback_value: UnitValue) -> Option<OscMessage> {
-        // TODO-high OSC feedback: Create correct source value
-        None
+        // TODO-high (low) Use different OscType depending on source character
+        // TODO-high (low) Use different value depending on input value
+        let msg = OscMessage {
+            addr: self.address_pattern.clone(),
+            args: vec![OscType::Float(feedback_value.get() as _)],
+        };
+        Some(msg)
     }
 }
