@@ -69,7 +69,11 @@ impl OscArgDescriptor {
     IntoPrimitive,
     Display,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize, Deserialize),
+    serde(rename_all = "camelCase")
+)]
 #[repr(usize)]
 // TODO-low Rename. This it not the tag, it's rather the OscType without value.
 pub enum OscTypeTag {
