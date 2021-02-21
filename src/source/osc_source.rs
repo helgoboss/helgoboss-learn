@@ -144,7 +144,7 @@ impl OscSource {
     }
 
     pub fn from_source_value(msg: OscMessage, arg_index_hint: Option<u32>) -> OscSource {
-        let arg_descriptor = arg_index_hint.and_then(|h| OscArgDescriptor::from_msg(&msg, h));
+        let arg_descriptor = OscArgDescriptor::from_msg(&msg, arg_index_hint.unwrap_or(0));
         OscSource::new(msg.addr, arg_descriptor)
     }
 
