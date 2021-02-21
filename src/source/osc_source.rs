@@ -61,7 +61,7 @@ impl OscArgDescriptor {
 
     fn from_arg(index: u32, arg: &OscType) -> Self {
         Self {
-            index: index,
+            index,
             type_tag: OscTypeTag::from_arg(arg),
             // Relative is the exception, so we reset it when learning.
             is_relative: false,
