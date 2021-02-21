@@ -212,18 +212,7 @@ impl OscSource {
 
     pub fn format_control_value(&self, value: ControlValue) -> Result<String, &'static str> {
         let v = value.as_absolute()?.get();
-        let res = if let Some(desc) = self.arg_descriptor {
-            use OscTypeTag::*;
-            match desc.type_tag {
-                Float | Double => format_percentage_without_unit(v),
-                Bool => (if v == 0.0 { "off" } else { "on" }).to_owned(),
-                Nil | Inf => "Trigger".to_owned(),
-                _ => return Err("no way to interpret value with such an OSC type tag"),
-            }
-        } else {
-            "Trigger".to_owned()
-        };
-        Ok(res)
+        Ok(format_percentage_without_unit(v))
     }
 
     pub fn parse_control_value(&self, text: &str) -> Result<UnitValue, &'static str> {
@@ -258,7 +247,7 @@ impl OscSource {
                     _ => return None,
                 };
                 // Send nil for all other elements
-                let mut vec = vec![OscType::Inf; (desc.index + 1) as usize];
+                let mut vec = vec![OscType::Nil; (desc.index + 1) as usize];
                 vec[desc.index as usize] = value;
                 vec
             } else {
