@@ -1,6 +1,6 @@
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, ControlValue, SourceCharacter,
-    UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit, ControlValue, DiscreteIncrement,
+    SourceCharacter, UnitValue,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -24,11 +24,17 @@ pub struct OscArgDescriptor {
     index: u32,
     /// To send the correct value type on feedback.
     type_tag: OscTypeTag,
+    /// Interpret 1 values as increments and 0 values as decrements.
+    is_relative: bool,
 }
 
 impl OscArgDescriptor {
-    pub fn new(index: u32, type_tag: OscTypeTag) -> Self {
-        Self { index, type_tag }
+    pub fn new(index: u32, type_tag: OscTypeTag, is_relative: bool) -> Self {
+        Self {
+            index,
+            type_tag,
+            is_relative,
+        }
     }
 
     pub fn index(self) -> u32 {
@@ -37,6 +43,10 @@ impl OscArgDescriptor {
 
     pub fn type_tag(self) -> OscTypeTag {
         self.type_tag
+    }
+
+    pub fn is_relative(self) -> bool {
+        self.is_relative
     }
 
     pub fn from_msg(msg: &OscMessage, arg_index_hint: u32) -> Option<Self> {
@@ -53,6 +63,8 @@ impl OscArgDescriptor {
         Self {
             index: index,
             type_tag: OscTypeTag::from_arg(arg),
+            // Relative is the exception, so we reset it when learning.
+            is_relative: false,
         }
     }
 }
@@ -157,31 +169,43 @@ impl OscSource {
     }
 
     pub fn control(&self, msg: &OscMessage) -> Option<ControlValue> {
-        use ControlValue::*;
-        let control_value = {
+        let (unit_value, is_relative) = {
             if msg.addr != self.address_pattern {
                 return None;
             }
             if let Some(desc) = self.arg_descriptor {
                 if let Some(arg) = msg.args.get(desc.index as usize) {
                     use OscType::*;
-                    match arg {
-                        Float(f) => Absolute(UnitValue::new_clamped(*f as _)),
-                        Double(d) => Absolute(UnitValue::new(*d)),
-                        Bool(on) => Absolute(if *on { UnitValue::MAX } else { UnitValue::MIN }),
+                    let v = match arg {
+                        Float(f) => UnitValue::new_clamped(*f as _),
+                        Double(d) => UnitValue::new(*d),
+                        Bool(on) => {
+                            if *on {
+                                UnitValue::MAX
+                            } else {
+                                UnitValue::MIN
+                            }
+                        }
                         // Inifity/impulse or nil/null - act like a trigger.
-                        Inf | Nil => Absolute(UnitValue::MAX),
+                        Inf | Nil => UnitValue::MAX,
                         Int(_) | String(_) | Blob(_) | Time(_) | Long(_) | Char(_) | Color(_)
                         | Midi(_) | Array(_) => return None,
-                    }
+                    };
+                    (v, desc.is_relative)
                 } else {
                     // Argument not found. Don't do anything.
                     return None;
                 }
             } else {
                 // Source shall not look at any argument. Act like a trigger.
-                Absolute(UnitValue::MAX)
+                (UnitValue::MAX, false)
             }
+        };
+        let control_value = if is_relative {
+            let inc = if unit_value.get() > 0.0 { 1 } else { -1 };
+            ControlValue::Relative(DiscreteIncrement::new(inc))
+        } else {
+            ControlValue::Absolute(unit_value)
         };
         Some(control_value)
     }
