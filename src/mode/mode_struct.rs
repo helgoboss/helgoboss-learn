@@ -223,8 +223,7 @@ impl<T: Transformation> Mode<T> {
             | AbsoluteContinuousRoundable { .. }
             // TODO-low I think trigger and switch targets don't make sense at all here because
             //  instead of +/- n they need just "trigger!" or "on/off!". 
-            | AbsoluteTrigger
-            | AbsoluteSwitch => {
+            | AbsoluteContinuousRetriggerable => {
                 // Continuous target
                 //
                 // Settings:
@@ -304,9 +303,9 @@ impl<T: Transformation> Mode<T> {
         } else {
             self.target_value_interval.max_val()
         };
-        if desired_target_value == current_target_value {
-            return None;
-        }
+        // If the settings make sense for toggling, the desired target value should *always*
+        // be different than the current value. Therefore no need to check if the target value
+        // already has that value.
         Some(desired_target_value)
     }
 
@@ -346,8 +345,7 @@ impl<T: Transformation> Mode<T> {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
             // TODO-low Controlling a switch/trigger target with +/- n doesn't make sense.
-            | AbsoluteSwitch
-            | AbsoluteTrigger => {
+            | AbsoluteContinuousRetriggerable => {
                 // Continuous target
                 //
                 // Settings which are always necessary:
@@ -478,7 +476,7 @@ impl<T: Transformation> Mode<T> {
         current_target_value: UnitValue,
         control_type: ControlType,
     ) -> Option<UnitValue> {
-        if !control_type.is_trigger() && current_target_value == desired_target_value {
+        if !control_type.is_retriggerable() && current_target_value == desired_target_value {
             return None;
         }
         Some(desired_target_value)
@@ -609,8 +607,13 @@ fn round_to_nearest_discrete_value(
     let step_size = match control_type {
         AbsoluteContinuousRoundable { rounding_step_size } => rounding_step_size,
         AbsoluteDiscrete { atomic_step_size } => atomic_step_size,
-        AbsoluteTrigger | AbsoluteSwitch | AbsoluteContinuous | Relative | VirtualMulti
-        | VirtualButton => return approximate_control_value,
+        AbsoluteContinuousRetriggerable
+        | AbsoluteContinuous
+        | Relative
+        | VirtualMulti
+        | VirtualButton => {
+            return approximate_control_value;
+        }
     };
     approximate_control_value.snap_to_grid_by_interval_size(step_size)
 }
@@ -652,7 +655,7 @@ mod tests {
             };
             let target = TestTarget {
                 current_value: Some(UnitValue::new(0.777)),
-                control_type: ControlType::AbsoluteTrigger,
+                control_type: ControlType::AbsoluteContinuousRetriggerable,
             };
             // When
             // Then
