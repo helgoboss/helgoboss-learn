@@ -562,10 +562,6 @@ impl<T: Transformation> Mode<T> {
             // Initial fire
             return (true, direction_signum);
         }
-        if self.increment_counter.signum() != direction_signum {
-            // Change of direction. In this case always fire.
-            return (true, direction_signum);
-        }
         let positive_increment_counter = self.increment_counter.abs() as u32;
         if positive_increment_counter >= nth {
             // After having waited for a few increments, fire again.
@@ -2286,8 +2282,9 @@ mod tests {
                 assert_eq!(mode.control(rel(-1), &target), None);
                 assert_eq!(mode.control(rel(-1), &target), Some(rel(-1)));
                 // Direction change
-                assert_eq!(mode.control(rel(1), &target), Some(rel(1)));
+                assert_eq!(mode.control(rel(1), &target), None);
                 // Every 3rd time (but fired before)
+                assert_eq!(mode.control(rel(2), &target), Some(rel(1)));
                 assert_eq!(mode.control(rel(2), &target), None);
                 assert_eq!(mode.control(rel(2), &target), None);
                 assert_eq!(mode.control(rel(2), &target), Some(rel(1)));
@@ -2339,6 +2336,10 @@ mod tests {
                 assert_eq!(mode.control(rel(-10), &target), None);
                 assert_eq!(mode.control(rel(-10), &target), None);
                 // Every 10th time
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
+                assert_eq!(mode.control(rel(1), &target), None);
                 assert_eq!(mode.control(rel(1), &target), Some(rel(1)));
                 assert_eq!(mode.control(rel(1), &target), None);
                 assert_eq!(mode.control(rel(1), &target), None);
