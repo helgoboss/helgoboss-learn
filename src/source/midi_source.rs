@@ -1,5 +1,5 @@
 use crate::{
-    Bpm, ControlValue, DiscreteIncrement, MidiSourceValue, RawMidiEvent, SysExPattern, UnitValue,
+    Bpm, ControlValue, DiscreteIncrement, MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -145,9 +145,9 @@ pub enum MidiSource {
     ClockTransport {
         message: MidiClockTransportMessage,
     },
-    // SysEx
-    SystemExclusive {
-        pattern: SysExPattern,
+    // E.g. SysEx
+    Raw {
+        pattern: RawMidiPattern,
         custom_character: SourceCharacter,
     },
 }
@@ -170,14 +170,14 @@ impl MidiSource {
             },
             Tempo(_) => MidiSource::ClockTempo,
             Plain(msg) => MidiSource::from_short_message(msg)?,
-            SystemExclusive(msg) => MidiSource::from_system_exclusive(msg.bytes()),
+            Raw(msg) => MidiSource::from_raw(msg.bytes()),
         };
         Some(source)
     }
 
-    fn from_system_exclusive(msg: &[u8]) -> MidiSource {
-        MidiSource::SystemExclusive {
-            pattern: SysExPattern::fixed_from_slice(msg),
+    fn from_raw(msg: &[u8]) -> MidiSource {
+        MidiSource::Raw {
+            pattern: RawMidiPattern::fixed_from_slice(msg),
             custom_character: Default::default(),
         }
     }
@@ -253,7 +253,7 @@ impl MidiSource {
             | PitchBendChangeValue { channel }
             | ControlChange14BitValue { channel, .. }
             | ParameterNumberValue { channel, .. } => *channel,
-            ClockTempo | ClockTransport { .. } | SystemExclusive { .. } => None,
+            ClockTempo | ClockTransport { .. } | Raw { .. } => None,
         }
     }
 
@@ -263,7 +263,7 @@ impl MidiSource {
             NoteVelocity { .. } => SourceCharacter::Button,
             // TODO-low Introduce new character "Trigger"
             ClockTransport { .. } => SourceCharacter::Button,
-            SystemExclusive {
+            Raw {
                 custom_character, ..
             }
             | ControlChangeValue {
@@ -430,9 +430,9 @@ impl MidiSource {
                 Tempo(bpm) => Some(abs(bpm.to_unit_value())),
                 _ => None,
             },
-            // TODO-low Support control for sys-ex. Not difficult because we have the pattern
+            // TODO-low Support control for raw/sys-ex. Not difficult because we have the pattern
             //  structure already.
-            S::SystemExclusive { .. } => None,
+            S::Raw { .. } => None,
         }
     }
 
@@ -572,7 +572,7 @@ impl MidiSource {
                 };
                 Some(V::ParameterNumber(n))
             }
-            SystemExclusive { pattern, .. } => {
+            Raw { pattern, .. } => {
                 let mut array = [0; RawMidiEvent::MAX_LENGTH];
                 let mut i = 0u32;
                 for byte in pattern
@@ -583,7 +583,7 @@ impl MidiSource {
                     i += 1;
                 }
                 let raw_midi_event = RawMidiEvent::new(0, i, array);
-                Some(V::SystemExclusive(Box::new(raw_midi_event)))
+                Some(V::Raw(Box::new(raw_midi_event)))
             }
             _ => None,
         }
@@ -677,7 +677,7 @@ impl MidiSource {
                     }
                 }
             },
-            SystemExclusive { pattern, .. } => value.to_discrete(pattern.max_discrete_value()) as _,
+            Raw { pattern, .. } => value.to_discrete(pattern.max_discrete_value()) as _,
             ClockTempo | ClockTransport { .. } => {
                 return Err("not supported");
             }
@@ -716,7 +716,7 @@ impl MidiSource {
                     }
                 }
             },
-            SystemExclusive { pattern, .. } => {
+            Raw { pattern, .. } => {
                 if value < 0 {
                     return Err("negative values not supported");
                 }

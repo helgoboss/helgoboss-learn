@@ -15,7 +15,7 @@ pub enum MidiSourceValue<M: ShortMessage> {
     Tempo(Bpm),
     /// We must take care not to allocate this in real-time thread! At the moment only feedback
     /// is supported with this source but once we support control, this gets relevant.
-    SystemExclusive(Box<RawMidiEvent>),
+    Raw(Box<RawMidiEvent>),
 }
 
 impl<M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<M> {
@@ -32,7 +32,7 @@ impl<M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<M> {
                 let inner_shorts = msg.to_short_messages();
                 [Some(inner_shorts[0]), Some(inner_shorts[1]), None, None]
             }
-            MidiSourceValue::Tempo(_) | MidiSourceValue::SystemExclusive(_) => [None; 4],
+            MidiSourceValue::Tempo(_) | MidiSourceValue::Raw(_) => [None; 4],
         }
     }
 }

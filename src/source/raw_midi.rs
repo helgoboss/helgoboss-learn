@@ -5,21 +5,21 @@ use std::fmt::{Display, Formatter, Write};
 use std::str::FromStr;
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
-pub struct SysExPattern {
-    entries: Vec<SysExPatternEntry>,
+pub struct RawMidiPattern {
+    entries: Vec<RawMidiPatternEntry>,
     resolution: u8,
 }
 
-impl SysExPattern {
+impl RawMidiPattern {
     pub fn resolution(&self) -> u8 {
         self.resolution
     }
 
     pub fn max_discrete_value(&self) -> u16 {
-        2_u16.pow(self.resolution as _) - 1
+        (2u32.pow(self.resolution as _) - 1) as u16
     }
 
-    pub fn from_entries(entries: Vec<SysExPatternEntry>) -> Self {
+    pub fn from_entries(entries: Vec<RawMidiPatternEntry>) -> Self {
         let max_variable_bit_index = entries
             .iter()
             .map(|e| e.max_variable_bit_index())
@@ -34,7 +34,7 @@ impl SysExPattern {
     pub fn fixed_from_slice(bytes: &[u8]) -> Self {
         let entries = bytes
             .iter()
-            .map(|byte| SysExPatternEntry::FixedByte(*byte))
+            .map(|byte| RawMidiPatternEntry::FixedByte(*byte))
             .collect();
         Self {
             entries,
@@ -56,7 +56,7 @@ impl SysExPattern {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub enum SysExPatternEntry {
+pub enum RawMidiPatternEntry {
     FixedByte(u8),
     VariableByte(BitPattern),
 }
@@ -116,9 +116,9 @@ impl BitPatternEntry {
     }
 }
 
-impl SysExPatternEntry {
+impl RawMidiPatternEntry {
     fn max_variable_bit_index(&self) -> u8 {
-        use SysExPatternEntry::*;
+        use RawMidiPatternEntry::*;
         match self {
             FixedByte(_) => 0u8,
             VariableByte(bit_pattern) => bit_pattern.max_variable_bit_index(),
@@ -126,7 +126,7 @@ impl SysExPatternEntry {
     }
 
     fn to_byte(&self, discrete_value: u16) -> u8 {
-        use SysExPatternEntry::*;
+        use RawMidiPatternEntry::*;
         match self {
             FixedByte(byte) => *byte,
             VariableByte(bit_pattern) => bit_pattern.to_byte(discrete_value),
@@ -134,16 +134,16 @@ impl SysExPatternEntry {
     }
 }
 
-impl Display for SysExPattern {
+impl Display for RawMidiPattern {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let string_vec: Vec<_> = self.entries.iter().map(|e| e.to_string()).collect();
         f.write_str(&string_vec.join(" "))
     }
 }
 
-impl Display for SysExPatternEntry {
+impl Display for RawMidiPatternEntry {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        use SysExPatternEntry::*;
+        use RawMidiPatternEntry::*;
         match self {
             FixedByte(byte) => write!(f, "{:X}", *byte),
             VariableByte(pattern) => write!(f, "[{}]", pattern),
@@ -174,25 +174,25 @@ impl Display for BitPatternEntry {
     }
 }
 
-impl FromStr for SysExPattern {
+impl FromStr for RawMidiPattern {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let lex: Lexer<SysExPatternToken> = SysExPatternToken::lexer(s);
-        use SysExPatternToken::*;
+        let lex: Lexer<RawMidiPatternToken> = RawMidiPatternToken::lexer(s);
+        use RawMidiPatternToken::*;
         let entries: Result<Vec<_>, _> = lex
             .map(|token| match token {
-                FixedByte(byte) => Ok(SysExPatternEntry::FixedByte(byte)),
-                Error => return Err("invalid pattern expression"),
-                VariableByte(pattern) => Ok(SysExPatternEntry::VariableByte(pattern)),
+                FixedByte(byte) => Ok(RawMidiPatternEntry::FixedByte(byte)),
+                Error => Err("invalid pattern expression"),
+                VariableByte(pattern) => Ok(RawMidiPatternEntry::VariableByte(pattern)),
             })
             .collect();
-        let p = SysExPattern::from_entries(entries?);
+        let p = RawMidiPattern::from_entries(entries?);
         Ok(p)
     }
 }
 #[derive(Logos, Debug, PartialEq)]
-enum SysExPatternToken {
+enum RawMidiPatternToken {
     #[regex(r"\[[01abcdefghijklmnop ]*\]", parse_as_bit_pattern)]
     VariableByte(BitPattern),
     #[regex(r"[0-9a-fA-F][0-9a-fA-F]", parse_as_byte)]
@@ -202,11 +202,11 @@ enum SysExPatternToken {
     Error,
 }
 
-fn parse_as_byte(lex: &mut Lexer<SysExPatternToken>) -> Result<u8, core::num::ParseIntError> {
+fn parse_as_byte(lex: &mut Lexer<RawMidiPatternToken>) -> Result<u8, core::num::ParseIntError> {
     u8::from_str_radix(lex.slice(), 16)
 }
 
-fn parse_as_bit_pattern(lex: &mut Lexer<SysExPatternToken>) -> Result<BitPattern, &'static str> {
+fn parse_as_bit_pattern(lex: &mut Lexer<RawMidiPatternToken>) -> Result<BitPattern, &'static str> {
     let mut entries: [BitPatternEntry; 8] = Default::default();
     let slice: &str = lex.slice();
     let mut i = 0;
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn one_variable_nibble() {
         // Given
-        let pattern: SysExPattern = "F0 [0000 dcba] F7".parse().unwrap();
+        let pattern: RawMidiPattern = "F0 [0000 dcba] F7".parse().unwrap();
         // When
         // Then
         assert_eq!(pattern.to_bytes(UnitValue::MAX), vec![0xf0, 0x0f, 0xf7]);
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn one_variable_nibble_no_spaces() {
         // Given
-        let pattern: SysExPattern = "F0[0000dcba]F7".parse().unwrap();
+        let pattern: RawMidiPattern = "F0[0000dcba]F7".parse().unwrap();
         // When
         // Then
         assert_eq!(pattern.to_bytes(UnitValue::MAX), vec![0xf0, 0x0f, 0xf7]);
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn one_variable_nibble_variation() {
         // Given
-        let pattern: SysExPattern = "F0[1111dcba]F7".parse().unwrap();
+        let pattern: RawMidiPattern = "F0[1111dcba]F7".parse().unwrap();
         // When
         // Then
         assert_eq!(pattern.to_bytes(UnitValue::MAX), vec![0xf0, 0xff, 0xf7]);
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn wrong_variable_pattern() {
-        let result = "F0[0000dcbaa]F7".parse::<SysExPattern>();
+        let result = "F0[0000dcbaa]F7".parse::<RawMidiPattern>();
         assert!(result.is_err());
     }
 }
