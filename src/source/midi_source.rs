@@ -1,4 +1,6 @@
-use crate::{Bpm, ControlValue, DiscreteIncrement, MidiSourceValue, UnitValue};
+use crate::{
+    Bpm, ControlValue, DiscreteIncrement, MidiSourceValue, RawMidiEvent, SysExPattern, UnitValue,
+};
 use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -143,6 +145,11 @@ pub enum MidiSource {
     ClockTransport {
         message: MidiClockTransportMessage,
     },
+    // SysEx
+    SystemExclusive {
+        pattern: SysExPattern,
+        custom_character: SourceCharacter,
+    },
 }
 
 impl MidiSource {
@@ -163,8 +170,16 @@ impl MidiSource {
             },
             Tempo(_) => MidiSource::ClockTempo,
             Plain(msg) => MidiSource::from_short_message(msg)?,
+            SystemExclusive(msg) => MidiSource::from_system_exclusive(msg.bytes()),
         };
         Some(source)
+    }
+
+    fn from_system_exclusive(msg: &[u8]) -> MidiSource {
+        MidiSource::SystemExclusive {
+            pattern: SysExPattern::fixed_from_slice(msg),
+            custom_character: Default::default(),
+        }
     }
 
     fn from_short_message(msg: impl ShortMessage) -> Option<MidiSource> {
@@ -238,7 +253,7 @@ impl MidiSource {
             | PitchBendChangeValue { channel }
             | ControlChange14BitValue { channel, .. }
             | ParameterNumberValue { channel, .. } => *channel,
-            ClockTempo | ClockTransport { .. } => None,
+            ClockTempo | ClockTransport { .. } | SystemExclusive { .. } => None,
         }
     }
 
@@ -248,7 +263,10 @@ impl MidiSource {
             NoteVelocity { .. } => SourceCharacter::Button,
             // TODO-low Introduce new character "Trigger"
             ClockTransport { .. } => SourceCharacter::Button,
-            ControlChangeValue {
+            SystemExclusive {
+                custom_character, ..
+            }
+            | ControlChangeValue {
                 custom_character, ..
             } => *custom_character,
             NoteKeyNumber { .. }
@@ -412,6 +430,9 @@ impl MidiSource {
                 Tempo(bpm) => Some(abs(bpm.to_unit_value())),
                 _ => None,
             },
+            // TODO-low Support control for sys-ex. Not difficult because we have the pattern
+            //  structure already.
+            S::SystemExclusive { .. } => None,
         }
     }
 
@@ -464,17 +485,17 @@ impl MidiSource {
         feedback_value: UnitValue,
     ) -> Option<MidiSourceValue<M>> {
         use MidiSource::*;
-        use MidiSourceValue::*;
+        use MidiSourceValue as V;
         match self {
             NoteVelocity {
                 channel: Some(ch),
                 key_number: Some(kn),
-            } => Some(Plain(M::note_on(
+            } => Some(V::Plain(M::note_on(
                 *ch,
                 *kn,
                 denormalize_7_bit(feedback_value),
             ))),
-            NoteKeyNumber { channel: Some(ch) } => Some(Plain(M::note_on(
+            NoteKeyNumber { channel: Some(ch) } => Some(V::Plain(M::note_on(
                 *ch,
                 denormalize_7_bit(feedback_value),
                 U7::MAX,
@@ -482,7 +503,7 @@ impl MidiSource {
             PolyphonicKeyPressureAmount {
                 channel: Some(ch),
                 key_number: Some(kn),
-            } => Some(Plain(M::polyphonic_key_pressure(
+            } => Some(V::Plain(M::polyphonic_key_pressure(
                 *ch,
                 *kn,
                 denormalize_7_bit(feedback_value),
@@ -491,27 +512,27 @@ impl MidiSource {
                 channel: Some(ch),
                 controller_number: Some(cn),
                 ..
-            } => Some(Plain(M::control_change(
+            } => Some(V::Plain(M::control_change(
                 *ch,
                 *cn,
                 denormalize_7_bit(feedback_value),
             ))),
-            ProgramChangeNumber { channel: Some(ch) } => Some(Plain(M::program_change(
+            ProgramChangeNumber { channel: Some(ch) } => Some(V::Plain(M::program_change(
                 *ch,
                 denormalize_7_bit(feedback_value),
             ))),
-            ChannelPressureAmount { channel: Some(ch) } => Some(Plain(M::channel_pressure(
+            ChannelPressureAmount { channel: Some(ch) } => Some(V::Plain(M::channel_pressure(
                 *ch,
                 denormalize_7_bit(feedback_value),
             ))),
-            PitchBendChangeValue { channel: Some(ch) } => Some(Plain(M::pitch_bend_change(
+            PitchBendChangeValue { channel: Some(ch) } => Some(V::Plain(M::pitch_bend_change(
                 *ch,
                 denormalize_14_bit_centered(feedback_value),
             ))),
             ControlChange14BitValue {
                 channel: Some(ch),
                 msb_controller_number: Some(mcn),
-            } => Some(ControlChange14Bit(ControlChange14BitMessage::new(
+            } => Some(V::ControlChange14Bit(ControlChange14BitMessage::new(
                 *ch,
                 *mcn,
                 denormalize_14_bit(feedback_value),
@@ -549,7 +570,20 @@ impl MidiSource {
                 } else {
                     unreachable!()
                 };
-                Some(ParameterNumber(n))
+                Some(V::ParameterNumber(n))
+            }
+            SystemExclusive { pattern, .. } => {
+                let mut array = [0; RawMidiEvent::MAX_LENGTH];
+                let mut i = 0u32;
+                for byte in pattern
+                    .byte_iter(feedback_value)
+                    .take(RawMidiEvent::MAX_LENGTH)
+                {
+                    array[i as usize] = byte;
+                    i += 1;
+                }
+                let raw_midi_event = RawMidiEvent::new(0, i, array);
+                Some(V::SystemExclusive(Box::new(raw_midi_event)))
             }
             _ => None,
         }
@@ -643,7 +677,10 @@ impl MidiSource {
                     }
                 }
             },
-            ClockTempo | ClockTransport { .. } => return Err("not supported for MIDI clock"),
+            SystemExclusive { pattern, .. } => value.to_discrete(pattern.max_discrete_value()) as _,
+            ClockTempo | ClockTransport { .. } => {
+                return Err("not supported");
+            }
         };
         Ok(midi_value)
     }
@@ -679,7 +716,15 @@ impl MidiSource {
                     }
                 }
             },
-            ClockTempo | ClockTransport { .. } => return Err("not supported for MIDI clock"),
+            SystemExclusive { pattern, .. } => {
+                if value < 0 {
+                    return Err("negative values not supported");
+                }
+                UnitValue::try_from_discrete(value as u16, pattern.max_discrete_value())?
+            }
+            ClockTempo | ClockTransport { .. } => {
+                return Err("not supported");
+            }
         };
         Ok(unit_value)
     }

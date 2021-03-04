@@ -2,7 +2,8 @@ use crate::{DiscreteIncrement, DiscreteValue, Interval};
 use derive_more::Display;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
+use std::fmt::Debug;
 use std::ops::{Add, Sub};
 
 /// A number that is primarily within the negative and positive unit interval `(-1.0..=1.0)` but
@@ -339,6 +340,27 @@ impl UnitValue {
                 interval.max_val().0,
             ))
         }
+    }
+
+    pub fn to_discrete<T: TryFrom<u64> + Into<u64>>(&self, max_value: T) -> T
+    where
+        <T as TryFrom<u64>>::Error: Debug,
+    {
+        let discrete = (self.get() * max_value.into() as f64).round() as u64;
+        discrete.try_into().unwrap()
+    }
+
+    pub fn try_from_discrete<T: TryFrom<u64> + Into<u64>>(
+        actual_value: T,
+        max_value: T,
+    ) -> Result<UnitValue, &'static str> {
+        let actual_value = actual_value.into();
+        let max_value = max_value.into();
+        if actual_value > max_value {
+            return Err("value too large");
+        }
+        let unit_value = Self::new_clamped(actual_value as f64 / max_value as f64);
+        Ok(unit_value)
     }
 }
 
