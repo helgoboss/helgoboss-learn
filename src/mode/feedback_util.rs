@@ -1,4 +1,6 @@
-use crate::{Interval, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, UnitValue};
+use crate::{
+    Interval, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, UnitValue, BASE_EPSILON,
+};
 
 /// When interpreting target value, make only 4 fractional digits matter.
 ///
@@ -7,7 +9,7 @@ use crate::{Interval, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, Unit
 /// value) could result in a totally different feedback value. Maybe it would be better to determine
 /// the epsilon dependent on the source precision (e.g. 1.0/128.0 in case of short MIDI messages)
 /// but right now this should suffice to solve the immediate problem.  
-pub const FEEDBACK_EPSILON: f64 = 0.00001;
+pub const FEEDBACK_EPSILON: f64 = BASE_EPSILON;
 
 pub fn feedback<T: Transformation>(
     target_value: UnitValue,

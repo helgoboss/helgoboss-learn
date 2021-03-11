@@ -4,6 +4,10 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+/// This epsilon is used in helgoboss-learn at some places to make floating point comparison
+/// more tolerant. This is the same epsilon used in JSFX/EEL.   
+pub const BASE_EPSILON: f64 = 0.00001;
+
 /// Determines how out-of-range source (control) or target (feedback) values are handled.
 #[derive(
     Copy,

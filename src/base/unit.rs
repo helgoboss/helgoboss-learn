@@ -289,10 +289,15 @@ impl UnitValue {
     /// snaps to the opposite bound of that interval. If this unit value is not within the given
     /// interval in the first place, it returns an appropriate interval bound instead of doing the
     /// addition.
+    ///
+    /// Slight inaccuracies can have a big effect when actually rotating:
+    /// https://github.com/helgoboss/realearn/issues/208. That's why an epsilon needs to be passed
+    /// for the comparison that decides whether it's time to rotate already.
     pub fn add_rotating(
         &self,
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
+        epsilon: f64,
     ) -> UnitValue {
         let (min, max) = (interval.min_val(), interval.max_val());
         if *self < min {
@@ -303,9 +308,17 @@ impl UnitValue {
         }
         let sum = self.0 + increment.get();
         if sum < min.get() {
-            max
+            if (min.get() - sum).abs() <= epsilon {
+                min
+            } else {
+                max
+            }
         } else if sum > max.get() {
-            min
+            if (sum - max.get()).abs() <= epsilon {
+                max
+            } else {
+                min
+            }
         } else {
             unsafe { UnitValue::new_unchecked(sum) }
         }

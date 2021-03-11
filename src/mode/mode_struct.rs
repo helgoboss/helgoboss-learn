@@ -2,7 +2,7 @@ use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     mode::feedback_util, negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue,
     Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, Target, Transformation,
-    UnitIncrement, UnitValue,
+    UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -206,7 +206,7 @@ impl<T: Transformation> Mode<T> {
         )
     }
 
-    /// Relative one-direction mode (convert absolute button presses to relative increments)
+    /// "Incremental buttons" mode (convert absolute button presses to relative increments)
     fn control_absolute_incremental_buttons(
         &mut self,
         control_value: UnitValue,
@@ -321,7 +321,7 @@ impl<T: Transformation> Mode<T> {
         let full_unit_interval = full_unit_interval();
         let abs_input_value = if self.rotate {
             self.current_absolute_value
-                .add_rotating(inc, &full_unit_interval)
+                .add_rotating(inc, &full_unit_interval, BASE_EPSILON)
         } else {
             self.current_absolute_value
                 .add_clamping(inc, &full_unit_interval)
@@ -521,7 +521,7 @@ impl<T: Transformation> Mode<T> {
             current_target_value.snap_to_grid_by_interval_size(grid_interval_size)
         };
         v = if self.rotate {
-            v.add_rotating(increment, &snapped_target_value_interval)
+            v.add_rotating(increment, &snapped_target_value_interval, BASE_EPSILON)
         } else {
             v.add_clamping(increment, &snapped_target_value_interval)
         };
@@ -2376,7 +2376,7 @@ mod tests {
         }
     }
 
-    mod absolute_to_relative {
+    mod incremental_buttons {
         use super::*;
 
         mod absolute_continuous_target {
@@ -2617,6 +2617,64 @@ mod tests {
                 assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(0.0));
                 assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+            }
+
+            #[test]
+            fn rotate_3_almost_max() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    rotate: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(UnitValue::new(0.990000000001)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.control(abs(0.1), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.control(abs(0.5), &target).unwrap(), abs(1.0));
+                assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
+            }
+
+            #[test]
+            fn reverse_and_rotate_almost_min() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    rotate: true,
+                    reverse: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(UnitValue::new(0.00999999999999)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(0.0));
+            }
+
+            #[test]
+            fn reverse_and_rotate_min() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    rotate: true,
+                    reverse: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(UnitValue::new(0.0)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs(0.0), &target).is_none());
+                assert_abs_diff_eq!(mode.control(abs(1.0), &target).unwrap(), abs(1.0));
             }
 
             #[test]
