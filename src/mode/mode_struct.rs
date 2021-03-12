@@ -118,26 +118,8 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target,
     ) -> Option<ControlValue> {
         match control_value {
-            ControlValue::Relative(i) => {
-                if self.convert_relative_to_absolute {
-                    self.control_relative_to_absolute(i, target)
-                        .map(ControlValue::Absolute)
-                } else {
-                    self.control_relative(i, target)
-                }
-            }
-            ControlValue::Absolute(v) => {
-                use AbsoluteMode::*;
-                match self.absolute_mode {
-                    Normal => self
-                        .control_absolute_normal(v, target)
-                        .map(ControlValue::Absolute),
-                    IncrementalButtons => self.control_absolute_incremental_buttons(v, target),
-                    ToggleButtons => self
-                        .control_absolute_toggle_buttons(v, target)
-                        .map(ControlValue::Absolute),
-                }
-            }
+            ControlValue::Relative(i) => self.control_relative(i, target),
+            ControlValue::Absolute(v) => self.control_absolute(v, target, true),
         }
     }
 
@@ -154,6 +136,55 @@ impl<T: Transformation> Mode<T> {
         )
     }
 
+    /// If this returns `true`, the `poll` method should be called, on a regular basis.
+    pub fn wants_to_be_polled(&self) -> bool {
+        self.press_duration_processor.wants_to_be_polled()
+    }
+
+    /// This function should be called regularly if the features are needed that are driven by a
+    /// timer (fire on length min, turbo, etc.). Returns a target control value whenever it's time
+    /// to fire.
+    pub fn poll(&mut self, target: &impl Target) -> Option<ControlValue> {
+        let control_value = self.press_duration_processor.poll()?;
+        self.control_absolute(control_value, target, false)
+    }
+
+    fn control_relative(
+        &mut self,
+        i: DiscreteIncrement,
+        target: &impl Target,
+    ) -> Option<ControlValue> {
+        if self.convert_relative_to_absolute {
+            self.control_relative_to_absolute(i, target)
+                .map(ControlValue::Absolute)
+        } else {
+            self.control_relative_normal(i, target)
+        }
+    }
+
+    fn control_absolute(
+        &mut self,
+        v: UnitValue,
+        target: &impl Target,
+        consider_press_duration: bool,
+    ) -> Option<ControlValue> {
+        let v = if consider_press_duration {
+            self.press_duration_processor.process_press_or_release(v)?
+        } else {
+            v
+        };
+        use AbsoluteMode::*;
+        match self.absolute_mode {
+            Normal => self
+                .control_absolute_normal(v, target)
+                .map(ControlValue::Absolute),
+            IncrementalButtons => self.control_absolute_incremental_buttons(v, target),
+            ToggleButtons => self
+                .control_absolute_toggle_buttons(v, target)
+                .map(ControlValue::Absolute),
+        }
+    }
+
     /// Processes the given control value in absolute mode and maybe returns an appropriate target
     /// value.
     fn control_absolute_normal(
@@ -161,7 +192,6 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target,
     ) -> Option<UnitValue> {
-        let control_value = self.press_duration_processor.process(control_value)?;
         let (source_bound_value, min_is_max_behavior) =
             if control_value.is_within_interval(&self.source_value_interval) {
                 // Control value is within source value interval
@@ -212,7 +242,6 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
-        let control_value = self.press_duration_processor.process(control_value)?;
         if control_value.is_zero() || !control_value.is_within_interval(&self.source_value_interval)
         {
             return None;
@@ -290,7 +319,6 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target,
     ) -> Option<UnitValue> {
-        let control_value = self.press_duration_processor.process(control_value)?;
         if control_value.is_zero() {
             return None;
         }
@@ -335,7 +363,7 @@ impl<T: Transformation> Mode<T> {
     // We don't need source min/max config in this case. At least I can't think of a use case
     // where one would like to totally ignore especially slow or especially fast encoder movements,
     // I guess that possibility would rather cause irritation.
-    fn control_relative(
+    fn control_relative_normal(
         &mut self,
         discrete_increment: DiscreteIncrement,
         target: &impl Target,

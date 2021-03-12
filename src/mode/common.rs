@@ -43,3 +43,39 @@ impl Default for OutOfRangeBehavior {
         OutOfRangeBehavior::MinOrMax
     }
 }
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(usize)]
+pub enum FireMode {
+    #[cfg_attr(feature = "serde", serde(rename = "release"))]
+    #[display(fmt = "When button released if min > 0 ms")]
+    WhenButtonReleased,
+    #[cfg_attr(feature = "serde", serde(rename = "timeout"))]
+    #[display(fmt = "On timeout")]
+    OnTimeout,
+}
+
+impl FireMode {
+    pub fn wants_to_be_polled(self) -> bool {
+        use FireMode::*;
+        matches!(self, OnTimeout)
+    }
+}
+
+impl Default for FireMode {
+    fn default() -> Self {
+        Self::WhenButtonReleased
+    }
+}
