@@ -60,7 +60,7 @@ impl Default for OutOfRangeBehavior {
 #[repr(usize)]
 pub enum FireMode {
     #[cfg_attr(feature = "serde", serde(rename = "release"))]
-    #[display(fmt = "When button released (if min > 0 ms)")]
+    #[display(fmt = "When button released (if Min > 0 ms)")]
     WhenButtonReleased,
     #[cfg_attr(feature = "serde", serde(rename = "timeout"))]
     #[display(fmt = "After timeout")]
