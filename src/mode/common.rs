@@ -60,17 +60,20 @@ impl Default for OutOfRangeBehavior {
 #[repr(usize)]
 pub enum FireMode {
     #[cfg_attr(feature = "serde", serde(rename = "release"))]
-    #[display(fmt = "When button released if min > 0 ms")]
+    #[display(fmt = "When button released (if min > 0 ms)")]
     WhenButtonReleased,
     #[cfg_attr(feature = "serde", serde(rename = "timeout"))]
-    #[display(fmt = "On timeout")]
-    OnTimeout,
+    #[display(fmt = "After timeout")]
+    AfterTimeout,
+    #[cfg_attr(feature = "serde", serde(rename = "turbo"))]
+    #[display(fmt = "After timeout, keep firing (turbo)")]
+    AfterTimeoutKeepFiring,
 }
 
 impl FireMode {
     pub fn wants_to_be_polled(self) -> bool {
         use FireMode::*;
-        matches!(self, OnTimeout)
+        matches!(self, AfterTimeout | AfterTimeoutKeepFiring)
     }
 }
 
