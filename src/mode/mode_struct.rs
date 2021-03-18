@@ -1,8 +1,8 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     mode::feedback_util, negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue,
-    Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, Target, Transformation,
-    UnitIncrement, UnitValue, BASE_EPSILON,
+    Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target,
+    Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -41,7 +41,7 @@ pub struct Mode<T: Transformation> {
     pub jump_interval: Interval<UnitValue>,
     // TODO-low Not cool to make this public. Maybe derive a builder for this beast.
     pub press_duration_processor: PressDurationProcessor,
-    pub approach_target_value: bool,
+    pub takeover_mode: TakeoverMode,
     pub reverse: bool,
     pub rotate: bool,
     pub round_target_value: bool,
@@ -57,6 +57,8 @@ pub struct Mode<T: Transformation> {
     /// when the last change was a positive increment and negative when the last change was a
     /// negative increment.
     pub increment_counter: i32,
+    /// For absolute-to-relative mode and value-scaling takeover mode.
+    pub previous_absolute_control_value: Option<UnitValue>,
 }
 
 #[derive(
@@ -96,7 +98,7 @@ impl<T: Transformation> Default for Mode<T> {
             step_count_interval: create_discrete_increment_interval(1, 1),
             jump_interval: full_unit_interval(),
             press_duration_processor: Default::default(),
-            approach_target_value: false,
+            takeover_mode: Default::default(),
             reverse: false,
             round_target_value: false,
             out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
@@ -106,6 +108,7 @@ impl<T: Transformation> Default for Mode<T> {
             increment_counter: 0,
             convert_relative_to_absolute: false,
             current_absolute_value: UnitValue::MIN,
+            previous_absolute_control_value: None,
         }
     }
 }
@@ -192,6 +195,8 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target,
     ) -> Option<UnitValue> {
+        // Memorize as previous value for next control cycle.
+        let previous_control_value = self.previous_absolute_control_value.replace(control_value);
         let (source_bound_value, min_is_max_behavior) =
             if control_value.is_within_interval(&self.source_value_interval) {
                 // Control value is within source value interval
@@ -233,6 +238,7 @@ impl<T: Transformation> Mode<T> {
             pepped_up_control_value,
             current_target_value,
             control_type,
+            previous_control_value,
         )
     }
 
@@ -310,7 +316,7 @@ impl<T: Transformation> Mode<T> {
                 // This doesn't make sense at all. Buttons just need to be triggered, not fed with
                 // +/- n.
                 None
-            },
+            }
         }
     }
 
@@ -461,10 +467,11 @@ impl<T: Transformation> Mode<T> {
     }
 
     fn hitting_target_considering_max_jump(
-        &self,
+        &mut self,
         control_value: UnitValue,
         current_target_value: Option<UnitValue>,
         control_type: ControlType,
+        previous_control_value: Option<UnitValue>,
     ) -> Option<UnitValue> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
@@ -478,17 +485,89 @@ impl<T: Transformation> Mode<T> {
         let distance = control_value.calc_distance_from(current_target_value);
         if distance > self.jump_interval.max_val() {
             // Distance is too large
-            if !self.approach_target_value {
-                // Scaling not desired. Do nothing.
-                return None;
-            }
-            // Scaling desired
-            let approach_distance = distance.map_from_unit_interval_to(&self.jump_interval);
-            let approach_increment = approach_distance
-                .to_increment(negative_if(control_value < current_target_value))?;
-            let final_target_value =
-                current_target_value.add_clamping(approach_increment, &self.target_value_interval);
-            return self.hit_if_changed(final_target_value, current_target_value, control_type);
+            use TakeoverMode::*;
+            return match self.takeover_mode {
+                Pickup => {
+                    // Scaling not desired. Do nothing.
+                    None
+                }
+                Parallel => {
+                    if let Some(prev) = previous_control_value {
+                        let relative_increment = control_value - prev;
+                        if relative_increment == 0.0 {
+                            None
+                        } else {
+                            let relative_increment = UnitIncrement::new(relative_increment);
+                            let restrained_increment =
+                                relative_increment.clamp_to_interval(&self.jump_interval);
+                            let final_target_value = current_target_value
+                                .add_clamping(restrained_increment, &self.target_value_interval);
+                            self.hit_if_changed(
+                                final_target_value,
+                                current_target_value,
+                                control_type,
+                            )
+                        }
+                    } else {
+                        // We can't know the direction if we don't have a previous value.
+                        // Wait for next incoming value.
+                        None
+                    }
+                }
+                LongTimeNoSee => {
+                    let approach_distance = distance.map_from_unit_interval_to(&self.jump_interval);
+                    let approach_increment = approach_distance
+                        .to_increment(negative_if(control_value < current_target_value))?;
+                    let final_target_value = current_target_value
+                        .add_clamping(approach_increment, &self.target_value_interval);
+                    self.hit_if_changed(final_target_value, current_target_value, control_type)
+                }
+                CatchUp => {
+                    if let Some(prev) = previous_control_value {
+                        let relative_increment = control_value - prev;
+                        if relative_increment == 0.0 {
+                            None
+                        } else {
+                            let goes_up = relative_increment.is_sign_positive();
+                            let source_distance_from_border = if goes_up {
+                                1.0 - prev.get()
+                            } else {
+                                prev.get()
+                            };
+                            let target_distance_from_border = if goes_up {
+                                1.0 - current_target_value.get()
+                            } else {
+                                current_target_value.get()
+                            };
+                            if source_distance_from_border == 0.0
+                                || target_distance_from_border == 0.0
+                            {
+                                None
+                            } else {
+                                let scaled_increment = relative_increment
+                                    * target_distance_from_border
+                                    / source_distance_from_border;
+                                let scaled_increment = UnitIncrement::new(scaled_increment);
+                                let restrained_increment =
+                                    scaled_increment.clamp_to_interval(&self.jump_interval);
+                                let final_target_value = current_target_value.add_clamping(
+                                    restrained_increment,
+                                    &self.target_value_interval,
+                                );
+                                self.hit_if_changed(
+                                    final_target_value,
+                                    current_target_value,
+                                    control_type,
+                                )
+                            }
+                        }
+                    } else {
+                        // We can't know the direction if we don't have a previous value.
+                        // Wait for next incoming value.
+                        None
+                    }
+                }
+            };
         }
         // Distance is not too large
         if distance < self.jump_interval.min_val() {
@@ -1014,7 +1093,7 @@ mod tests {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
                 jump_interval: create_unit_value_interval(0.0, 0.2),
-                approach_target_value: true,
+                takeover_mode: TakeoverMode::LongTimeNoSee,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1244,7 +1323,6 @@ mod tests {
     }
 
     mod absolute_toggle {
-
         use super::*;
 
         #[test]
@@ -1901,10 +1979,14 @@ mod tests {
                 assert!(mode.control(rel(-10), &target).is_none());
                 assert!(mode.control(rel(-2), &target).is_none());
                 assert!(mode.control(rel(-1), &target).is_none());
-                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.20)); // 4x
-                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), abs(0.25)); // 5x
-                assert_abs_diff_eq!(mode.control(rel(4), &target).unwrap(), abs(0.35)); // 7x
-                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), abs(0.65)); // 13x
+                assert_abs_diff_eq!(mode.control(rel(1), &target).unwrap(), abs(0.20));
+                // 4x
+                assert_abs_diff_eq!(mode.control(rel(2), &target).unwrap(), abs(0.25));
+                // 5x
+                assert_abs_diff_eq!(mode.control(rel(4), &target).unwrap(), abs(0.35));
+                // 7x
+                assert_abs_diff_eq!(mode.control(rel(10), &target).unwrap(), abs(0.65));
+                // 13x
                 assert_abs_diff_eq!(mode.control(rel(100), &target).unwrap(), abs(1.00)); // 100x
             }
 
@@ -1923,8 +2005,10 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), abs(0.35)); // 13x
-                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), abs(0.75)); // 5x
+                assert_abs_diff_eq!(mode.control(rel(-10), &target).unwrap(), abs(0.35));
+                // 13x
+                assert_abs_diff_eq!(mode.control(rel(-2), &target).unwrap(), abs(0.75));
+                // 5x
                 assert_abs_diff_eq!(mode.control(rel(-1), &target).unwrap(), abs(0.8)); // 4x
                 assert!(mode.control(rel(1), &target).is_none());
                 assert!(mode.control(rel(2), &target).is_none());

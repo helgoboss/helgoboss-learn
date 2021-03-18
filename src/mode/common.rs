@@ -82,3 +82,38 @@ impl Default for FireMode {
         Self::WhenButtonReleased
     }
 }
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(usize)]
+pub enum TakeoverMode {
+    #[cfg_attr(feature = "serde", serde(rename = "pickup"))]
+    #[display(fmt = "Pick up")]
+    Pickup,
+    #[cfg_attr(feature = "serde", serde(rename = "longTimeNoSee"))]
+    #[display(fmt = "Long time no see")]
+    LongTimeNoSee,
+    #[cfg_attr(feature = "serde", serde(rename = "parallel"))]
+    #[display(fmt = "Parallel")]
+    Parallel,
+    #[cfg_attr(feature = "serde", serde(rename = "valueScaling"))]
+    #[display(fmt = "Catch up")]
+    CatchUp,
+}
+
+impl Default for TakeoverMode {
+    fn default() -> Self {
+        Self::Pickup
+    }
+}
