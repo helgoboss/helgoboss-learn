@@ -351,7 +351,7 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<UnitValue> {
         // Convert to absolute value
         let mut inc = discrete_increment.to_unit_increment(self.step_size_interval.min_val())?;
-        inc = inc.clamp_to_interval(&self.step_size_interval);
+        inc = inc.clamp_to_interval(&self.step_size_interval)?;
         let full_unit_interval = full_unit_interval();
         let abs_input_value = if self.rotate {
             self.current_absolute_value
@@ -396,7 +396,7 @@ impl<T: Transformation> Mode<T> {
                 let unit_increment = potentially_reversed_increment
                     .to_unit_increment(self.step_size_interval.min_val())?;
                 let clamped_unit_increment =
-                    unit_increment.clamp_to_interval(&self.step_size_interval);
+                    unit_increment.clamp_to_interval(&self.step_size_interval)?;
                 self.hit_target_absolutely_with_unit_increment(
                     clamped_unit_increment,
                     self.step_size_interval.min_val(),
@@ -499,7 +499,7 @@ impl<T: Transformation> Mode<T> {
                         } else {
                             let relative_increment = UnitIncrement::new(relative_increment);
                             let restrained_increment =
-                                relative_increment.clamp_to_interval(&self.jump_interval);
+                                relative_increment.clamp_to_interval(&self.jump_interval)?;
                             let final_target_value = current_target_value
                                 .add_clamping(restrained_increment, &self.target_value_interval);
                             self.hit_if_changed(
@@ -549,7 +549,7 @@ impl<T: Transformation> Mode<T> {
                                     / source_distance_from_border;
                                 let scaled_increment = UnitIncrement::new(scaled_increment);
                                 let restrained_increment =
-                                    scaled_increment.clamp_to_interval(&self.jump_interval);
+                                    scaled_increment.clamp_to_interval(&self.jump_interval)?;
                                 let final_target_value = current_target_value.add_clamping(
                                     restrained_increment,
                                     &self.target_value_interval,

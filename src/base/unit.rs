@@ -491,9 +491,9 @@ impl UnitIncrement {
     }
 
     /// Clamps this increment to the given interval bounds.
-    pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> UnitIncrement {
+    pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> Option<UnitIncrement> {
         let clamped_value = self.to_value().clamp_to_interval(interval);
-        clamped_value.to_increment(self.signum()).unwrap()
+        clamped_value.to_increment(self.signum())
     }
 }
 
