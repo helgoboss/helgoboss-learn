@@ -2,6 +2,7 @@ use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, ControlValue, DiscreteIncrement,
     SourceCharacter, UnitValue,
 };
+use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -10,11 +11,13 @@ use rosc::{OscMessage, OscType};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(Eq, PartialEq, Hash)]
 pub struct OscSource {
     /// To filter out the correct messages.
     address_pattern: String,
     /// To process a value (not just trigger).
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     arg_descriptor: Option<OscArgDescriptor>,
 }
 

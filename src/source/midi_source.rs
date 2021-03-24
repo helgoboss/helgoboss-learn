@@ -148,6 +148,7 @@ pub enum MidiSource {
     // E.g. SysEx
     Raw {
         pattern: RawMidiPattern,
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
         custom_character: SourceCharacter,
     },
 }
