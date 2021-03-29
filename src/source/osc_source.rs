@@ -227,12 +227,12 @@ impl OscSource {
         if let Some(desc) = self.arg_descriptor {
             use OscTypeTag::*;
             match desc.type_tag {
-                Float | Double => Range,
-                Bool | Nil | Inf => Button,
-                _ => Button,
+                Float | Double => RangeElement,
+                Bool | Nil | Inf => MomentaryButton,
+                _ => MomentaryButton,
             }
         } else {
-            Button
+            MomentaryButton
         }
     }
 

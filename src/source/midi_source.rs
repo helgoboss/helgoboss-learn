@@ -30,20 +30,25 @@ use std::convert::TryFrom;
 #[repr(usize)]
 pub enum SourceCharacter {
     #[display(fmt = "Range element (knob, fader, etc.)")]
-    Range = 0,
+    RangeElement = 0,
     #[display(fmt = "Button (momentary)")]
-    Button = 1,
+    MomentaryButton = 1,
     #[display(fmt = "Encoder (relative type 1)")]
     Encoder1 = 2,
     #[display(fmt = "Encoder (relative type 2)")]
     Encoder2 = 3,
     #[display(fmt = "Encoder (relative type 3)")]
     Encoder3 = 4,
+    /// This exists as a workaround for buttons that only toggle and can't be configured to work
+    /// as momentary buttons. A source with this character will always emit 1, even if the
+    /// hardware toggle is switching to off.   
+    #[display(fmt = "Toggle-only button (avoid!)")]
+    ToggleButton = 5,
 }
 
 impl Default for SourceCharacter {
     fn default() -> Self {
-        SourceCharacter::Range
+        SourceCharacter::RangeElement
     }
 }
 
@@ -138,6 +143,8 @@ pub enum MidiSource {
         number: Option<U14>,
         is_14_bit: Option<bool>,
         is_registered: Option<bool>,
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        custom_character: SourceCharacter,
     },
     // ShortMessageType::TimingClock
     ClockTempo,
@@ -164,6 +171,7 @@ impl MidiSource {
                 number: Some(msg.number()),
                 is_14_bit: Some(msg.is_14_bit()),
                 is_registered: Some(msg.is_registered()),
+                custom_character: SourceCharacter::RangeElement,
             },
             ControlChange14Bit(msg) => MidiSource::ControlChange14BitValue {
                 channel: Some(msg.channel()),
@@ -214,7 +222,7 @@ impl MidiSource {
             } => MidiSource::ControlChangeValue {
                 channel: Some(channel),
                 controller_number: Some(controller_number),
-                custom_character: SourceCharacter::Range,
+                custom_character: SourceCharacter::RangeElement,
             },
             ProgramChange { channel, .. } => MidiSource::ProgramChangeNumber {
                 channel: Some(channel),
@@ -261,13 +269,16 @@ impl MidiSource {
     pub fn character(&self) -> SourceCharacter {
         use MidiSource::*;
         match self {
-            NoteVelocity { .. } => SourceCharacter::Button,
+            NoteVelocity { .. } => SourceCharacter::MomentaryButton,
             // TODO-low Introduce new character "Trigger"
-            ClockTransport { .. } => SourceCharacter::Button,
+            ClockTransport { .. } => SourceCharacter::MomentaryButton,
             Raw {
                 custom_character, ..
             }
             | ControlChangeValue {
+                custom_character, ..
+            }
+            | ParameterNumberValue {
                 custom_character, ..
             } => *custom_character,
             NoteKeyNumber { .. }
@@ -276,8 +287,7 @@ impl MidiSource {
             | ChannelPressureAmount { .. }
             | PitchBendChangeValue { .. }
             | ControlChange14BitValue { .. }
-            | ParameterNumberValue { .. }
-            | ClockTempo => SourceCharacter::Range,
+            | ClockTempo => SourceCharacter::RangeElement,
         }
     }
 
@@ -407,6 +417,7 @@ impl MidiSource {
                 number,
                 is_14_bit,
                 is_registered,
+                custom_character,
             } => match value {
                 ParameterNumber(msg)
                     if matches(msg.channel(), *channel)
@@ -414,12 +425,12 @@ impl MidiSource {
                         && matches(msg.is_14_bit(), *is_14_bit)
                         && matches(msg.is_registered(), *is_registered) =>
                 {
-                    let unit_value = if msg.is_14_bit() {
-                        normalize_14_bit(msg.value())
+                    if msg.is_14_bit() {
+                        Some(abs(normalize_14_bit(msg.value())))
                     } else {
-                        normalize_7_bit(U7::try_from(msg.value()).unwrap())
-                    };
-                    Some(abs(unit_value))
+                        let u7_value = U7::try_from(msg.value()).unwrap();
+                        calc_control_value_from_control_change(*custom_character, u7_value).ok()
+                    }
                 }
                 _ => None,
             },
@@ -543,6 +554,7 @@ impl MidiSource {
                 number: Some(n),
                 is_14_bit: Some(is_14_bit),
                 is_registered: Some(is_registered),
+                ..
             } => {
                 let n = if !*is_registered && !*is_14_bit {
                     ParameterNumberMessage::non_registered_7_bit(
@@ -641,6 +653,8 @@ impl MidiSource {
             self,
             MidiSource::ControlChangeValue {
                 custom_character, ..
+            } | MidiSource::ParameterNumberValue {
+            custom_character, ..
             } if custom_character.emits_increments()
         )
     }
@@ -697,10 +711,9 @@ impl MidiSource {
             | ChannelPressureAmount { .. } => {
                 normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
             }
-            ControlChangeValue {
-                custom_character: _,
-                ..
-            } => normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?),
+            ControlChangeValue { .. } => {
+                normalize_7_bit(U7::try_from(value).map_err(|_| "value not 7-bit")?)
+            }
             PitchBendChangeValue { .. } => normalize_14_bit_centered(
                 U14::try_from(value + 8192).map_err(|_| "value not 14-bit")?,
             ),
@@ -744,10 +757,11 @@ fn calc_control_value_from_control_change(
 ) -> Result<ControlValue, &'static str> {
     use SourceCharacter::*;
     let result = match character {
+        RangeElement | MomentaryButton => abs(normalize_7_bit(cc_control_value)),
         Encoder1 => rel(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),
         Encoder2 => rel(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
         Encoder3 => rel(DiscreteIncrement::from_encoder_3_value(cc_control_value)?),
-        _ => abs(normalize_7_bit(cc_control_value)),
+        ToggleButton => abs(UnitValue::MAX),
     };
     Ok(result)
 }
@@ -1038,7 +1052,7 @@ mod tests {
         let source = MidiSource::ControlChangeValue {
             channel: Some(ch(1)),
             controller_number: None,
-            custom_character: SourceCharacter::Range,
+            custom_character: SourceCharacter::RangeElement,
         };
         // When
         // Then
@@ -1487,6 +1501,7 @@ mod tests {
             number: None,
             is_14_bit: None,
             is_registered: None,
+            custom_character: SourceCharacter::RangeElement,
         };
         // When
         // Then
@@ -1544,6 +1559,7 @@ mod tests {
             number: Some(u14(3000)),
             is_14_bit: Some(false),
             is_registered: Some(true),
+            custom_character: SourceCharacter::RangeElement,
         };
         // When
         // Then
@@ -1589,6 +1605,23 @@ mod tests {
     }
 
     #[test]
+    fn parameter_number_value_2_toggle() {
+        // Given
+        let source = MidiSource::ParameterNumberValue {
+            channel: Some(ch(7)),
+            number: Some(u14(3000)),
+            is_14_bit: Some(false),
+            is_registered: Some(true),
+            custom_character: SourceCharacter::ToggleButton,
+        };
+        // When
+        // Then
+        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 50))).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 127))).unwrap(), abs(1.0));
+    }
+
+    #[test]
     fn parameter_number_value_3() {
         // Given
         let source = MidiSource::ParameterNumberValue {
@@ -1596,6 +1629,7 @@ mod tests {
             number: Some(u14(3000)),
             is_14_bit: Some(true),
             is_registered: Some(true),
+            custom_character: SourceCharacter::RangeElement,
         };
         // When
         // Then
