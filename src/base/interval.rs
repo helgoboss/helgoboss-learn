@@ -26,6 +26,9 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     }
 
     /// Checks if this interval contains the given value.
+    ///
+    /// **Attention:** This is very strict at the interval bounds and doesn't consider numerical
+    /// inaccuracies. Consider using `value_matches_tolerant()` instead.
     pub fn contains(&self, value: T) -> bool {
         self.min <= value && value <= self.max
     }

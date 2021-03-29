@@ -197,34 +197,35 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<UnitValue> {
         // Memorize as previous value for next control cycle.
         let previous_control_value = self.previous_absolute_control_value.replace(control_value);
-        let (source_bound_value, min_is_max_behavior) =
-            if control_value.is_within_interval(&self.source_value_interval) {
-                // Control value is within source value interval
-                (control_value, MinIsMaxBehavior::PreferOne)
-            } else {
-                // Control value is outside source value interval
-                use OutOfRangeBehavior::*;
-                match self.out_of_range_behavior {
-                    MinOrMax => {
-                        if control_value < self.source_value_interval.min_val() {
-                            (
-                                self.source_value_interval.min_val(),
-                                MinIsMaxBehavior::PreferZero,
-                            )
-                        } else {
-                            (
-                                self.source_value_interval.max_val(),
-                                MinIsMaxBehavior::PreferOne,
-                            )
-                        }
+        let (source_bound_value, min_is_max_behavior) = if control_value
+            .is_within_interval_tolerant(&self.source_value_interval, BASE_EPSILON)
+        {
+            // Control value is within source value interval
+            (control_value, MinIsMaxBehavior::PreferOne)
+        } else {
+            // Control value is outside source value interval
+            use OutOfRangeBehavior::*;
+            match self.out_of_range_behavior {
+                MinOrMax => {
+                    if control_value < self.source_value_interval.min_val() {
+                        (
+                            self.source_value_interval.min_val(),
+                            MinIsMaxBehavior::PreferZero,
+                        )
+                    } else {
+                        (
+                            self.source_value_interval.max_val(),
+                            MinIsMaxBehavior::PreferOne,
+                        )
                     }
-                    Min => (
-                        self.source_value_interval.min_val(),
-                        MinIsMaxBehavior::PreferZero,
-                    ),
-                    Ignore => return None,
                 }
-            };
+                Min => (
+                    self.source_value_interval.min_val(),
+                    MinIsMaxBehavior::PreferZero,
+                ),
+                Ignore => return None,
+            }
+        };
         let current_target_value = target.current_value();
         // Control value is within source value interval
         let control_type = target.control_type();
@@ -248,7 +249,8 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
-        if control_value.is_zero() || !control_value.is_within_interval(&self.source_value_interval)
+        if control_value.is_zero()
+            || !control_value.is_within_interval_tolerant(&self.source_value_interval, BASE_EPSILON)
         {
             return None;
         }
@@ -271,6 +273,7 @@ impl<T: Transformation> Mode<T> {
                     .map_to_unit_interval_from(
                         &self.source_value_interval,
                         MinIsMaxBehavior::PreferOne,
+                        BASE_EPSILON
                     )
                     .map_from_unit_interval_to(&self.step_size_interval);
                 let step_size_increment =
@@ -358,7 +361,7 @@ impl<T: Transformation> Mode<T> {
                 .add_rotating(inc, &full_unit_interval, BASE_EPSILON)
         } else {
             self.current_absolute_value
-                .add_clamping(inc, &full_unit_interval)
+                .add_clamping(inc, &full_unit_interval, BASE_EPSILON)
         };
         self.current_absolute_value = abs_input_value;
         // Do the usual absolute processing
@@ -443,8 +446,11 @@ impl<T: Transformation> Mode<T> {
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> UnitValue {
         // 1. Apply source interval
-        let mut v = control_value
-            .map_to_unit_interval_from(&self.source_value_interval, min_is_max_behavior);
+        let mut v = control_value.map_to_unit_interval_from(
+            &self.source_value_interval,
+            min_is_max_behavior,
+            BASE_EPSILON,
+        );
         // 2. Apply transformation
         v = self
             .control_transformation
@@ -500,8 +506,11 @@ impl<T: Transformation> Mode<T> {
                             let relative_increment = UnitIncrement::new(relative_increment);
                             let restrained_increment =
                                 relative_increment.clamp_to_interval(&self.jump_interval)?;
-                            let final_target_value = current_target_value
-                                .add_clamping(restrained_increment, &self.target_value_interval);
+                            let final_target_value = current_target_value.add_clamping(
+                                restrained_increment,
+                                &self.target_value_interval,
+                                BASE_EPSILON,
+                            );
                             self.hit_if_changed(
                                 final_target_value,
                                 current_target_value,
@@ -518,8 +527,11 @@ impl<T: Transformation> Mode<T> {
                     let approach_distance = distance.map_from_unit_interval_to(&self.jump_interval);
                     let approach_increment = approach_distance
                         .to_increment(negative_if(control_value < current_target_value))?;
-                    let final_target_value = current_target_value
-                        .add_clamping(approach_increment, &self.target_value_interval);
+                    let final_target_value = current_target_value.add_clamping(
+                        approach_increment,
+                        &self.target_value_interval,
+                        BASE_EPSILON,
+                    );
                     self.hit_if_changed(final_target_value, current_target_value, control_type)
                 }
                 CatchUp => {
@@ -553,6 +565,7 @@ impl<T: Transformation> Mode<T> {
                                 let final_target_value = current_target_value.add_clamping(
                                     restrained_increment,
                                     &self.target_value_interval,
+                                    BASE_EPSILON,
                                 );
                                 self.hit_if_changed(
                                     final_target_value,
@@ -630,7 +643,7 @@ impl<T: Transformation> Mode<T> {
         v = if self.rotate {
             v.add_rotating(increment, &snapped_target_value_interval, BASE_EPSILON)
         } else {
-            v.add_clamping(increment, &snapped_target_value_interval)
+            v.add_clamping(increment, &snapped_target_value_interval, BASE_EPSILON)
         };
         if v == current_target_value {
             return None;
@@ -682,7 +695,11 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
     ) -> Option<DiscreteIncrement> {
         let factor = control_value
-            .map_to_unit_interval_from(&self.source_value_interval, MinIsMaxBehavior::PreferOne)
+            .map_to_unit_interval_from(
+                &self.source_value_interval,
+                MinIsMaxBehavior::PreferOne,
+                BASE_EPSILON,
+            )
             .map_from_unit_interval_to_discrete_increment(&self.step_count_interval);
         // This mode supports positive increment only.
         let discrete_value = if factor.is_positive() {

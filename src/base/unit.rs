@@ -1,4 +1,4 @@
-use crate::{DiscreteIncrement, DiscreteValue, Interval};
+use crate::{DiscreteIncrement, DiscreteValue, Interval, IntervalMatchResult};
 use derive_more::Display;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -158,9 +158,21 @@ impl UnitValue {
         SoftSymmetricUnitValue::new((self.0 * 2.0) - 1.0)
     }
 
-    /// Tests if this value is within the given interval.
     pub fn is_within_interval(&self, interval: &Interval<UnitValue>) -> bool {
         interval.contains(*self)
+    }
+
+    /// Tests if this value is within the given interval.
+    pub fn is_within_interval_tolerant(
+        &self,
+        interval: &Interval<UnitValue>,
+        epsilon: f64,
+    ) -> bool {
+        use IntervalMatchResult::*;
+        match interval.value_matches_tolerant(*self, epsilon) {
+            Between | Min | Max | MinAndMax => true,
+            Lower | Greater => false,
+        }
     }
 
     /// Calculates the distance between this and another unit value.
@@ -181,29 +193,28 @@ impl UnitValue {
 
     /// Maps this value to the unit interval assuming that this value currently exhausts the given
     /// current interval. If this value is outside the current interval, this method returns either
-    /// 0.0 or 1.0. If value == min == max, it returns 1.0.
+    /// 0.0 or 1.0. If value == min == max, it returns 0.0 or 1.0 depending on the given behavior.
     pub fn map_to_unit_interval_from(
         &self,
         current_interval: &Interval<UnitValue>,
         min_is_max_behavior: MinIsMaxBehavior,
+        epsilon: f64,
     ) -> UnitValue {
-        let (min, max) = (current_interval.min_val(), current_interval.max_val());
-        if *self < min {
-            return UnitValue::MIN;
+        use IntervalMatchResult::*;
+        match current_interval.value_matches_tolerant(*self, epsilon) {
+            Between => UnitValue::new_clamped(
+                (*self - current_interval.min_val()) / current_interval.span(),
+            ),
+            MinAndMax => {
+                use MinIsMaxBehavior::*;
+                match min_is_max_behavior {
+                    PreferZero => UnitValue::MIN,
+                    PreferOne => UnitValue::MAX,
+                }
+            }
+            Min | Lower => UnitValue::MIN,
+            Max | Greater => UnitValue::MAX,
         }
-        if *self > max {
-            return UnitValue::MAX;
-        }
-        // At this point we know that the value is within the interval.
-        // Special case: The interval is just one value and we have that value!
-        if min == max {
-            use MinIsMaxBehavior::*;
-            return match min_is_max_behavior {
-                PreferZero => UnitValue::MIN,
-                PreferOne => UnitValue::MAX,
-            };
-        }
-        UnitValue::new_clamped((*self - min) / current_interval.span())
     }
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).
@@ -302,27 +313,27 @@ impl UnitValue {
         epsilon: f64,
     ) -> UnitValue {
         let (min, max) = (interval.min_val(), interval.max_val());
-        if *self < min {
-            return if increment.is_positive() { min } else { max };
-        }
-        if *self > max {
-            return if increment.is_positive() { min } else { max };
-        }
-        let sum = self.0 + increment.get();
-        if sum < min.get() {
-            if (min.get() - sum).abs() <= epsilon {
-                min
-            } else {
-                max
+        use IntervalMatchResult::*;
+        match interval.value_matches_tolerant(*self, epsilon) {
+            Lower | Greater => {
+                if increment.is_positive() {
+                    min
+                } else {
+                    max
+                }
             }
-        } else if sum > max.get() {
-            if (sum - max.get()).abs() <= epsilon {
-                max
-            } else {
-                min
+            Between | Min | Max | MinAndMax => {
+                let sum = self.0 + increment.get();
+                match interval.to_raw().value_matches_tolerant(sum, epsilon) {
+                    Between => UnitValue::new_clamped(sum),
+                    Min => min,
+                    Max => max,
+                    Lower => max,
+                    Greater => min,
+                    // Rotation makes no sense for this one.
+                    MinAndMax => max,
+                }
             }
-        } else {
-            unsafe { UnitValue::new_unchecked(sum) }
         }
     }
 
@@ -333,16 +344,16 @@ impl UnitValue {
         &self,
         increment: UnitIncrement,
         interval: &Interval<UnitValue>,
+        epsilon: f64,
     ) -> UnitValue {
         let (min, max) = (interval.min_val(), interval.max_val());
-        if *self < min {
-            return min;
-        }
-        if *self > max {
-            return max;
-        }
-        unsafe {
-            UnitValue::new_unchecked(num::clamp(self.0 + increment.get(), min.get(), max.get()))
+        use IntervalMatchResult::*;
+        match interval.value_matches_tolerant(*self, epsilon) {
+            Lower => min,
+            Greater => max,
+            Between | Min | Max | MinAndMax => {
+                UnitValue::new_clamped(num::clamp(self.0 + increment.get(), min.get(), max.get()))
+            }
         }
     }
 
@@ -432,6 +443,10 @@ impl Interval<UnitValue> {
     /// Inverts the interval.
     pub fn inverse(&self) -> Interval<UnitValue> {
         Interval::new(self.max_val().inverse(), self.min_val().inverse())
+    }
+
+    pub fn to_raw(&self) -> Interval<f64> {
+        Interval::new(self.min_val().get(), self.max_val().get())
     }
 }
 

@@ -1,6 +1,5 @@
 use crate::{
-    Interval, IntervalMatchResult, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, UnitValue,
-    BASE_EPSILON,
+    Interval, IntervalMatchResult, OutOfRangeBehavior, Transformation, UnitValue, BASE_EPSILON,
 };
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -36,9 +35,9 @@ pub fn feedback<T: Transformation>(
             Between => UnitValue::new_clamped(
                 (v - target_value_interval.min_val()) / target_value_interval.span(),
             ),
+            MinAndMax => UnitValue::MAX,
             Min => UnitValue::MIN,
             Max => UnitValue::MAX,
-            MinAndMax => UnitValue::MAX,
             Lower => match out_of_range_behavior {
                 OutOfRangeBehavior::MinOrMax | OutOfRangeBehavior::Min => UnitValue::MIN,
                 OutOfRangeBehavior::Ignore => return None,
