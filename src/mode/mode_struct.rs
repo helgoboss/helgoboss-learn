@@ -1258,6 +1258,55 @@ mod tests {
         }
 
         #[test]
+        fn feedback_out_of_range_min_max_okay() {
+            // Given
+            let mode: Mode<TestTransformation> = Mode {
+                target_value_interval: create_unit_value_interval(0.02, 0.02),
+                out_of_range_behavior: OutOfRangeBehavior::Min,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.01)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.02)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.03)).unwrap(), uv(0.0));
+        }
+
+        #[test]
+        fn feedback_out_of_range_min_max_issue_263() {
+            // Given
+            let mode: Mode<TestTransformation> = Mode {
+                target_value_interval: create_unit_value_interval(0.03, 0.03),
+                out_of_range_behavior: OutOfRangeBehavior::Min,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.01)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.03)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.04)).unwrap(), uv(0.0));
+        }
+
+        #[test]
+        fn feedback_out_of_range_min_max_issue_263_more() {
+            // Given
+            let mode: Mode<TestTransformation> = Mode {
+                target_value_interval: create_unit_value_interval(0.03, 0.03),
+                out_of_range_behavior: OutOfRangeBehavior::Min,
+                ..Default::default()
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(mode.feedback(uv(0.0)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.01)).unwrap(), uv(0.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.029999999329447746)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.0300000001)).unwrap(), uv(1.0));
+            assert_abs_diff_eq!(mode.feedback(uv(0.04)).unwrap(), uv(0.0));
+        }
+
+        #[test]
         fn feedback_out_of_range_min_target_one_value() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
