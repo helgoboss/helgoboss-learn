@@ -1,5 +1,6 @@
 use crate::{
-    Interval, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, UnitValue, BASE_EPSILON,
+    Interval, IntervalMatchResult, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, UnitValue,
+    BASE_EPSILON,
 };
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -19,35 +20,36 @@ pub fn feedback<T: Transformation>(
     target_value_interval: &Interval<UnitValue>,
     out_of_range_behavior: OutOfRangeBehavior,
 ) -> Option<UnitValue> {
-    // 5. Apply rounding (though in a different way than in control direction)
-    let v =
-        UnitValue::new_clamped((target_value.get() / FEEDBACK_EPSILON).round() * FEEDBACK_EPSILON);
+    let mut v = target_value;
     // 4. Apply target interval
-    let (mut v, min_is_max_behavior) = if target_value_interval.contains(v) {
-        // Feedback value is within target value interval
-        (v, MinIsMaxBehavior::PreferOne)
-    } else {
-        // Feedback value is outside target value interval
-        use OutOfRangeBehavior::*;
-        match out_of_range_behavior {
-            MinOrMax => {
-                if v < target_value_interval.min_val() {
-                    (
-                        target_value_interval.min_val(),
-                        MinIsMaxBehavior::PreferZero,
-                    )
-                } else {
-                    (target_value_interval.max_val(), MinIsMaxBehavior::PreferOne)
-                }
-            }
-            Min => (
-                target_value_interval.min_val(),
-                MinIsMaxBehavior::PreferZero,
+    // Tolerant interval bounds test because of https://github.com/helgoboss/realearn/issues/263.
+    // TODO-medium The most elaborate solution to deal with discrete values would be to actually
+    //  know which interval of floating point values represents a specific discrete target value.
+    //  However, is there a generic way to know that? Taking the target step size as epsilon in this
+    //  case sounds good but we still don't know if the target respects approximate values, if it
+    //  rounds them or uses more a ceil/floor approach ... I don't think this is standardized for
+    //  VST parameters. We could solve it for our own parameters in future. Until then, having a
+    //  fixed epsilon deals at least with most issues I guess.
+    v = {
+        use IntervalMatchResult::*;
+        match target_value_interval.value_matches_tolerant(v, FEEDBACK_EPSILON) {
+            Between => UnitValue::new_clamped(
+                (v - target_value_interval.min_val()) / target_value_interval.span(),
             ),
-            Ignore => return None,
+            Min => UnitValue::MIN,
+            Max => UnitValue::MAX,
+            MinAndMax => UnitValue::MAX,
+            Lower => match out_of_range_behavior {
+                OutOfRangeBehavior::MinOrMax | OutOfRangeBehavior::Min => UnitValue::MIN,
+                OutOfRangeBehavior::Ignore => return None,
+            },
+            Greater => match out_of_range_behavior {
+                OutOfRangeBehavior::MinOrMax => UnitValue::MAX,
+                OutOfRangeBehavior::Min => UnitValue::MIN,
+                OutOfRangeBehavior::Ignore => return None,
+            },
         }
     };
-    v = v.map_to_unit_interval_from(&target_value_interval, min_is_max_behavior);
     // 3. Apply reverse
     v = if reverse { v.inverse() } else { v };
     // 2. Apply transformation

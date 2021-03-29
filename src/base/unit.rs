@@ -194,6 +194,8 @@ impl UnitValue {
         if *self > max {
             return UnitValue::MAX;
         }
+        // At this point we know that the value is within the interval.
+        // Special case: The interval is just one value and we have that value!
         if min == max {
             use MinIsMaxBehavior::*;
             return match min_is_max_behavior {
@@ -201,7 +203,7 @@ impl UnitValue {
                 PreferOne => UnitValue::MAX,
             };
         }
-        unsafe { UnitValue::new_unchecked((*self - min) / current_interval.span()) }
+        UnitValue::new_clamped((*self - min) / current_interval.span())
     }
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).

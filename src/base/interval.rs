@@ -30,6 +30,34 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
         self.min <= value && value <= self.max
     }
 
+    pub fn min_is_max(&self, epsilon: f64) -> bool
+    where
+        T: Sub<Output = f64>,
+    {
+        (self.max - self.min).abs() < epsilon
+    }
+
+    pub fn value_matches_tolerant(&self, value: T, epsilon: f64) -> IntervalMatchResult
+    where
+        T: Sub<Output = f64>,
+    {
+        let is_min = (self.min - value).abs() < epsilon;
+        let is_max = (value - self.max).abs() < epsilon;
+        if is_min && is_max {
+            IntervalMatchResult::MinAndMax
+        } else if is_min {
+            IntervalMatchResult::Min
+        } else if is_max {
+            IntervalMatchResult::Max
+        } else if value < self.min {
+            IntervalMatchResult::Lower
+        } else if value > self.max {
+            IntervalMatchResult::Greater
+        } else {
+            IntervalMatchResult::Between
+        }
+    }
+
     /// Returns the low bound of this interval.
     pub fn min_val(&self) -> T {
         self.min
@@ -42,7 +70,7 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     pub fn with_min(&self, min: T) -> Interval<T> {
         Interval::new(min, if min <= self.max { self.max } else { min })
     }
-    /// Returns a new interval containing the given maxium.
+    /// Returns a new interval containing the given maximum.
     ///
     /// If the given maximum is lower than the current minimum, the minimum will be set to the given
     /// maximum.
@@ -59,4 +87,13 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     pub fn span(&self) -> T::Output {
         self.max - self.min
     }
+}
+
+pub enum IntervalMatchResult {
+    Between,
+    Min,
+    Max,
+    MinAndMax,
+    Lower,
+    Greater,
 }
