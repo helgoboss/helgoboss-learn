@@ -60,7 +60,7 @@ impl Default for OutOfRangeBehavior {
 #[repr(usize)]
 pub enum FireMode {
     #[cfg_attr(feature = "serde", serde(rename = "release"))]
-    #[display(fmt = "Normal (fire on press unless Min/Max > 0 ms)")]
+    #[display(fmt = "Normal (fire on release if Min/Max > 0 ms)")]
     WhenButtonReleased,
     #[cfg_attr(feature = "serde", serde(rename = "timeout"))]
     #[display(fmt = "After timeout")]
@@ -68,11 +68,11 @@ pub enum FireMode {
     #[cfg_attr(feature = "serde", serde(rename = "turbo"))]
     #[display(fmt = "After timeout, keep firing (turbo)")]
     AfterTimeoutKeepFiring,
-    #[cfg_attr(feature = "serde", serde(rename = "single-press"))]
-    #[display(fmt = "Single press")]
+    #[cfg_attr(feature = "serde", serde(rename = "single"))]
+    #[display(fmt = "Single press (if hold < Max ms)")]
     OnSinglePress,
-    #[cfg_attr(feature = "serde", serde(rename = "double-press"))]
-    #[display(fmt = "Double press (within Max ms)")]
+    #[cfg_attr(feature = "serde", serde(rename = "double"))]
+    #[display(fmt = "Double press")]
     OnDoublePress,
 }
 
