@@ -181,7 +181,7 @@ impl PressDurationProcessor {
             }
             FireMode::OnDoublePress => {
                 if control_value.get() > 0.0 {
-                    let result = if let Some(press) = &self.last_button_press {
+                    if let Some(press) = &self.last_button_press {
                         // Button was pressed before
                         let (result, next_press) = if press.time.elapsed() <= self.multi_press_span
                         {
@@ -197,8 +197,7 @@ impl PressDurationProcessor {
                         // First press
                         self.last_button_press = Some(ButtonPress::new(control_value));
                         None
-                    };
-                    result
+                    }
                 } else {
                     // Button release
                     None
