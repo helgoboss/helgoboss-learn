@@ -16,6 +16,7 @@ struct ButtonPress {
     time: Instant,
     value: UnitValue,
     time_of_last_turbo_fire: Option<Instant>,
+    count: u32,
 }
 
 impl ButtonPress {
@@ -24,6 +25,7 @@ impl ButtonPress {
             time: Instant::now(),
             value,
             time_of_last_turbo_fire: None,
+            count: 1,
         }
     }
 }
@@ -59,7 +61,13 @@ impl PressDurationProcessor {
     /// `poll()`, regularly.
     pub fn wants_to_be_polled(&self) -> bool {
         // This must not depend on the button press state!
-        self.fire_mode.wants_to_be_polled()
+        // This must not depend on the button press state!
+        use FireMode::*;
+        match self.fire_mode {
+            AfterTimeout | AfterTimeoutKeepFiring => true,
+            OnSinglePress => true, // self.interval.max_val() == ZERO_DURATION,
+            WhenButtonReleased | OnDoublePress => false,
+        }
     }
 
     pub fn process_press_or_release(&mut self, control_value: UnitValue) -> Option<UnitValue> {
@@ -68,7 +76,7 @@ impl PressDurationProcessor {
         match self.fire_mode {
             FireMode::WhenButtonReleased => {
                 if min == ZERO_DURATION && max == ZERO_DURATION {
-                    // N-op case: Just fire immediately. If just min is zero, we don't fire
+                    // No-op case: Just fire immediately. If just min is zero, we don't fire
                     // immediately but wait for button release. That way we can support different
                     // stacked press durations (or just "fire on release" behavior no matter the
                     // press duration if user chooses max very high)!
@@ -133,6 +141,67 @@ impl PressDurationProcessor {
                     None
                 }
             }
+            FireMode::OnSinglePress => {
+                if control_value.get() > 0.0 {
+                    // Button press
+                    self.last_button_press = if let Some(press) = self.last_button_press.as_mut() {
+                        // Button was pressed before without releasing it. Maybe toggle-only button.
+                        // Anyway, must be more than single press already.
+                        press.count += 1;
+                        None
+                    } else {
+                        // First press
+                        Some(ButtonPress::new(control_value))
+                    };
+                    None
+                } else {
+                    // Button release.
+                    // TODO-high
+                    return None;
+                    if self.interval.max_val() > ZERO_DURATION {
+                        // Should be handled by polling
+                        return None;
+                    }
+                    let fire_value = {
+                        let press = self.last_button_press.as_ref()?;
+                        let elapsed = press.time.elapsed();
+                        if self.interval.contains(press.time.elapsed()) && press.count == 1 {
+                            Some(press.value)
+                        } else {
+                            None
+                        }
+                    };
+                    if fire_value.is_some() {
+                        self.last_button_press = None;
+                    }
+                    fire_value
+                }
+            }
+            FireMode::OnDoublePress => {
+                if control_value.get() > 0.0 {
+                    let result = if let Some(press) = &self.last_button_press {
+                        // Button was pressed before
+                        let (result, next_press) =
+                            if press.time.elapsed() <= self.interval.max_val() {
+                                // Double press detected
+                                (Some(press.value), None)
+                            } else {
+                                // Previous press too long in past. Handle just like first press.
+                                (None, Some(ButtonPress::new(control_value)))
+                            };
+                        self.last_button_press = next_press;
+                        result
+                    } else {
+                        // First press
+                        self.last_button_press = Some(ButtonPress::new(control_value));
+                        None
+                    };
+                    result
+                } else {
+                    // Button release
+                    None
+                }
+            }
         }
     }
 
@@ -140,7 +209,7 @@ impl PressDurationProcessor {
     /// time.
     pub fn poll(&mut self) -> Option<UnitValue> {
         match self.fire_mode {
-            FireMode::WhenButtonReleased => None,
+            FireMode::WhenButtonReleased | FireMode::OnDoublePress => None,
             FireMode::AfterTimeout => {
                 let fire_value = {
                     let last_button_press = self.last_button_press.as_ref()?;
@@ -174,6 +243,22 @@ impl PressDurationProcessor {
                 } else {
                     None
                 }
+            }
+            FireMode::OnSinglePress => {
+                // if self.interval.max_val() == ZERO_DURATION {
+                //     // No-op (shouldn't be polled at all in this case)
+                //     return None;
+                // }
+                let fire_value = {
+                    let press = self.last_button_press.as_ref()?;
+                    if press.time.elapsed() >= self.interval.min_val() && press.count == 1 {
+                        Some(press.value)
+                    } else {
+                        return None;
+                    }
+                };
+                self.last_button_press = None;
+                fire_value
             }
         }
     }
