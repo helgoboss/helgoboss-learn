@@ -1,8 +1,9 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    mode::feedback_util, negative_if, ControlType, ControlValue, DiscreteIncrement, DiscreteValue,
-    Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target,
-    Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
+    mode::feedback_util, negative_if, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
+    DiscreteValue, EncoderUsage, Interval, MinIsMaxBehavior, OutOfRangeBehavior,
+    PressDurationProcessor, TakeoverMode, Target, Transformation, UnitIncrement, UnitValue,
+    BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -42,6 +43,8 @@ pub struct Mode<T: Transformation> {
     // TODO-low Not cool to make this public. Maybe derive a builder for this beast.
     pub press_duration_processor: PressDurationProcessor,
     pub takeover_mode: TakeoverMode,
+    pub encoder_usage: EncoderUsage,
+    pub button_usage: ButtonUsage,
     pub reverse: bool,
     pub rotate: bool,
     pub round_target_value: bool,
@@ -99,6 +102,8 @@ impl<T: Transformation> Default for Mode<T> {
             jump_interval: full_unit_interval(),
             press_duration_processor: Default::default(),
             takeover_mode: Default::default(),
+            button_usage: Default::default(),
+            encoder_usage: Default::default(),
             reverse: false,
             round_target_value: false,
             out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
@@ -157,6 +162,11 @@ impl<T: Transformation> Mode<T> {
         i: DiscreteIncrement,
         target: &impl Target,
     ) -> Option<ControlValue> {
+        match self.encoder_usage {
+            EncoderUsage::IncrementOnly if !i.is_positive() => return None,
+            EncoderUsage::DecrementOnly if i.is_positive() => return None,
+            _ => {}
+        };
         if self.convert_relative_to_absolute {
             self.control_relative_to_absolute(i, target)
                 .map(ControlValue::Absolute)
@@ -197,6 +207,11 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<UnitValue> {
         // Memorize as previous value for next control cycle.
         let previous_control_value = self.previous_absolute_control_value.replace(control_value);
+        match self.button_usage {
+            ButtonUsage::PressOnly if control_value.is_zero() => return None,
+            ButtonUsage::ReleaseOnly if !control_value.is_zero() => return None,
+            _ => {}
+        };
         let (source_bound_value, min_is_max_behavior) = if control_value
             .is_within_interval_tolerant(&self.source_value_interval, BASE_EPSILON)
         {

@@ -58,21 +58,85 @@ impl Default for OutOfRangeBehavior {
 )]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
+pub enum ButtonUsage {
+    #[cfg_attr(feature = "serde", serde(rename = "both"))]
+    #[display(fmt = "Press & release")]
+    Both,
+    #[cfg_attr(feature = "serde", serde(rename = "press-only"))]
+    #[display(fmt = "Press only")]
+    PressOnly,
+    #[cfg_attr(feature = "serde", serde(rename = "release-only"))]
+    #[display(fmt = "Release only")]
+    ReleaseOnly,
+}
+
+impl Default for ButtonUsage {
+    fn default() -> Self {
+        ButtonUsage::Both
+    }
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(usize)]
+pub enum EncoderUsage {
+    #[cfg_attr(feature = "serde", serde(rename = "both"))]
+    #[display(fmt = "Increment & decrement")]
+    Both,
+    #[cfg_attr(feature = "serde", serde(rename = "increment-only"))]
+    #[display(fmt = "Increment only")]
+    IncrementOnly,
+    #[cfg_attr(feature = "serde", serde(rename = "decrement-only"))]
+    #[display(fmt = "Decrement only")]
+    DecrementOnly,
+}
+
+impl Default for EncoderUsage {
+    fn default() -> Self {
+        EncoderUsage::Both
+    }
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(usize)]
 pub enum FireMode {
     #[cfg_attr(feature = "serde", serde(rename = "release"))]
-    #[display(fmt = "Normal (fire on release if Min/Max > 0 ms)")]
+    #[display(fmt = "Fire on press (or release if > 0 ms)")]
     WhenButtonReleased,
     #[cfg_attr(feature = "serde", serde(rename = "timeout"))]
-    #[display(fmt = "After timeout")]
+    #[display(fmt = "Fire after timeout")]
     AfterTimeout,
     #[cfg_attr(feature = "serde", serde(rename = "turbo"))]
-    #[display(fmt = "After timeout, keep firing (turbo)")]
+    #[display(fmt = "Fire after timeout, keep firing (turbo)")]
     AfterTimeoutKeepFiring,
     #[cfg_attr(feature = "serde", serde(rename = "single"))]
-    #[display(fmt = "Single press (if hold < Max ms)")]
+    #[display(fmt = "Fire after single press")]
     OnSinglePress,
     #[cfg_attr(feature = "serde", serde(rename = "double"))]
-    #[display(fmt = "Double press")]
+    #[display(fmt = "Fire on double press")]
     OnDoublePress,
 }
 
