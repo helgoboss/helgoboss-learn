@@ -136,6 +136,8 @@ pub enum MidiSource {
     ControlChange14BitValue {
         channel: Option<Channel>,
         msb_controller_number: Option<ControllerNumber>,
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        custom_character: SourceCharacter,
     },
     // ParameterNumberMessage
     ParameterNumberValue {
@@ -176,6 +178,7 @@ impl MidiSource {
             ControlChange14Bit(msg) => MidiSource::ControlChange14BitValue {
                 channel: Some(msg.channel()),
                 msb_controller_number: Some(msg.msb_controller_number()),
+                custom_character: SourceCharacter::RangeElement,
             },
             Tempo(_) => MidiSource::ClockTempo,
             Plain(msg) => MidiSource::from_short_message(msg)?,
@@ -278,6 +281,9 @@ impl MidiSource {
             | ControlChangeValue {
                 custom_character, ..
             }
+            | ControlChange14BitValue {
+                custom_character, ..
+            }
             | ParameterNumberValue {
                 custom_character, ..
             } => *custom_character,
@@ -286,7 +292,6 @@ impl MidiSource {
             | ProgramChangeNumber { .. }
             | ChannelPressureAmount { .. }
             | PitchBendChangeValue { .. }
-            | ControlChange14BitValue { .. }
             | ClockTempo => SourceCharacter::RangeElement,
         }
     }
@@ -393,8 +398,7 @@ impl MidiSource {
                         controller_number: cn,
                         control_value,
                     } if matches(ch, *channel) && matches(cn, *controller_number) => {
-                        calc_control_value_from_control_change(*custom_character, control_value)
-                            .ok()
+                        calc_control_value_from_7_bit_cc(*custom_character, control_value).ok()
                     }
                     _ => None,
                 },
@@ -403,12 +407,13 @@ impl MidiSource {
             S::ControlChange14BitValue {
                 channel,
                 msb_controller_number,
+                custom_character,
             } => match value {
                 ControlChange14Bit(msg)
                     if matches(msg.channel(), *channel)
                         && matches(msg.msb_controller_number(), *msb_controller_number) =>
                 {
-                    Some(abs(normalize_14_bit(msg.value())))
+                    calc_control_value_from_14_bit_cc(*custom_character, msg.value()).ok()
                 }
                 _ => None,
             },
@@ -426,10 +431,10 @@ impl MidiSource {
                         && matches(msg.is_registered(), *is_registered) =>
                 {
                     if msg.is_14_bit() {
-                        Some(abs(normalize_14_bit(msg.value())))
+                        calc_control_value_from_14_bit_cc(*custom_character, msg.value()).ok()
                     } else {
                         let u7_value = U7::try_from(msg.value()).unwrap();
-                        calc_control_value_from_control_change(*custom_character, u7_value).ok()
+                        calc_control_value_from_7_bit_cc(*custom_character, u7_value).ok()
                     }
                 }
                 _ => None,
@@ -458,6 +463,7 @@ impl MidiSource {
             ControlChange14BitValue {
                 channel,
                 msb_controller_number,
+                ..
             } => match msg.to_structured() {
                 ControlChange {
                     channel: ch,
@@ -544,6 +550,7 @@ impl MidiSource {
             ControlChange14BitValue {
                 channel: Some(ch),
                 msb_controller_number: Some(mcn),
+                ..
             } => Some(V::ControlChange14Bit(ControlChange14BitMessage::new(
                 *ch,
                 *mcn,
@@ -653,8 +660,10 @@ impl MidiSource {
             self,
             MidiSource::ControlChangeValue {
                 custom_character, ..
+            } | MidiSource::ControlChange14BitValue {
+              custom_character, ..
             } | MidiSource::ParameterNumberValue {
-            custom_character, ..
+              custom_character, ..
             } if custom_character.emits_increments()
         )
     }
@@ -751,7 +760,7 @@ fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> b
     }
 }
 
-fn calc_control_value_from_control_change(
+fn calc_control_value_from_7_bit_cc(
     character: SourceCharacter,
     cc_control_value: U7,
 ) -> Result<ControlValue, &'static str> {
@@ -761,6 +770,28 @@ fn calc_control_value_from_control_change(
         Encoder1 => rel(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),
         Encoder2 => rel(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
         Encoder3 => rel(DiscreteIncrement::from_encoder_3_value(cc_control_value)?),
+        ToggleButton => abs(UnitValue::MAX),
+    };
+    Ok(result)
+}
+
+fn calc_control_value_from_14_bit_cc(
+    character: SourceCharacter,
+    cc_control_value: U14,
+) -> Result<ControlValue, &'static str> {
+    use SourceCharacter::*;
+    let result = match character {
+        RangeElement | MomentaryButton => abs(normalize_14_bit(cc_control_value)),
+        Encoder1 | Encoder2 | Encoder3 => {
+            let value_7_bit = extract_low_7_bit_value_from_14_bit_value(cc_control_value);
+            let increment = match character {
+                Encoder1 => DiscreteIncrement::from_encoder_1_value(value_7_bit)?,
+                Encoder2 => DiscreteIncrement::from_encoder_2_value(value_7_bit)?,
+                Encoder3 => DiscreteIncrement::from_encoder_3_value(value_7_bit)?,
+                _ => unreachable!("impossible"),
+            };
+            rel(increment)
+        }
         ToggleButton => abs(UnitValue::MAX),
     };
     Ok(result)
@@ -1399,6 +1430,7 @@ mod tests {
         let source = MidiSource::ControlChange14BitValue {
             channel: Some(ch(1)),
             msb_controller_number: None,
+            custom_character: Default::default(),
         };
         // When
         // Then
@@ -1455,6 +1487,7 @@ mod tests {
         let source = MidiSource::ControlChange14BitValue {
             channel: Some(ch(1)),
             msb_controller_number: Some(cn(7)),
+            custom_character: Default::default(),
         };
         // When
         // Then
@@ -1787,4 +1820,8 @@ mod tests {
     fn tempo(bpm: f64) -> MidiSourceValue<RawShortMessage> {
         MidiSourceValue::Tempo(Bpm::new(bpm))
     }
+}
+
+fn extract_low_7_bit_value_from_14_bit_value(value: U14) -> U7 {
+    U7::new((value.get() & 0x7f) as u8)
 }
