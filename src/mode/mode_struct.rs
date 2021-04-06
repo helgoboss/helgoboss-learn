@@ -11,6 +11,11 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+pub struct ModeControlOptions {
+    pub enforce_rotate: bool,
+}
+
 /// Settings for processing all kinds of control values.
 ///
 /// ## How relative control values are processed (or button taps interpreted as increments).
@@ -125,9 +130,19 @@ impl<T: Transformation> Mode<T> {
         control_value: ControlValue,
         target: &impl Target,
     ) -> Option<ControlValue> {
+        self.control_with_options(control_value, target, ModeControlOptions::default())
+    }
+
+    /// Processes the given control value and maybe returns an appropriate target control value.
+    pub fn control_with_options(
+        &mut self,
+        control_value: ControlValue,
+        target: &impl Target,
+        options: ModeControlOptions,
+    ) -> Option<ControlValue> {
         match control_value {
-            ControlValue::Relative(i) => self.control_relative(i, target),
-            ControlValue::Absolute(v) => self.control_absolute(v, target, true),
+            ControlValue::Relative(i) => self.control_relative(i, target, options),
+            ControlValue::Absolute(v) => self.control_absolute(v, target, true, options),
         }
     }
 
@@ -154,13 +169,14 @@ impl<T: Transformation> Mode<T> {
     /// to fire.
     pub fn poll(&mut self, target: &impl Target) -> Option<ControlValue> {
         let control_value = self.press_duration_processor.poll()?;
-        self.control_absolute(control_value, target, false)
+        self.control_absolute(control_value, target, false, ModeControlOptions::default())
     }
 
     fn control_relative(
         &mut self,
         i: DiscreteIncrement,
         target: &impl Target,
+        options: ModeControlOptions,
     ) -> Option<ControlValue> {
         match self.encoder_usage {
             EncoderUsage::IncrementOnly if !i.is_positive() => return None,
@@ -168,10 +184,10 @@ impl<T: Transformation> Mode<T> {
             _ => {}
         };
         if self.convert_relative_to_absolute {
-            self.control_relative_to_absolute(i, target)
+            self.control_relative_to_absolute(i, target, options)
                 .map(ControlValue::Absolute)
         } else {
-            self.control_relative_normal(i, target)
+            self.control_relative_normal(i, target, options)
         }
     }
 
@@ -180,6 +196,7 @@ impl<T: Transformation> Mode<T> {
         v: UnitValue,
         target: &impl Target,
         consider_press_duration: bool,
+        options: ModeControlOptions,
     ) -> Option<ControlValue> {
         let v = if consider_press_duration {
             self.press_duration_processor.process_press_or_release(v)?
@@ -191,7 +208,7 @@ impl<T: Transformation> Mode<T> {
             Normal => self
                 .control_absolute_normal(v, target)
                 .map(ControlValue::Absolute),
-            IncrementalButtons => self.control_absolute_incremental_buttons(v, target),
+            IncrementalButtons => self.control_absolute_incremental_buttons(v, target, options),
             ToggleButtons => self
                 .control_absolute_toggle_buttons(v, target)
                 .map(ControlValue::Absolute),
@@ -263,6 +280,7 @@ impl<T: Transformation> Mode<T> {
         &mut self,
         control_value: UnitValue,
         target: &impl Target,
+        options: ModeControlOptions,
     ) -> Option<ControlValue> {
         if control_value.is_zero()
             || !control_value.is_within_interval_tolerant(&self.source_value_interval, BASE_EPSILON)
@@ -297,6 +315,7 @@ impl<T: Transformation> Mode<T> {
                     step_size_increment,
                     self.step_size_interval.min_val(),
                     target.current_value()?,
+                    options
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -309,7 +328,7 @@ impl<T: Transformation> Mode<T> {
                 // - Target value interval (absolute, important for rotation only, clamped)
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                self.hit_discrete_target_absolutely(discrete_increment, atomic_step_size, || {
+                self.hit_discrete_target_absolutely(discrete_increment, atomic_step_size, options, || {
                     target.current_value()
                 })
             }
@@ -366,12 +385,13 @@ impl<T: Transformation> Mode<T> {
         &mut self,
         discrete_increment: DiscreteIncrement,
         target: &impl Target,
+        options: ModeControlOptions,
     ) -> Option<UnitValue> {
         // Convert to absolute value
         let mut inc = discrete_increment.to_unit_increment(self.step_size_interval.min_val())?;
         inc = inc.clamp_to_interval(&self.step_size_interval)?;
         let full_unit_interval = full_unit_interval();
-        let abs_input_value = if self.rotate {
+        let abs_input_value = if options.enforce_rotate || self.rotate {
             self.current_absolute_value
                 .add_rotating(inc, &full_unit_interval, BASE_EPSILON)
         } else {
@@ -391,6 +411,7 @@ impl<T: Transformation> Mode<T> {
         &mut self,
         discrete_increment: DiscreteIncrement,
         target: &impl Target,
+        options: ModeControlOptions,
     ) -> Option<ControlValue> {
         use ControlType::*;
         match target.control_type() {
@@ -419,6 +440,7 @@ impl<T: Transformation> Mode<T> {
                     clamped_unit_increment,
                     self.step_size_interval.min_val(),
                     target.current_value()?,
+                    options
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -431,7 +453,7 @@ impl<T: Transformation> Mode<T> {
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
-                self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, || {
+                self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, options, || {
                     target.current_value()
                 })
             }
@@ -621,6 +643,7 @@ impl<T: Transformation> Mode<T> {
         &self,
         discrete_increment: DiscreteIncrement,
         target_step_size: UnitValue,
+        options: ModeControlOptions,
         current_value: impl Fn() -> Option<UnitValue>,
     ) -> Option<ControlValue> {
         let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
@@ -628,6 +651,7 @@ impl<T: Transformation> Mode<T> {
             unit_increment,
             target_step_size,
             current_value()?,
+            options,
         )
     }
 
@@ -636,6 +660,7 @@ impl<T: Transformation> Mode<T> {
         increment: UnitIncrement,
         grid_interval_size: UnitValue,
         current_target_value: UnitValue,
+        options: ModeControlOptions,
     ) -> Option<ControlValue> {
         let snapped_target_value_interval = Interval::new(
             self.target_value_interval
@@ -655,7 +680,7 @@ impl<T: Transformation> Mode<T> {
         } else {
             current_target_value.snap_to_grid_by_interval_size(grid_interval_size)
         };
-        v = if self.rotate {
+        v = if options.enforce_rotate || self.rotate {
             v.add_rotating(increment, &snapped_target_value_interval, BASE_EPSILON)
         } else {
             v.add_clamping(increment, &snapped_target_value_interval, BASE_EPSILON)
