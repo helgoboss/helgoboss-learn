@@ -9,3 +9,9 @@ pub use osc_source::*;
 
 mod raw_midi;
 pub use raw_midi::*;
+
+mod midi_source_script;
+pub use midi_source_script::*;
+
+#[cfg(test)]
+mod test_util;

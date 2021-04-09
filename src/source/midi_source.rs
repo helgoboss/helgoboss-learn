@@ -1,5 +1,6 @@
 use crate::{
-    Bpm, ControlValue, DiscreteIncrement, MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
+    Bpm, ControlValue, DiscreteIncrement, MidiSourceScript, MidiSourceValue, RawMidiEvent,
+    RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -100,7 +101,7 @@ impl From<MidiClockTransportMessage> for ShortMessageType {
 
 #[derive(Clone, Debug, Derivative)]
 #[derivative(Eq, PartialEq, Hash)]
-pub enum MidiSource {
+pub enum MidiSource<S: MidiSourceScript> {
     NoteVelocity {
         channel: Option<Channel>,
         key_number: Option<KeyNumber>,
@@ -160,12 +161,15 @@ pub enum MidiSource {
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         custom_character: SourceCharacter,
     },
+    // For advanced feedback (e.g. to drive hardware displays).
+    Script {
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        script: Option<S>,
+    },
 }
 
-impl MidiSource {
-    pub fn from_source_value(
-        source_value: MidiSourceValue<impl ShortMessage>,
-    ) -> Option<MidiSource> {
+impl<S: MidiSourceScript> MidiSource<S> {
+    pub fn from_source_value(source_value: MidiSourceValue<impl ShortMessage>) -> Option<Self> {
         use MidiSourceValue::*;
         let source = match source_value {
             ParameterNumber(msg) => MidiSource::ParameterNumberValue {
@@ -187,14 +191,14 @@ impl MidiSource {
         Some(source)
     }
 
-    fn from_raw(msg: &[u8]) -> MidiSource {
+    fn from_raw(msg: &[u8]) -> Self {
         MidiSource::Raw {
             pattern: RawMidiPattern::fixed_from_slice(msg),
             custom_character: Default::default(),
         }
     }
 
-    fn from_short_message(msg: impl ShortMessage) -> Option<MidiSource> {
+    fn from_short_message(msg: impl ShortMessage) -> Option<Self> {
         use StructuredShortMessage::*;
         let source = match msg.to_structured() {
             NoteOn {
@@ -265,7 +269,7 @@ impl MidiSource {
             | PitchBendChangeValue { channel }
             | ControlChange14BitValue { channel, .. }
             | ParameterNumberValue { channel, .. } => *channel,
-            ClockTempo | ClockTransport { .. } | Raw { .. } => None,
+            ClockTempo | ClockTransport { .. } | Raw { .. } | Script { .. } => None,
         }
     }
 
@@ -292,6 +296,7 @@ impl MidiSource {
             | ProgramChangeNumber { .. }
             | ChannelPressureAmount { .. }
             | PitchBendChangeValue { .. }
+            | Script { .. }
             | ClockTempo => SourceCharacter::RangeElement,
         }
     }
@@ -450,6 +455,8 @@ impl MidiSource {
             // TODO-low Support control for raw/sys-ex. Not difficult because we have the pattern
             //  structure already.
             S::Raw { .. } => None,
+            // Feedback-only forever.
+            S::Script { .. } => None,
         }
     }
 
@@ -605,6 +612,11 @@ impl MidiSource {
                 let raw_midi_event = RawMidiEvent::new(0, i, array);
                 Some(V::Raw(Box::new(raw_midi_event)))
             }
+            Script { script } => {
+                let script = script.as_ref()?;
+                let raw_midi_event = script.execute(feedback_value).ok()?;
+                Some(V::Raw(raw_midi_event))
+            }
             _ => None,
         }
     }
@@ -702,7 +714,7 @@ impl MidiSource {
                 }
             },
             Raw { pattern, .. } => value.to_discrete(pattern.max_discrete_value()) as _,
-            ClockTempo | ClockTransport { .. } => {
+            ClockTempo | ClockTransport { .. } | Script { .. } => {
                 return Err("not supported");
             }
         };
@@ -745,7 +757,7 @@ impl MidiSource {
                 }
                 UnitValue::try_from_discrete(value as u16, pattern.max_discrete_value())?
             }
-            ClockTempo | ClockTransport { .. } => {
+            ClockTempo | ClockTransport { .. } | Script { .. } => {
                 return Err("not supported");
             }
         };
@@ -852,14 +864,17 @@ fn rel(increment: DiscreteIncrement) -> ControlValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::test_util::TestMidiSourceScript;
     use approx::*;
     use helgoboss_midi::test_util::{channel as ch, controller_number as cn, key_number as kn, *};
     use helgoboss_midi::RawShortMessage;
 
+    type TestMidiSource = MidiSource<TestMidiSourceScript>;
+
     #[test]
     fn note_velocity_1() {
         // Given
-        let source = MidiSource::NoteVelocity {
+        let source = TestMidiSource::NoteVelocity {
             channel: Some(ch(0)),
             key_number: None,
         };
@@ -911,7 +926,7 @@ mod tests {
     #[test]
     fn note_velocity_2() {
         // Given
-        let source = MidiSource::NoteVelocity {
+        let source = TestMidiSource::NoteVelocity {
             channel: Some(ch(4)),
             key_number: Some(kn(20)),
         };
@@ -932,7 +947,7 @@ mod tests {
     #[test]
     fn note_key_number_1() {
         // Given
-        let source = MidiSource::NoteKeyNumber { channel: None };
+        let source = TestMidiSource::NoteKeyNumber { channel: None };
         // When
         // Then
         assert_abs_diff_eq!(
@@ -978,7 +993,7 @@ mod tests {
     #[test]
     fn note_key_number_2() {
         // Given
-        let source = MidiSource::NoteKeyNumber {
+        let source = TestMidiSource::NoteKeyNumber {
             channel: Some(ch(1)),
         };
         // When
@@ -999,7 +1014,7 @@ mod tests {
     #[test]
     fn polyphonic_key_pressure_amount_1() {
         // Given
-        let source = MidiSource::PolyphonicKeyPressureAmount {
+        let source = TestMidiSource::PolyphonicKeyPressureAmount {
             channel: Some(ch(1)),
             key_number: None,
         };
@@ -1054,7 +1069,7 @@ mod tests {
     #[test]
     fn polyphonic_key_pressure_amount_2() {
         // Given
-        let source = MidiSource::PolyphonicKeyPressureAmount {
+        let source = TestMidiSource::PolyphonicKeyPressureAmount {
             channel: Some(ch(1)),
             key_number: Some(kn(53)),
         };
@@ -1080,7 +1095,7 @@ mod tests {
     #[test]
     fn control_change_value_1() {
         // Given
-        let source = MidiSource::ControlChangeValue {
+        let source = TestMidiSource::ControlChangeValue {
             channel: Some(ch(1)),
             controller_number: None,
             custom_character: SourceCharacter::RangeElement,
@@ -1132,7 +1147,7 @@ mod tests {
     #[test]
     fn control_change_value_2() {
         // Given
-        let source = MidiSource::ControlChangeValue {
+        let source = TestMidiSource::ControlChangeValue {
             channel: Some(ch(1)),
             controller_number: Some(cn(64)),
             custom_character: SourceCharacter::Encoder2,
@@ -1174,7 +1189,7 @@ mod tests {
     #[test]
     fn program_change_number_1() {
         // Given
-        let source = MidiSource::ProgramChangeNumber { channel: None };
+        let source = TestMidiSource::ProgramChangeNumber { channel: None };
         // When
         // Then
         assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
@@ -1226,7 +1241,7 @@ mod tests {
     #[test]
     fn program_change_number_2() {
         // Given
-        let source = MidiSource::ProgramChangeNumber {
+        let source = TestMidiSource::ProgramChangeNumber {
             channel: Some(ch(10)),
         };
         // When
@@ -1245,7 +1260,7 @@ mod tests {
     #[test]
     fn channel_pressure_amount_1() {
         // Given
-        let source = MidiSource::ChannelPressureAmount { channel: None };
+        let source = TestMidiSource::ChannelPressureAmount { channel: None };
         // When
         // Then
         assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
@@ -1297,7 +1312,7 @@ mod tests {
     #[test]
     fn channel_pressure_amount_2() {
         // Given
-        let source = MidiSource::ChannelPressureAmount {
+        let source = TestMidiSource::ChannelPressureAmount {
             channel: Some(ch(15)),
         };
         // When
@@ -1324,7 +1339,7 @@ mod tests {
     #[test]
     fn pitch_bend_change_value_1() {
         // Given
-        let source = MidiSource::PitchBendChangeValue { channel: None };
+        let source = TestMidiSource::PitchBendChangeValue { channel: None };
         // When
         // Then
         assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
@@ -1392,7 +1407,7 @@ mod tests {
     #[test]
     fn pitch_bend_change_value_2() {
         // Given
-        let source = MidiSource::PitchBendChangeValue {
+        let source = TestMidiSource::PitchBendChangeValue {
             channel: Some(ch(3)),
         };
         // When
@@ -1427,7 +1442,7 @@ mod tests {
     #[test]
     fn control_change_14_bit_value_1() {
         // Given
-        let source = MidiSource::ControlChange14BitValue {
+        let source = TestMidiSource::ControlChange14BitValue {
             channel: Some(ch(1)),
             msb_controller_number: None,
             custom_character: Default::default(),
@@ -1484,7 +1499,7 @@ mod tests {
     #[test]
     fn control_change_14_bit_value_2() {
         // Given
-        let source = MidiSource::ControlChange14BitValue {
+        let source = TestMidiSource::ControlChange14BitValue {
             channel: Some(ch(1)),
             msb_controller_number: Some(cn(7)),
             custom_character: Default::default(),
@@ -1529,7 +1544,7 @@ mod tests {
     #[test]
     fn parameter_number_value_1() {
         // Given
-        let source = MidiSource::ParameterNumberValue {
+        let source = TestMidiSource::ParameterNumberValue {
             channel: None,
             number: None,
             is_14_bit: None,
@@ -1587,7 +1602,7 @@ mod tests {
     #[test]
     fn parameter_number_value_2() {
         // Given
-        let source = MidiSource::ParameterNumberValue {
+        let source = TestMidiSource::ParameterNumberValue {
             channel: Some(ch(7)),
             number: Some(u14(3000)),
             is_14_bit: Some(false),
@@ -1640,7 +1655,7 @@ mod tests {
     #[test]
     fn parameter_number_value_2_toggle() {
         // Given
-        let source = MidiSource::ParameterNumberValue {
+        let source = TestMidiSource::ParameterNumberValue {
             channel: Some(ch(7)),
             number: Some(u14(3000)),
             is_14_bit: Some(false),
@@ -1657,7 +1672,7 @@ mod tests {
     #[test]
     fn parameter_number_value_3() {
         // Given
-        let source = MidiSource::ParameterNumberValue {
+        let source = TestMidiSource::ParameterNumberValue {
             channel: Some(ch(7)),
             number: Some(u14(3000)),
             is_14_bit: Some(true),
@@ -1696,7 +1711,7 @@ mod tests {
     #[test]
     fn clock_tempo() {
         // Given
-        let source = MidiSource::ClockTempo;
+        let source = TestMidiSource::ClockTempo;
         // When
         // Then
         assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
@@ -1748,7 +1763,7 @@ mod tests {
     #[test]
     fn clock_transport() {
         // Given
-        let source = MidiSource::ClockTransport {
+        let source = TestMidiSource::ClockTransport {
             message: MidiClockTransportMessage::Continue,
         };
         // When
