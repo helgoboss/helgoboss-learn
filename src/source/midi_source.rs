@@ -1,6 +1,6 @@
 use crate::{
-    Bpm, ControlValue, DiscreteIncrement, MidiSourceScript, MidiSourceValue, RawMidiEvent,
-    RawMidiPattern, UnitValue,
+    Bpm, ControlValue, DetailedSourceCharacter, DiscreteIncrement, MidiSourceScript,
+    MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -59,6 +59,19 @@ impl SourceCharacter {
     pub fn emits_increments(&self) -> bool {
         use SourceCharacter::*;
         matches!(self, Encoder1 | Encoder2 | Encoder3)
+    }
+
+    pub fn possible_detailed_characters(&self) -> Vec<DetailedSourceCharacter> {
+        use SourceCharacter::*;
+        match self {
+            RangeElement => vec![DetailedSourceCharacter::RangeControl],
+            MomentaryButton => vec![
+                DetailedSourceCharacter::MomentaryOnOffButton,
+                DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
+            ],
+            Encoder1 | Encoder2 | Encoder3 => vec![DetailedSourceCharacter::Relative],
+            ToggleButton => vec![DetailedSourceCharacter::PressOnlyButton],
+        }
     }
 }
 
@@ -298,6 +311,47 @@ impl<S: MidiSourceScript> MidiSource<S> {
             | PitchBendChangeValue { .. }
             | Script { .. }
             | ClockTempo => SourceCharacter::RangeElement,
+        }
+    }
+
+    pub fn possible_detailed_characters(&self) -> Vec<DetailedSourceCharacter> {
+        use MidiSource::*;
+        match self {
+            NoteVelocity { .. } => vec![
+                DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
+                DetailedSourceCharacter::MomentaryOnOffButton,
+            ],
+            ClockTransport { .. } => vec![DetailedSourceCharacter::PressOnlyButton],
+            // User can choose.
+            Raw {
+                custom_character, ..
+            }
+            | ControlChangeValue {
+                custom_character, ..
+            }
+            | ControlChange14BitValue {
+                custom_character, ..
+            }
+            | ParameterNumberValue {
+                custom_character, ..
+            } => custom_character.possible_detailed_characters(),
+            // Usually a range control but sometimes more like a button (e.g. see #316).
+            ProgramChangeNumber { .. } | ChannelPressureAmount { .. } => vec![
+                DetailedSourceCharacter::RangeControl,
+                DetailedSourceCharacter::MomentaryOnOffButton,
+                DetailedSourceCharacter::PressOnlyButton,
+            ],
+            // Usually a range control but could also be a velocity-sensitive button.
+            PolyphonicKeyPressureAmount { .. } | PitchBendChangeValue { .. } => vec![
+                DetailedSourceCharacter::RangeControl,
+                DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
+                DetailedSourceCharacter::MomentaryOnOffButton,
+                DetailedSourceCharacter::PressOnlyButton,
+            ],
+            // Special targets for which we can safely say it's a range.
+            NoteKeyNumber { .. } | ClockTempo => vec![DetailedSourceCharacter::RangeControl],
+            // No control supported.
+            Script { .. } => vec![],
         }
     }
 

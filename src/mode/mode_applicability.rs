@@ -1,13 +1,21 @@
 use crate::{AbsoluteMode, OutOfRangeBehavior};
 use derive_more::Display;
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Display)]
 pub enum DetailedSourceCharacter {
-    MomentaryOnOffButton,
+    /// Feature-wise a superset of `MomentaryOnOffButton` and `PressOnlyButton`.
+    #[display(fmt = "momentary velocity-sensitive button")]
     MomentaryVelocitySensitiveButton,
-    ToggleOnlyOnOffButton,
+    /// Feature-wise a superset of `PressOnlyButton`.
+    #[display(fmt = "momentary on/off button")]
+    MomentaryOnOffButton,
+    /// Doesn't send message on release ("Toggle-only button").
+    #[display(fmt = "press-only button (button which doesn't fire on release)")]
+    PressOnlyButton,
+    #[display(fmt = "range control element (e.g. knob or fader)")]
     RangeControl,
-    Encoder,
+    #[display(fmt = "relative control element (e.g. encoder)")]
+    Relative,
 }
 
 impl DetailedSourceCharacter {
@@ -15,12 +23,12 @@ impl DetailedSourceCharacter {
         use DetailedSourceCharacter::*;
         matches!(
             self,
-            MomentaryOnOffButton | MomentaryVelocitySensitiveButton | ToggleOnlyOnOffButton
+            MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton
         )
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ModeApplicabilityCheckInput {
     pub target_is_virtual: bool,
     pub is_feedback: bool,
@@ -42,7 +50,7 @@ pub enum ModeParameter {
     SourceMinMax,
     #[display(fmt = "Reverse")]
     Reverse,
-    #[display(fmt = "Out-of-range behavior")]
+    #[display(fmt = "Out-of-range behavior \"{}\"", _0)]
     OutOfRangeBehavior(OutOfRangeBehavior),
     #[display(fmt = "Jump min/max")]
     JumpMinMax,
@@ -78,20 +86,20 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
         SourceMinMax => {
             if input.is_feedback {
                 if input.source_is_button() {
-                    Some("off/on LED colors")
+                    Some("Changes off/on LED colors")
                 } else {
-                    Some("lowest/highest position of motorized fader or LED ring")
+                    Some("Changes lowest/highest position of motorized fader or LED ring")
                 }
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | ToggleOnlyOnOffButton => None,
-                    MomentaryVelocitySensitiveButton => Some(
-                        "consider button presses with velocity between min and max as full range",
-                    ),
-                    RangeControl | Encoder => {
+                    MomentaryOnOffButton | PressOnlyButton => None,
+                    MomentaryVelocitySensitiveButton => {
+                        Some("Defines the observed button press velocity range")
+                    }
+                    RangeControl | Relative => {
                         if input.source_character == RangeControl || input.make_absolute {
-                            Some("consider fader/knob positions between min and max as full range")
+                            Some("Defines the observed fader/knob position range")
                         } else {
                             None
                         }
@@ -103,30 +111,30 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             if input.is_feedback {
                 if input.source_is_button() {
                     Some(
-                        "use \"off\" LED color if target is on and \"on\" LED color if target is off",
+                        "If enabled, uses \"off\" LED color if target is on and \"on\" LED color if target is off",
                     )
                 } else {
-                    Some("reverse direction of motorized fader or LED ring")
+                    Some("If enabled, reverses the direction of motorized fader or LED ring")
                 }
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton
-                    | MomentaryVelocitySensitiveButton
-                    | ToggleOnlyOnOffButton => match input.absolute_mode {
-                        AbsoluteMode::Normal => {
-                            Some("switch target off when pressed and on when released")
+                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
+                        match input.absolute_mode {
+                            AbsoluteMode::Normal => Some(
+                                "If enabled, switches the target off when pressed and on when released",
+                            ),
+                            AbsoluteMode::IncrementalButtons => Some(
+                                "If enabled, decreases the target value on press instead of increasing it",
+                            ),
+                            AbsoluteMode::ToggleButtons => None,
                         }
-                        AbsoluteMode::IncrementalButtons => {
-                            Some("decrease target value on press instead of increasing it")
-                        }
-                        AbsoluteMode::ToggleButtons => None,
-                    },
-                    RangeControl | Encoder => {
+                    }
+                    RangeControl | Relative => {
                         if input.source_character == RangeControl || input.make_absolute {
-                            Some("reverse direction of target value change")
+                            Some("If enabled, reverses the direction of the target value change")
                         } else {
-                            Some("convert increments to decrements and vice versa")
+                            Some("If enabled, converts increments to decrements and vice versa")
                         }
                     }
                 }
@@ -136,37 +144,37 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             use crate::OutOfRangeBehavior::*;
             if input.is_feedback {
                 match b {
-                    MinOrMax => Some("use target min/max if target value below/above range"),
-                    Min => Some("use target min if target value out of range"),
-                    Ignore => Some("don't send feedback if target value out of range"),
+                    MinOrMax => Some("Uses target min/max if target value below/above range"),
+                    Min => Some("Uses target min if target value out of range"),
+                    Ignore => Some("Doesn't send feedback if target value out of range"),
                 }
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | ToggleOnlyOnOffButton => None,
+                    MomentaryOnOffButton | PressOnlyButton => None,
                     MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == AbsoluteMode::Normal {
                             match b {
                                 MinOrMax => Some(
-                                    "use min/max velocity if button velocity below/above velocity range",
+                                    "Uses min/max velocity if button velocity below/above velocity range",
                                 ),
-                                Min => Some("use min velocity if button velocity out of range"),
-                                Ignore => Some("ignore if button velocity out of range"),
+                                Min => Some("Uses min velocity if button velocity out of range"),
+                                Ignore => Some("Ignores button press if velocity out of range"),
                             }
                         } else {
                             None
                         }
                     }
-                    RangeControl | Encoder => {
-                        if input.source_character == Encoder && !input.make_absolute {
+                    RangeControl | Relative => {
+                        if input.source_character == Relative && !input.make_absolute {
                             None
                         } else {
                             match b {
                                 MinOrMax => Some(
-                                    "use source min/max if source value below/above source range",
+                                    "Uses source min/max if source value below/above source range",
                                 ),
-                                Min => Some("use source min if source value out of range"),
-                                Ignore => Some("ignore if source value out of range"),
+                                Min => Some("Uses source min if source value out of range"),
+                                Ignore => Some("Ignores event if source value out of range"),
                             }
                         }
                     }
@@ -179,20 +187,20 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | ToggleOnlyOnOffButton => None,
-                    MomentaryVelocitySensitiveButton | RangeControl | Encoder => {
+                    MomentaryOnOffButton | PressOnlyButton => None,
+                    MomentaryVelocitySensitiveButton | RangeControl | Relative => {
                         if (input.source_character == MomentaryVelocitySensitiveButton
                             && input.absolute_mode != AbsoluteMode::Normal)
-                            || (input.source_character == Encoder && !input.make_absolute)
+                            || (input.source_character == Relative && !input.make_absolute)
                         {
                             None
                         } else if input.mode_parameter == JumpMinMax {
                             Some(
-                                "min/max allowed target parameter jump (set max very low for takeover)",
+                                "Sets the min/max allowed target parameter jump (set max very low for takeover)",
                             )
                         } else {
                             // Takeover mode
-                            Some("how to deal with too long target parameter jumps")
+                            Some("Defines how to deal with too long target parameter jumps")
                         }
                     }
                 }
@@ -204,16 +212,16 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | ToggleOnlyOnOffButton => None,
-                    MomentaryVelocitySensitiveButton | RangeControl | Encoder => {
+                    MomentaryOnOffButton | PressOnlyButton => None,
+                    MomentaryVelocitySensitiveButton | RangeControl | Relative => {
                         if (input.source_character == MomentaryVelocitySensitiveButton
                             && input.absolute_mode != AbsoluteMode::Normal)
-                            || (input.source_character == Encoder && !input.make_absolute)
+                            || (input.source_character == Relative && !input.make_absolute)
                         {
                             None
                         } else {
                             Some(
-                                "EEL formula which transforms the normalized source value x (0.0 <= x <= 1.0)",
+                                "Defines via EEL how to transform the normalized source value x (0.0 <= x <= 1.0)",
                             )
                         }
                     }
@@ -224,15 +232,15 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             if input.target_is_virtual {
                 None
             } else if input.is_feedback {
-                Some("consider target values between min and max as full range")
+                Some("Defines the relevant target value range")
             } else {
-                Some("target value will end up somewhere between min and max")
+                Some("Makes sure the target value will end up in the specified range")
             }
         }
         FeedbackTransformation => {
             if input.is_feedback {
                 Some(
-                    "EEL formula which transforms the normalized feedback value y (0.0 <= y <= 1.0)",
+                    "Defines via EEL how to transform the normalized feedback value y (0.0 <= y <= 1.0)",
                 )
             } else {
                 None
@@ -244,25 +252,23 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton
-                    | ToggleOnlyOnOffButton
-                    | MomentaryVelocitySensitiveButton => {
+                    MomentaryOnOffButton | PressOnlyButton | MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == AbsoluteMode::IncrementalButtons {
                             if input.source_character == MomentaryVelocitySensitiveButton {
                                 if input.mode_parameter == StepSizeMin {
                                     Some(
-                                        "amount of target value change when button pressed with lowest velocity",
+                                        "Sets the target value change amount when button pressed with lowest velocity",
                                     )
                                 } else {
                                     Some(
-                                        "number of target increments when button pressed with lowest velocity",
+                                        "Sets the number of target increments when button pressed with lowest velocity",
                                     )
                                 }
                             } else {
                                 if input.mode_parameter == StepSizeMin {
-                                    Some("amount of target value change when button pressed")
+                                    Some("Sets the target value change amount when button pressed")
                                 } else {
-                                    Some("number of target increments when button pressed")
+                                    Some("Sets the number of target increments when button pressed")
                                 }
                             }
                         } else {
@@ -270,11 +276,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
                         }
                     }
                     RangeControl => None,
-                    Encoder => {
+                    Relative => {
                         if input.make_absolute {
                             if input.mode_parameter == StepSizeMin {
                                 Some(
-                                    "amount added/subtracted to calculate absolute value from incoming non-accelerated increment/decrement",
+                                    "Sets the amount added/subtracted to calculate the absolute value from an incoming non-accelerated increment/decrement",
                                 )
                             } else {
                                 None
@@ -282,11 +288,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
                         } else {
                             if input.mode_parameter == StepSizeMin {
                                 Some(
-                                    "amount of target value change on incoming non-accelerated increment/decrement",
+                                    "Sets the target value change amount for an incoming non-accelerated increment/decrement",
                                 )
                             } else {
                                 Some(
-                                    "number of target increments on incoming non-accelerated increment/decrement",
+                                    "Sets the number of target increments for an incoming non-accelerated increment/decrement",
                                 )
                             }
                         }
@@ -300,27 +306,27 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | ToggleOnlyOnOffButton | RangeControl => None,
+                    MomentaryOnOffButton | PressOnlyButton | RangeControl => None,
                     MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == AbsoluteMode::IncrementalButtons {
                             if input.mode_parameter == StepSizeMax {
                                 Some(
-                                    "amount of target value change when button pressed with highest velocity",
+                                    "Sets the target value change amount when button pressed with highest velocity",
                                 )
                             } else {
                                 Some(
-                                    "number of target increments when button pressed with highest velocity",
+                                    "Sets the number of target increments when button pressed with highest velocity",
                                 )
                             }
                         } else {
                             None
                         }
                     }
-                    Encoder => {
+                    Relative => {
                         if input.make_absolute {
                             if input.mode_parameter == StepSizeMax {
                                 Some(
-                                    "amount added/subtracted to calculate absolute value from incoming most accelerated increment/decrement",
+                                    "Sets the amount added/subtracted to calculate the absolute value from an incoming most accelerated increment/decrement",
                                 )
                             } else {
                                 None
@@ -328,11 +334,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
                         } else {
                             if input.mode_parameter == StepSizeMin {
                                 Some(
-                                    "amount of target value change on incoming most accelerated increment/decrement",
+                                    "Sets the target value change amount for an incoming most accelerated increment/decrement",
                                 )
                             } else {
                                 Some(
-                                    "number of target increments on incoming most accelerated increment/decrement",
+                                    "Sets the number of target increments for an incoming most accelerated increment/decrement",
                                 )
                             }
                         }
@@ -341,10 +347,10 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             }
         }
         RelativeFilter => {
-            if input.is_feedback || input.source_character != DetailedSourceCharacter::Encoder {
+            if input.is_feedback || input.source_character != DetailedSourceCharacter::Relative {
                 None
             } else {
-                Some("process increments only, decrements only or both")
+                Some("Defines whether to process increments only, decrements only or both")
             }
         }
         Rotate => {
@@ -353,26 +359,24 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton
-                    | MomentaryVelocitySensitiveButton
-                    | ToggleOnlyOnOffButton => {
+                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
                         if input.absolute_mode == AbsoluteMode::IncrementalButtons {
                             Some(
-                                "jump from max target value to min target value (or opposite if reverse enabled)",
+                                "If enabled, jumps from max target value to min target value (or opposite if reverse enabled)",
                             )
                         } else {
                             None
                         }
                     }
                     RangeControl => None,
-                    Encoder => {
+                    Relative => {
                         if input.make_absolute {
                             Some(
-                                "jump from absolute value 100% to 0% for increments (opposite for decrements)",
+                                "If enabled, jumps from absolute value 100% to 0% for increments (opposite for decrements)",
                             )
                         } else {
                             Some(
-                                "jump from max target value to min target value for increments (opposite for decrements)",
+                                "If enabled, jumps from max target value to min target value for increments (opposite for decrements)",
                             )
                         }
                     }
@@ -383,7 +387,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
             if input.is_feedback || !input.source_is_button() {
                 None
             } else {
-                Some("react to certain button interactions only")
+                Some("Fire in different situations")
             }
         }
         ButtonFilter => {
@@ -395,7 +399,9 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> Option<&'
                     MomentaryOnOffButton | MomentaryVelocitySensitiveButton
                         if input.absolute_mode == AbsoluteMode::Normal =>
                     {
-                        Some("process button presses only, releases only or both")
+                        Some(
+                            "Defines whether to process button presses only, releases only or both",
+                        )
                     }
                     _ => None,
                 }

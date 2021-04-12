@@ -1,6 +1,7 @@
+use crate::DetailedSourceCharacter::PressOnlyButton;
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, ControlValue, DiscreteIncrement,
-    SourceCharacter, UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit, ControlValue,
+    DetailedSourceCharacter, DiscreteIncrement, SourceCharacter, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -233,6 +234,30 @@ impl OscSource {
             }
         } else {
             MomentaryButton
+        }
+    }
+
+    pub fn possible_detailed_characters(&self) -> Vec<DetailedSourceCharacter> {
+        if let Some(desc) = self.arg_descriptor {
+            if desc.is_relative {
+                vec![DetailedSourceCharacter::Relative]
+            } else {
+                use OscTypeTag::*;
+                match desc.type_tag {
+                    Float | Double => vec![
+                        DetailedSourceCharacter::RangeControl,
+                        DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
+                        DetailedSourceCharacter::MomentaryOnOffButton,
+                        DetailedSourceCharacter::PressOnlyButton,
+                    ],
+                    _ => vec![
+                        DetailedSourceCharacter::MomentaryOnOffButton,
+                        PressOnlyButton,
+                    ],
+                }
+            }
+        } else {
+            vec![DetailedSourceCharacter::PressOnlyButton]
         }
     }
 
