@@ -1,20 +1,22 @@
 use crate::{AbsoluteMode, OutOfRangeBehavior};
 use derive_more::Display;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Display)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Display, TryFromPrimitive, IntoPrimitive)]
+#[repr(isize)]
 pub enum DetailedSourceCharacter {
     /// Feature-wise a superset of `MomentaryOnOffButton` and `PressOnlyButton`.
-    #[display(fmt = "momentary velocity-sensitive button")]
+    #[display(fmt = "Momentary velocity-sensitive button")]
     MomentaryVelocitySensitiveButton,
     /// Feature-wise a superset of `PressOnlyButton`.
-    #[display(fmt = "momentary on/off button")]
+    #[display(fmt = "Momentary on/off button")]
     MomentaryOnOffButton,
     /// Doesn't send message on release ("Toggle-only button").
-    #[display(fmt = "press-only button (button which doesn't fire on release)")]
+    #[display(fmt = "Press-only button (doesn't fire on release)")]
     PressOnlyButton,
-    #[display(fmt = "range control element (e.g. knob or fader)")]
+    #[display(fmt = "Range control element (e.g. knob or fader)")]
     RangeControl,
-    #[display(fmt = "relative control element (e.g. encoder)")]
+    #[display(fmt = "Relative control element (e.g. encoder)")]
     Relative,
 }
 
