@@ -374,16 +374,14 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                         "Sets the number of target increments when button pressed with lowest velocity.",
                                     )
                                 }
+                            } else if input.mode_parameter == StepSizeMin {
+                                MakesSense(
+                                    "Sets the target value change amount when button pressed.",
+                                )
                             } else {
-                                if input.mode_parameter == StepSizeMin {
-                                    MakesSense(
-                                        "Sets the target value change amount when button pressed.",
-                                    )
-                                } else {
-                                    MakesSense(
-                                        "Sets the number of target increments when button pressed.",
-                                    )
-                                }
+                                MakesSense(
+                                    "Sets the number of target increments when button pressed.",
+                                )
                             }
                         } else {
                             HasNoEffect
@@ -399,16 +397,14 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             } else {
                                 HasNoEffect
                             }
+                        } else if input.mode_parameter == StepSizeMin {
+                            MakesSense(
+                                "Sets the target value change amount for an incoming non-accelerated increment/decrement.",
+                            )
                         } else {
-                            if input.mode_parameter == StepSizeMin {
-                                MakesSense(
-                                    "Sets the target value change amount for an incoming non-accelerated increment/decrement.",
-                                )
-                            } else {
-                                MakesSense(
-                                    "Sets the number of target increments for an incoming non-accelerated increment/decrement.",
-                                )
-                            }
+                            MakesSense(
+                                "Sets the number of target increments for an incoming non-accelerated increment/decrement.",
+                            )
                         }
                     }
                 }
@@ -446,16 +442,14 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             } else {
                                 HasNoEffect
                             }
+                        } else if input.mode_parameter == StepSizeMin {
+                            MakesSense(
+                                "Sets the target value change amount for an incoming most accelerated increment/decrement.",
+                            )
                         } else {
-                            if input.mode_parameter == StepSizeMin {
-                                MakesSense(
-                                    "Sets the target value change amount for an incoming most accelerated increment/decrement.",
-                                )
-                            } else {
-                                MakesSense(
-                                    "Sets the number of target increments for an incoming most accelerated increment/decrement.",
-                                )
-                            }
+                            MakesSense(
+                                "Sets the number of target increments for an incoming most accelerated increment/decrement.",
+                            )
                         }
                     }
                 }
@@ -645,14 +639,12 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     RangeControl | Relative => {
                         if input.source_character == Relative && !input.make_absolute {
                             HasNoEffect
+                        } else if m == Normal {
+                            MakesSense(
+                                "Sets target to the value that corresponds to the knob/fader position. Proportionally maps from source to target range.",
+                            )
                         } else {
-                            if m == Normal {
-                                MakesSense(
-                                    "Sets target to the value that corresponds to the knob/fader position. Proportionally maps from source to target range.",
-                                )
-                            } else {
-                                MakesNoSenseParentTakesCareOfDefault
-                            }
+                            MakesNoSenseParentTakesCareOfDefault
                         }
                     }
                 }

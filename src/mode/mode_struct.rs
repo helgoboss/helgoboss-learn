@@ -95,15 +95,8 @@ impl<T: Transformation> Default for Mode<T> {
             absolute_mode: AbsoluteMode::Normal,
             source_value_interval: full_unit_interval(),
             target_value_interval: full_unit_interval(),
-            // 0.01 has been chosen as default minimum step size because it corresponds to 1%.
-            // 0.01 has also been chosen as default maximum step size because most users probably
-            // want to start easy, that is without using the "press harder = more increments"
-            // respectively "dial harder = more increments" features. Activating them right from
-            // the start by choosing a higher step size maximum could lead to surprising results
-            // such as ugly parameters jumps, especially if the source is not suited for that.
-            step_size_interval: create_unit_value_interval(0.01, 0.01),
-            // Same reasoning like with `step_size_interval`
-            step_count_interval: create_discrete_increment_interval(1, 1),
+            step_size_interval: default_step_size_interval(),
+            step_count_interval: default_step_count_interval(),
             jump_interval: full_unit_interval(),
             press_duration_processor: Default::default(),
             takeover_mode: Default::default(),
@@ -3705,4 +3698,20 @@ mod tests {
     fn rel(increment: i32) -> ControlValue {
         ControlValue::relative(increment)
     }
+}
+
+pub fn default_step_size_interval() -> Interval<UnitValue> {
+    // 0.01 has been chosen as default minimum step size because it corresponds to 1%.
+    //
+    // 0.01 has also been chosen as default maximum step size because most users probably
+    // want to start easy, that is without using the "press harder = more increments"
+    // respectively "dial harder = more increments" features. Activating them right from
+    // the start by choosing a higher step size maximum could lead to surprising results
+    // such as ugly parameters jumps, especially if the source is not suited for that.
+    create_unit_value_interval(0.01, 0.01)
+}
+
+pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
+    // Same reasoning as with step size interval
+    create_discrete_increment_interval(1, 1)
 }
