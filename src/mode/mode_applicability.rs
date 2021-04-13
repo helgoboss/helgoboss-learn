@@ -421,7 +421,6 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 use DetailedSourceCharacter::*;
                 match input.source_character {
                     RangeControl => HasNoEffect,
-                    // TODO-high Should use Min as default
                     MomentaryOnOffButton | PressOnlyButton => MakesNoSenseUseDefault,
                     MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButtons {
@@ -502,11 +501,10 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         FireMode => {
             if input.is_feedback {
                 HasNoEffect
-            } else if input.source_is_button() {
+            } else if input.source_is_button() && !input.target_is_virtual {
                 // Description not interesting, will be queried for specific fire mode only.
                 MakesSense("-")
             } else {
-                // TODO-high Means: WhenButtonReleased with min = max = 0 ms.
                 MakesNoSenseUseDefault
             }
         }
