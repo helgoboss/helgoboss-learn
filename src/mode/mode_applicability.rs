@@ -76,7 +76,7 @@ pub enum ModeParameter {
     SpeedMax,
     #[display(fmt = "Relative filter")]
     RelativeFilter,
-    #[display(fmt = "Rotate")]
+    #[display(fmt = "Wrap")]
     Rotate,
     #[display(fmt = "Fire mode")]
     FireMode,
@@ -471,7 +471,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButtons {
                             MakesSense(
-                                "If enabled, jumps from max target value to min target value (or opposite if reverse enabled).",
+                                "If enabled, jumps from max target value to min target value (or opposite if reverse enabled). Was called \"Rotate\" before.",
                             )
                         } else {
                             HasNoEffect
@@ -481,11 +481,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     Relative => {
                         if input.make_absolute {
                             MakesSense(
-                                "If enabled, jumps from absolute value 100% to 0% for increments (opposite for decrements).",
+                                "If enabled, jumps from absolute value 100% to 0% for increments (opposite for decrements). Was called \"Rotate\" before.",
                             )
                         } else {
                             MakesSense(
-                                "If enabled, jumps from max target value to min target value for increments (opposite for decrements).",
+                                "If enabled, jumps from max target value to min target value for increments (opposite for decrements). Was called \"Rotate\" before.",
                             )
                         }
                     }
