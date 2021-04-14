@@ -1,4 +1,4 @@
-use crate::UnitValue;
+use crate::{RawMidiEvent, UnitValue};
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::{Display, Formatter, Write};
@@ -11,12 +11,21 @@ pub struct RawMidiPattern {
 }
 
 impl RawMidiPattern {
+    /// Resolution in bit.
     pub fn resolution(&self) -> u8 {
         self.resolution
     }
 
     pub fn max_discrete_value(&self) -> u16 {
         (2u32.pow(self.resolution as _) - 1) as u16
+    }
+
+    pub fn step_size(&self) -> Option<UnitValue> {
+        let max = self.max_discrete_value();
+        if max == 0 {
+            return None;
+        }
+        Some(UnitValue::new_clamped(1.0 / max as f64))
     }
 
     pub fn from_entries(entries: Vec<RawMidiPatternEntry>) -> Self {
@@ -52,6 +61,19 @@ impl RawMidiPattern {
     ) -> impl Iterator<Item = u8> + ExactSizeIterator + '_ {
         let discrete_value = variable_value.to_discrete(self.max_discrete_value());
         self.entries.iter().map(move |e| e.to_byte(discrete_value))
+    }
+
+    pub fn to_concrete_midi_event(&self, variable_value: UnitValue) -> RawMidiEvent {
+        let mut array = [0; RawMidiEvent::MAX_LENGTH];
+        let mut i = 0u32;
+        for byte in self
+            .byte_iter(variable_value)
+            .take(RawMidiEvent::MAX_LENGTH)
+        {
+            array[i as usize] = byte;
+            i += 1;
+        }
+        RawMidiEvent::new(0, i, array)
     }
 }
 

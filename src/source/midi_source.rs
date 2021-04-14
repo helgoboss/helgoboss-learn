@@ -656,16 +656,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Some(V::ParameterNumber(n))
             }
             Raw { pattern, .. } => {
-                let mut array = [0; RawMidiEvent::MAX_LENGTH];
-                let mut i = 0u32;
-                for byte in pattern
-                    .byte_iter(feedback_value)
-                    .take(RawMidiEvent::MAX_LENGTH)
-                {
-                    array[i as usize] = byte;
-                    i += 1;
-                }
-                let raw_midi_event = RawMidiEvent::new(0, i, array);
+                let raw_midi_event = pattern.to_concrete_midi_event(feedback_value);
                 Some(V::Raw(Box::new(raw_midi_event)))
             }
             Script { script } => {
