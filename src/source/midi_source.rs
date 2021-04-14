@@ -1,6 +1,7 @@
 use crate::{
-    Bpm, ControlValue, DetailedSourceCharacter, DiscreteIncrement, MidiSourceScript,
-    MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit, Bpm, ControlValue,
+    DetailedSourceCharacter, DiscreteIncrement, MidiSourceScript, MidiSourceValue, RawMidiEvent,
+    RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -13,7 +14,7 @@ use helgoboss_midi::{
 };
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 
 #[derive(
     Clone,
@@ -694,6 +695,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             ClockTransport { .. } => {
                 return Err("clock transport sources have just one possible control value");
             }
+            Script { .. } => format_percentage_without_unit(value.as_absolute()?.get()),
             _ => self
                 .convert_control_value_to_midi_value(value.as_absolute()?)?
                 .to_string(),
@@ -713,6 +715,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             ClockTransport { .. } => {
                 return Err("parsing doesn't make sense for clock transport MIDI source");
             }
+            Script { .. } => parse_percentage_without_unit(text)?.try_into()?,
             _ => {
                 let midi_value: i32 = text.parse().map_err(|_| "not a valid integer")?;
                 self.convert_midi_value_to_control_value(midi_value)?
