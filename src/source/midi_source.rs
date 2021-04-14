@@ -1,7 +1,7 @@
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, Bpm, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, MidiSourceScript, MidiSourceValue, RawMidiEvent,
-    RawMidiPattern, UnitValue,
+    DetailedSourceCharacter, DiscreteIncrement, MidiSourceScript, MidiSourceValue, RawMidiPattern,
+    UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
