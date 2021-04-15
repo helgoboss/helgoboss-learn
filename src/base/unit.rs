@@ -90,7 +90,7 @@ pub enum MinIsMaxBehavior {
 }
 
 /// A number within the unit interval `(0.0..=1.0)`.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Display, Default)]
 #[cfg_attr(
     feature = "serde",
     derive(Serialize, Deserialize),
@@ -99,6 +99,12 @@ pub enum MinIsMaxBehavior {
 pub struct UnitValue(f64);
 
 impl Eq for UnitValue {}
+
+impl PartialOrd for UnitValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
 
 impl Ord for UnitValue {
     fn cmp(&self, other: &Self) -> Ordering {
