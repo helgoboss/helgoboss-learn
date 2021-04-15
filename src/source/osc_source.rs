@@ -63,6 +63,10 @@ impl OscArgDescriptor {
         Some(desc)
     }
 
+    pub fn to_concrete_args(&self, value: UnitValue) -> Option<Vec<OscType>> {
+        self.type_tag.to_concrete_args(self.index, value)
+    }
+
     fn from_arg(index: u32, arg: &OscType) -> Self {
         Self {
             index,
@@ -148,6 +152,23 @@ impl OscTypeTag {
             Nil => Self::Nil,
             Inf => Self::Inf,
         }
+    }
+
+    pub fn to_concrete_args(&self, index: u32, value: UnitValue) -> Option<Vec<OscType>> {
+        let v = value.get();
+        use OscTypeTag::*;
+        let value = match self {
+            Float => OscType::Float(v as _),
+            Double => OscType::Double(v),
+            Bool => OscType::Bool(v > 0.0),
+            Nil => OscType::Nil,
+            Inf => OscType::Inf,
+            _ => return None,
+        };
+        // Send nil for all other elements
+        let mut vec = vec![OscType::Nil; (index + 1) as usize];
+        vec[index as usize] = value;
+        Some(vec)
     }
 }
 
@@ -262,30 +283,14 @@ impl OscSource {
     }
 
     pub fn feedback(&self, feedback_value: UnitValue) -> Option<OscMessage> {
-        let v = feedback_value.get();
-        let args = {
-            if let Some(desc) = self.arg_descriptor {
-                use OscTypeTag::*;
-                let value = match desc.type_tag {
-                    Float => OscType::Float(v as _),
-                    Double => OscType::Double(v),
-                    Bool => OscType::Bool(v > 0.0),
-                    Nil => OscType::Nil,
-                    Inf => OscType::Inf,
-                    _ => return None,
-                };
-                // Send nil for all other elements
-                let mut vec = vec![OscType::Nil; (desc.index + 1) as usize];
-                vec[desc.index as usize] = value;
-                vec
+        let msg = OscMessage {
+            addr: self.address_pattern.clone(),
+            args: if let Some(desc) = self.arg_descriptor {
+                desc.to_concrete_args(feedback_value)?
             } else {
                 // No arguments shall be sent.
                 vec![]
-            }
-        };
-        let msg = OscMessage {
-            addr: self.address_pattern.clone(),
-            args,
+            },
         };
         Some(msg)
     }
