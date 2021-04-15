@@ -322,16 +322,30 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | PressOnlyButton => MakesNoSenseUseDefault,
-                    MomentaryVelocitySensitiveButton | RangeControl | Relative => {
-                        if (input.source_character == MomentaryVelocitySensitiveButton
-                            && input.absolute_mode != crate::AbsoluteMode::Normal)
-                            || (input.source_character == Relative && !input.make_absolute)
-                        {
+                    MomentaryOnOffButton | PressOnlyButton => {
+                        if input.absolute_mode == crate::AbsoluteMode::Normal {
+                            MakesSense(
+                                "Defines via EEL how to transform incoming button presses or releases. Interesting use case for buttons: Stepping through a list of predefined target values. You can access the current target value as normalized value y (where 0.0 <= y <= 1.0).",
+                            )
+                        } else {
+                            MakesNoSenseUseDefault
+                        }
+                    }
+                    MomentaryVelocitySensitiveButton => {
+                        if input.absolute_mode == crate::AbsoluteMode::Normal {
+                            MakesSense(
+                                "Defines via EEL how to transform the button velocity (represented as normalized source value x where 0.0 <= x <= 1.0). See other button types for additional use cases.",
+                            )
+                        } else {
+                            MakesNoSenseUseDefault
+                        }
+                    }
+                    RangeControl | Relative => {
+                        if input.source_character == Relative && !input.make_absolute {
                             HasNoEffect
                         } else {
                             MakesSense(
-                                "Defines via EEL how to transform the normalized source value x (0.0 <= x <= 1.0).",
+                                "Defines via EEL how to transform the knob/fader position (represented as normalized source value x where 0.0 <= x <= 1.0).",
                             )
                         }
                     }
