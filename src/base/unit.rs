@@ -2,6 +2,7 @@ use crate::{DiscreteIncrement, DiscreteValue, Interval, IntervalMatchResult};
 use derive_more::Display;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Debug;
 use std::ops::{Add, Sub};
@@ -96,6 +97,16 @@ pub enum MinIsMaxBehavior {
     serde(try_from = "f64")
 )]
 pub struct UnitValue(f64);
+
+impl Eq for UnitValue {}
+
+impl Ord for UnitValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0
+            .partial_cmp(&other.0)
+            .expect("unit values are never NaN")
+    }
+}
 
 impl UnitValue {
     /// 0.0
