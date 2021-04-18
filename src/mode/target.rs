@@ -40,7 +40,9 @@ impl ControlType {
     }
 }
 
-pub trait Target {
+pub trait Target<'a> {
+    type Context: Copy;
+
     /// Should return the current value of the target.
     ///
     /// Some targets don't have the notion of a current value, e.g. virtual targets (which are just
@@ -48,7 +50,7 @@ pub trait Target {
     /// In such cases, `None` should be returned so that the mode can handle this situation
     /// gracefully. Of course, some mode features won't work without knowing the current value,
     /// but others will still work.
-    fn current_value(&self) -> Option<UnitValue>;
+    fn current_value(&self, context: Self::Context) -> Option<UnitValue>;
 
     fn control_type(&self) -> ControlType;
 }

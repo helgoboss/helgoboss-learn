@@ -5,8 +5,10 @@ pub struct TestTarget {
     pub control_type: ControlType,
 }
 
-impl Target for TestTarget {
-    fn current_value(&self) -> Option<UnitValue> {
+impl<'a> Target<'a> for TestTarget {
+    type Context = ();
+
+    fn current_value(&self, _: ()) -> Option<UnitValue> {
         self.current_value
     }
 
