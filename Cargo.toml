@@ -19,7 +19,7 @@ derivative = "2.1.1"
 # For OSC
 rosc = "*"
 # For letting the here defined raw MIDI data structure implement the REAPER MIDI event type
-#reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", optional = true }
-reaper-low = { path = "../../../../reaper-rs/main/low", optional = true }
+reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", optional = true }
+#reaper-low = { path = "../../../../reaper-rs/main/low", optional = true }
 # For tokenizing sys-ex patterns
 logos = "0.12.0"
