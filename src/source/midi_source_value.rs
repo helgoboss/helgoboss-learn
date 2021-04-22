@@ -111,6 +111,9 @@ impl TryFrom<f64> for Bpm {
 /// struct is more picky in that it needs offset and size directly in front of the raw data whereas
 /// the VST struct allows the data to be at a different address. That's why we need to follow the
 /// REAPER requirement.
+///
+/// Conforms to the LongMidiEvent in `reaper-medium` but the goal of `helgoboss-learn` is to be
+/// DAW-agnostic, so we have to recreate the lowest common denominator.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 #[repr(C)]
 pub struct RawMidiEvent {
