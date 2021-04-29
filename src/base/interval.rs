@@ -13,7 +13,9 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     pub fn new(min: T, max: T) -> Interval<T> {
         assert!(
             min <= max,
-            format!("min = {:?} is greater than max = {:?}", min, max)
+            "min = {:?} is greater than max = {:?}",
+            min,
+            max
         );
         Interval { min, max }
     }

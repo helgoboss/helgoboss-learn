@@ -129,7 +129,8 @@ impl UnitValue {
     pub fn new(number: f64) -> UnitValue {
         assert!(
             Self::is_valid(number),
-            format!("{} is not a valid unit value", number)
+            "{} is not a valid unit value",
+            number
         );
         UnitValue(number)
     }
@@ -156,7 +157,8 @@ impl UnitValue {
     pub unsafe fn new_unchecked(number: f64) -> UnitValue {
         debug_assert!(
             Self::is_valid(number),
-            format!("{} is not a valid unit value", number)
+            "{} is not a valid unit value",
+            number
         );
         UnitValue(number)
     }
