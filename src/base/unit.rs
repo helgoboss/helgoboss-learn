@@ -138,7 +138,7 @@ impl UnitValue {
     pub fn new_clamped(number: f64) -> UnitValue {
         let actual_number = if number > 1.0 {
             1.0
-        } else if number < 0.0 {
+        } else if number < 0.0 || number.is_nan() {
             0.0
         } else {
             number
