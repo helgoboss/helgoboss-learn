@@ -352,8 +352,16 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     DetailedSourceCharacter::PressOnlyButton,
                 ]
             }
+            // We exposed this as range-only ("key range") before but this actually also works as
+            // buttons that are never released.
+            NoteKeyNumber { .. } => {
+                vec![
+                    DetailedSourceCharacter::RangeControl,
+                    DetailedSourceCharacter::PressOnlyButton,
+                ]
+            }
             // Special targets for which we can safely say it's a range.
-            NoteKeyNumber { .. } | ClockTempo => vec![DetailedSourceCharacter::RangeControl],
+            ClockTempo => vec![DetailedSourceCharacter::RangeControl],
         }
     }
 
