@@ -533,7 +533,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     }
                     AfterTimeout => {
                         if input.source_character == DetailedSourceCharacter::PressOnlyButton {
-                            MakesNoSenseParentTakesCareOfDefault
+                            MakesSense("Fires after the specified timeout instead of immediately.")
                         } else {
                             MakesSense(
                                 "Fires as soon as button pressed as long as the specified timeout.",
@@ -542,6 +542,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     }
                     AfterTimeoutKeepFiring => {
                         if input.source_character == DetailedSourceCharacter::PressOnlyButton {
+                            // What sense does it make if we can't turn the turbo off again ...
                             MakesNoSenseParentTakesCareOfDefault
                         } else {
                             MakesSense(
