@@ -2112,7 +2112,8 @@ mod tests {
                 // 7x
                 assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs(0.65));
                 // 13x
-                assert_abs_diff_eq!(mode.control(rel(100), &target, ()).unwrap(), abs(1.00)); // 100x
+                assert_abs_diff_eq!(mode.control(rel(100), &target, ()).unwrap(), abs(1.00));
+                // 100x
             }
 
             #[test]

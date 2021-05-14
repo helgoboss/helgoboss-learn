@@ -205,7 +205,11 @@ impl DiscreteIncrement {
 
     /// Returns the signum (-1 if it's a negative increment, otherwise +1).
     pub fn signum(&self) -> i32 {
-        if self.is_positive() { 1 } else { -1 }
+        if self.is_positive() {
+            1
+        } else {
+            -1
+        }
     }
 
     /// Returns a unit increment or None in case of 0.0. The unit increment is built by creating a
