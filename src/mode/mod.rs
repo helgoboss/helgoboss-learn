@@ -11,6 +11,7 @@ pub use transformation::*;
 mod press_duration_processor;
 pub use press_duration_processor::*;
 mod feedback_util;
+pub use feedback_util::*;
 
 #[cfg(test)]
 mod test_util;

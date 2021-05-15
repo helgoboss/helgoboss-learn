@@ -11,7 +11,7 @@ use crate::{
 /// but right now this should suffice to solve the immediate problem.  
 pub const FEEDBACK_EPSILON: f64 = BASE_EPSILON;
 
-pub fn feedback<T: Transformation>(
+pub(crate) fn feedback<T: Transformation>(
     target_value: UnitValue,
     reverse: bool,
     transformation: &Option<T>,
