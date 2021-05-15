@@ -304,4 +304,22 @@ mod tests {
         let result = "F0[0000dcbaa]F7".parse::<RawMidiPattern>();
         assert!(result.is_err());
     }
+
+    #[test]
+    fn correct_resolution_1() {
+        // Given
+        let pattern: RawMidiPattern = "B0 00 [0nml kjih]".parse().unwrap();
+        // When
+        // Then
+        assert_eq!(pattern.resolution(), 14);
+    }
+
+    #[test]
+    fn correct_resolution_2() {
+        // Given
+        let pattern: RawMidiPattern = "B0 00 [0gfe dcba]".parse().unwrap();
+        // When
+        // Then
+        assert_eq!(pattern.resolution(), 7);
+    }
 }
