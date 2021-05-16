@@ -1,4 +1,4 @@
-use crate::{AbsoluteMode, FireMode, OutOfRangeBehavior};
+use crate::{AbsoluteMode, FireMode, GroupInteraction, OutOfRangeBehavior};
 use derive_more::Display;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
@@ -92,6 +92,10 @@ pub enum ModeParameter {
     AbsoluteMode,
     #[display(fmt = "Absolute mode \"{}\"", _0)]
     SpecificAbsoluteMode(AbsoluteMode),
+    #[display(fmt = "Group interaction")]
+    GroupInteraction,
+    #[display(fmt = "Group interaction \"{}\"", _0)]
+    SpecificGroupInteraction(GroupInteraction),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -325,7 +329,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     MomentaryOnOffButton | PressOnlyButton => {
                         if input.absolute_mode == crate::AbsoluteMode::Normal {
                             MakesSense(
-                                "Defines via EEL how to transform incoming button presses or releases. Interesting use case for buttons: Stepping through a list of predefined target values. You can access the current target value as normalized value y (where 0.0 <= y <= 1.0).",
+                                "Defines via EEL how to transform incoming button presses or releases. Interesting use case for buttons: Stepping through a list of predefined target values. You can access the current target value as normalized value y (where 0.0 <= y <= 1.0). Example: a = 0.0; b = 0.2; c = 0.6; y = y == a ? b : (y == b ? c : a);",
                             )
                         } else {
                             MakesNoSenseUseDefault
@@ -334,7 +338,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::Normal {
                             MakesSense(
-                                "Defines via EEL how to transform the button velocity (represented as normalized source value x where 0.0 <= x <= 1.0). See other button types for additional use cases.",
+                                "Defines via EEL how to transform the button velocity (represented as normalized source value x where 0.0 <= x <= 1.0). See other button types for additional use cases. Example that creates a curve: y = x^8",
                             )
                         } else {
                             MakesNoSenseUseDefault
@@ -345,7 +349,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             HasNoEffect
                         } else {
                             MakesSense(
-                                "Defines via EEL how to transform the knob/fader position (represented as normalized source value x where 0.0 <= x <= 1.0).",
+                                "Defines via EEL how to transform the knob/fader position (represented as normalized source value x where 0.0 <= x <= 1.0). Example that creates a curve: y = x^8",
                             )
                         }
                     }
@@ -364,7 +368,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         FeedbackTransformation => {
             if input.is_feedback {
                 MakesSense(
-                    "Defines via EEL how to transform the normalized feedback value y (0.0 <= y <= 1.0).",
+                    "Defines via EEL how to transform the normalized feedback value y (where 0.0 <= y <= 1.0). Example: x = 1 - y",
                 )
             } else {
                 HasNoEffect
@@ -660,6 +664,37 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             )
                         } else {
                             MakesNoSenseParentTakesCareOfDefault
+                        }
+                    }
+                }
+            }
+        }
+        GroupInteraction => {
+            if input.is_feedback {
+                HasNoEffect
+            } else {
+                // Description not interesting, will be queried for specific interaction only.
+                MakesSense("-")
+            }
+        }
+        SpecificGroupInteraction(i) => {
+            if input.is_feedback {
+                HasNoEffect
+            } else {
+                use crate::GroupInteraction::*;
+                match i {
+                    None => MakesSense("Other mappings in the same group will not be touched."),
+                    Inverse => {
+                        use DetailedSourceCharacter::*;
+                        match input.source_character {
+                            MomentaryOnOffButton | PressOnlyButton  => {
+                                MakesSense("Other mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. This is also called \"group exclusivity\".")
+                            }
+                            RangeControl | Relative | MomentaryVelocitySensitiveButton => {
+                                MakesSense(
+                                    "Other mappings in this group will receive the inverse target value with respect to their corresponding target range.",
+                                )
+                            }
                         }
                     }
                 }

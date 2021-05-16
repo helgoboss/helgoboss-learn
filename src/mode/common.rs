@@ -180,3 +180,32 @@ impl Default for TakeoverMode {
         Self::Pickup
     }
 }
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(usize)]
+pub enum GroupInteraction {
+    #[serde(rename = "none")]
+    #[display(fmt = "None")]
+    None,
+    #[serde(rename = "inverse")]
+    #[display(fmt = "Inverse other mappings (absolute)")]
+    Inverse,
+}
+
+impl Default for GroupInteraction {
+    fn default() -> Self {
+        Self::None
+    }
+}
