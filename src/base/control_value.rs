@@ -35,4 +35,11 @@ impl ControlValue {
             _ => Err("control value is not relative"),
         }
     }
+
+    pub fn inverse(self) -> ControlValue {
+        match self {
+            ControlValue::Absolute(v) => ControlValue::Absolute(v.inverse()),
+            ControlValue::Relative(v) => ControlValue::Relative(v.inverse()),
+        }
+    }
 }

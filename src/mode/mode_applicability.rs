@@ -692,10 +692,13 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             }
                             RangeControl | Relative | MomentaryVelocitySensitiveButton => {
                                 MakesSense(
-                                    "Other mappings in this group will receive the inverse target value with respect to their corresponding target range.",
+                                    "Other mappings in this group will receive the inverse target value with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Inverse control\".",
                                 )
                             }
                         }
+                    }
+                    InverseControl => {
+                        MakesSense("Other mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete tuning section of the other mapping.")
                     }
                 }
             }
