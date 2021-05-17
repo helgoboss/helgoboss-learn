@@ -199,12 +199,18 @@ pub enum GroupInteraction {
     #[serde(rename = "none")]
     #[display(fmt = "None")]
     None,
-    #[serde(rename = "inverse-target-value")]
-    #[display(fmt = "Inverse target value")]
-    InverseTargetValue,
+    #[serde(rename = "same-control")]
+    #[display(fmt = "Same control")]
+    SameControl,
+    #[serde(rename = "same-target-value")]
+    #[display(fmt = "Same target value")]
+    SameTargetValue,
     #[serde(rename = "inverse-control")]
     #[display(fmt = "Inverse control")]
     InverseControl,
+    #[serde(rename = "inverse-target-value")]
+    #[display(fmt = "Inverse target value")]
+    InverseTargetValue,
 }
 
 impl Default for GroupInteraction {

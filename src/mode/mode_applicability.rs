@@ -684,11 +684,22 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 use crate::GroupInteraction::*;
                 match i {
                     None => MakesSense("Other mappings in the same group will not be touched."),
+                    SameControl => {
+                        MakesSense("Other mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete tuning section of the other mapping.")
+                    }
+                    SameTargetValue => {
+                        MakesSense(
+                            "Other mappings in this group will receive the same target value as this one with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Same control\".",
+                        )
+                    }
+                    InverseControl => {
+                        MakesSense("Other mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete tuning section of the other mapping.")
+                    }
                     InverseTargetValue => {
                         use DetailedSourceCharacter::*;
                         match input.source_character {
                             MomentaryOnOffButton | PressOnlyButton  => {
-                                MakesSense("Other mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. This is also called \"group exclusivity\".")
+                                MakesSense("Other mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. Great for making something exclusive within a group!")
                             }
                             RangeControl | Relative | MomentaryVelocitySensitiveButton => {
                                 MakesSense(
@@ -696,9 +707,6 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                 )
                             }
                         }
-                    }
-                    InverseControl => {
-                        MakesSense("Other mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete tuning section of the other mapping.")
                     }
                 }
             }
