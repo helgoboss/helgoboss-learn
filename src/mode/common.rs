@@ -200,8 +200,8 @@ pub enum GroupInteraction {
     #[display(fmt = "None")]
     None,
     #[serde(rename = "inverse")]
-    #[display(fmt = "Inverse other mappings (absolute)")]
-    Inverse,
+    #[display(fmt = "Inverse target value (absolute)")]
+    InverseTargetValue,
 }
 
 impl Default for GroupInteraction {

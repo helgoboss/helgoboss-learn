@@ -684,7 +684,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 use crate::GroupInteraction::*;
                 match i {
                     None => MakesSense("Other mappings in the same group will not be touched."),
-                    Inverse => {
+                    InverseTargetValue => {
                         use DetailedSourceCharacter::*;
                         match input.source_character {
                             MomentaryOnOffButton | PressOnlyButton  => {
