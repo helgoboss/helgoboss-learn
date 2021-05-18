@@ -1,11 +1,17 @@
-use crate::{DiscreteIncrement, UnitValue};
+use crate::{DiscreteIncrement, Fraction, UnitValue};
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ControlValue {
-    /// Absolute value (e.g. fader position, knob position, key press, key release)
+    /// Absolute value that represents a percentage (e.g. fader position on the scale from lowest to
+    /// highest, knob position on the scale from closed to fully opened, key press on the scale from
+    /// not pressed to pressed with full velocity, key release).
     Absolute(UnitValue),
-    /// Relative value (e.g. encoder movement)
+    /// Absolute value that is capable of retaining the original discrete value, e.g. the played
+    /// note number, without immediately converting it into a UnitValue and thereby losing that
+    /// information - which is important for the new "Discrete" mode.
+    AbsoluteDiscrete(Fraction),
+    /// Relative increment (e.g. encoder movement)
     Relative(DiscreteIncrement),
 }
 
@@ -24,6 +30,7 @@ impl ControlValue {
     pub fn as_absolute(self) -> Result<UnitValue, &'static str> {
         match self {
             ControlValue::Absolute(v) => Ok(v),
+            ControlValue::AbsoluteDiscrete(f) => Ok(f.into()),
             _ => Err("control value is not absolute"),
         }
     }
@@ -40,6 +47,7 @@ impl ControlValue {
         match self {
             ControlValue::Absolute(v) => ControlValue::Absolute(v.inverse()),
             ControlValue::Relative(v) => ControlValue::Relative(v.inverse()),
+            ControlValue::AbsoluteDiscrete(v) => ControlValue::AbsoluteDiscrete(v.inverse()),
         }
     }
 }

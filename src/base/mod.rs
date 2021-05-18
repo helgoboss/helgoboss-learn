@@ -7,6 +7,9 @@ pub use unit::*;
 mod discrete;
 pub use discrete::*;
 
+mod fraction;
+pub use fraction::*;
+
 mod interval;
 pub use interval::*;
 

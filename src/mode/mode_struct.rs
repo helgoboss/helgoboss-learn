@@ -149,6 +149,9 @@ impl<T: Transformation> Mode<T> {
         match control_value {
             ControlValue::Relative(i) => self.control_relative(i, target, context, options),
             ControlValue::Absolute(v) => self.control_absolute(v, target, context, true, options),
+            ControlValue::AbsoluteDiscrete(f) => {
+                self.control_absolute(f.into(), target, context, true, options)
+            }
         }
     }
 
