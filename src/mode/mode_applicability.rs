@@ -683,7 +683,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use crate::GroupInteraction::*;
                 match i {
-                    None => MakesSense("Other non-virtual mappings in the same group will not be touched."),
+                    None => MakesSense("Other mappings in the same group will not be touched."),
                     SameControl => {
                         MakesSense("Other non-virtual mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete tuning section of the other mapping.")
                     }
