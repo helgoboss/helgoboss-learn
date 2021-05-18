@@ -670,7 +670,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             }
         }
         GroupInteraction => {
-            if input.is_feedback {
+            if input.is_feedback || input.target_is_virtual {
                 HasNoEffect
             } else {
                 // Description not interesting, will be queried for specific interaction only.
@@ -678,32 +678,32 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             }
         }
         SpecificGroupInteraction(i) => {
-            if input.is_feedback {
+            if input.is_feedback || input.target_is_virtual {
                 HasNoEffect
             } else {
                 use crate::GroupInteraction::*;
                 match i {
-                    None => MakesSense("Other mappings in the same group will not be touched."),
+                    None => MakesSense("Other non-virtual mappings in the same group will not be touched."),
                     SameControl => {
-                        MakesSense("Other mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete tuning section of the other mapping.")
+                        MakesSense("Other non-virtual mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete tuning section of the other mapping.")
                     }
                     SameTargetValue => {
                         MakesSense(
-                            "Other mappings in this group will receive the same target value as this one with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Same control\".",
+                            "Other non-virtual mappings in this group will receive the same target value as this one with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Same control\".",
                         )
                     }
                     InverseControl => {
-                        MakesSense("Other mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete tuning section of the other mapping.")
+                        MakesSense("Other non-virtual mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete tuning section of the other mapping.")
                     }
                     InverseTargetValue => {
                         use DetailedSourceCharacter::*;
                         match input.source_character {
                             MomentaryOnOffButton | PressOnlyButton  => {
-                                MakesSense("Other mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. Great for making something exclusive within a group!")
+                                MakesSense("Other non-virtual mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. Great for making something exclusive within a group!")
                             }
                             RangeControl | Relative | MomentaryVelocitySensitiveButton => {
                                 MakesSense(
-                                    "Other mappings in this group will receive the inverse target value with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Inverse control\".",
+                                    "Other non-virtual mappings in this group will receive the inverse target value with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Inverse control\".",
                                 )
                             }
                         }
