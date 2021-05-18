@@ -196,19 +196,19 @@ impl Default for TakeoverMode {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum GroupInteraction {
-    #[serde(rename = "none")]
+    #[cfg_attr(feature = "serde", serde(rename = "none"))]
     #[display(fmt = "None")]
     None,
-    #[serde(rename = "same-control")]
+    #[cfg_attr(feature = "serde", serde(rename = "same-control"))]
     #[display(fmt = "Same control")]
     SameControl,
-    #[serde(rename = "same-target-value")]
+    #[cfg_attr(feature = "serde", serde(rename = "same-target-value"))]
     #[display(fmt = "Same target value")]
     SameTargetValue,
-    #[serde(rename = "inverse-control")]
+    #[cfg_attr(feature = "serde", serde(rename = "inverse-control"))]
     #[display(fmt = "Inverse control")]
     InverseControl,
-    #[serde(rename = "inverse-target-value")]
+    #[cfg_attr(feature = "serde", serde(rename = "inverse-target-value"))]
     #[display(fmt = "Inverse target value")]
     InverseTargetValue,
 }

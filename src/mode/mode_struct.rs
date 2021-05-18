@@ -118,6 +118,8 @@ impl<T: Transformation> Default for Mode<T> {
 
 impl<T: Transformation> Mode<T> {
     /// Processes the given control value and maybe returns an appropriate target control value.
+    ///
+    /// `None` either means ignored or target value already has desired value.
     pub fn control<'a, C: Copy>(
         &mut self,
         control_value: ControlValue,
@@ -129,17 +131,21 @@ impl<T: Transformation> Mode<T> {
             target,
             context,
             ModeControlOptions::default(),
-        )
+        )?
+        .into()
     }
 
     /// Processes the given control value and maybe returns an appropriate target control value.
+    ///
+    /// `None` means the incoming source control value doesn't reach the target because it's
+    /// filtered out (e.g. because of button filter "Press only").
     pub fn control_with_options<'a, C: Copy>(
         &mut self,
         control_value: ControlValue,
         target: &impl Target<'a, Context = C>,
         context: C,
         options: ModeControlOptions,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         match control_value {
             ControlValue::Relative(i) => self.control_relative(i, target, context, options),
             ControlValue::Absolute(v) => self.control_absolute(v, target, context, true, options),
@@ -171,7 +177,7 @@ impl<T: Transformation> Mode<T> {
         &mut self,
         target: &impl Target<'a, Context = C>,
         context: C,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         let control_value = self.press_duration_processor.poll()?;
         self.control_absolute(
             control_value,
@@ -188,15 +194,17 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = C>,
         context: C,
         options: ModeControlOptions,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         match self.encoder_usage {
             EncoderUsage::IncrementOnly if !i.is_positive() => return None,
             EncoderUsage::DecrementOnly if i.is_positive() => return None,
             _ => {}
         };
         if self.convert_relative_to_absolute {
-            self.control_relative_to_absolute(i, target, context, options)
-                .map(ControlValue::Absolute)
+            Some(
+                self.control_relative_to_absolute(i, target, context, options)?
+                    .map(ControlValue::Absolute),
+            )
         } else {
             self.control_relative_normal(i, target, context, options)
         }
@@ -209,7 +217,7 @@ impl<T: Transformation> Mode<T> {
         context: C,
         consider_press_duration: bool,
         options: ModeControlOptions,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         let v = if consider_press_duration {
             self.press_duration_processor.process_press_or_release(v)?
         } else {
@@ -217,15 +225,17 @@ impl<T: Transformation> Mode<T> {
         };
         use AbsoluteMode::*;
         match self.absolute_mode {
-            Normal => self
-                .control_absolute_normal(v, target, context)
-                .map(ControlValue::Absolute),
+            Normal => Some(
+                self.control_absolute_normal(v, target, context)?
+                    .map(ControlValue::Absolute),
+            ),
             IncrementalButtons => {
                 self.control_absolute_incremental_buttons(v, target, context, options)
             }
-            ToggleButtons => self
-                .control_absolute_toggle_buttons(v, target, context)
-                .map(ControlValue::Absolute),
+            ToggleButtons => Some(
+                self.control_absolute_toggle_buttons(v, target, context)?
+                    .map(ControlValue::Absolute),
+            ),
         }
     }
 
@@ -236,7 +246,7 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target<'a, Context = C>,
         context: C,
-    ) -> Option<UnitValue> {
+    ) -> Option<ModeControlResult<UnitValue>> {
         // Memorize as previous value for next control cycle.
         let previous_control_value = self.previous_absolute_control_value.replace(control_value);
         match self.button_usage {
@@ -297,7 +307,7 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = C>,
         context: C,
         options: ModeControlOptions,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         if control_value.is_zero()
             || !control_value.is_within_interval_tolerant(&self.source_value_interval, BASE_EPSILON)
         {
@@ -363,7 +373,7 @@ impl<T: Transformation> Mode<T> {
                 // - Minimum target step count (enables accurate normal/minimum increment, atomic)
                 // - Maximum target step count (enables accurate maximum increment, mapped)
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                Some(ControlValue::Relative(discrete_increment))
+                Some(ModeControlResult::HitTarget(ControlValue::Relative(discrete_increment)))
             }
             VirtualButton => {
                 // This doesn't make sense at all. Buttons just need to be triggered, not fed with
@@ -378,7 +388,7 @@ impl<T: Transformation> Mode<T> {
         control_value: UnitValue,
         target: &impl Target<'a, Context = C>,
         context: C,
-    ) -> Option<UnitValue> {
+    ) -> Option<ModeControlResult<UnitValue>> {
         if control_value.is_zero() {
             return None;
         }
@@ -394,7 +404,7 @@ impl<T: Transformation> Mode<T> {
         // If the settings make sense for toggling, the desired target value should *always*
         // be different than the current value. Therefore no need to check if the target value
         // already has that value.
-        Some(desired_target_value)
+        Some(ModeControlResult::HitTarget(desired_target_value))
     }
 
     // Relative-to-absolute conversion mode.
@@ -404,7 +414,7 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = C>,
         context: C,
         options: ModeControlOptions,
-    ) -> Option<UnitValue> {
+    ) -> Option<ModeControlResult<UnitValue>> {
         // Convert to absolute value
         let mut inc = discrete_increment.to_unit_increment(self.step_size_interval.min_val())?;
         inc = inc.clamp_to_interval(&self.step_size_interval)?;
@@ -431,7 +441,7 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = C>,
         context: C,
         options: ModeControlOptions,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         use ControlType::*;
         match target.control_type() {
             AbsoluteContinuous
@@ -485,7 +495,7 @@ impl<T: Transformation> Mode<T> {
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
-                Some(ControlValue::Relative(pepped_up_increment))
+                Some(ModeControlResult::HitTarget(ControlValue::Relative(pepped_up_increment)))
             }
             VirtualButton => {
                 // Controlling a button target with +/- n doesn't make sense.
@@ -534,10 +544,10 @@ impl<T: Transformation> Mode<T> {
         current_target_value: Option<UnitValue>,
         control_type: ControlType,
         previous_control_value: Option<UnitValue>,
-    ) -> Option<UnitValue> {
+    ) -> Option<ModeControlResult<UnitValue>> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
-            None => return Some(control_value),
+            None => return Some(ModeControlResult::HitTarget(control_value)),
             Some(v) => v,
         };
         if self.jump_interval.is_full() {
@@ -651,11 +661,13 @@ impl<T: Transformation> Mode<T> {
         desired_target_value: UnitValue,
         current_target_value: UnitValue,
         control_type: ControlType,
-    ) -> Option<UnitValue> {
+    ) -> Option<ModeControlResult<UnitValue>> {
         if !control_type.is_retriggerable() && current_target_value == desired_target_value {
-            return None;
+            return Some(ModeControlResult::LeaveTargetUntouched(
+                desired_target_value,
+            ));
         }
-        Some(desired_target_value)
+        Some(ModeControlResult::HitTarget(desired_target_value))
     }
 
     fn hit_discrete_target_absolutely(
@@ -664,7 +676,7 @@ impl<T: Transformation> Mode<T> {
         target_step_size: UnitValue,
         options: ModeControlOptions,
         current_value: impl Fn() -> Option<UnitValue>,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
         self.hit_target_absolutely_with_unit_increment(
             unit_increment,
@@ -680,7 +692,7 @@ impl<T: Transformation> Mode<T> {
         grid_interval_size: UnitValue,
         current_target_value: UnitValue,
         options: ModeControlOptions,
-    ) -> Option<ControlValue> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         let snapped_target_value_interval = Interval::new(
             self.target_value_interval
                 .min_val()
@@ -705,9 +717,11 @@ impl<T: Transformation> Mode<T> {
             v.add_clamping(increment, &snapped_target_value_interval, BASE_EPSILON)
         };
         if v == current_target_value {
-            return None;
+            return Some(ModeControlResult::LeaveTargetUntouched(
+                ControlValue::Absolute(v),
+            ));
         }
-        Some(ControlValue::Absolute(v))
+        Some(ModeControlResult::HitTarget(ControlValue::Absolute(v)))
     }
 
     fn pep_up_discrete_increment(
@@ -3741,4 +3755,32 @@ pub fn default_step_size_interval() -> Interval<UnitValue> {
 pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
     // Same reasoning as with step size interval
     create_discrete_increment_interval(1, 1)
+}
+
+pub enum ModeControlResult<T> {
+    /// Target should be hit with the given value.
+    HitTarget(T),
+    /// Target is reached but already has the given desired value and is not retriggerable.
+    /// It shouldn't be hit.
+    LeaveTargetUntouched(T),
+}
+
+impl<T> ModeControlResult<T> {
+    pub fn map<R>(self, f: impl FnOnce(T) -> R) -> ModeControlResult<R> {
+        use ModeControlResult::*;
+        match self {
+            HitTarget(v) => HitTarget(f(v)),
+            LeaveTargetUntouched(v) => LeaveTargetUntouched(f(v)),
+        }
+    }
+}
+
+impl<T> From<ModeControlResult<T>> for Option<T> {
+    fn from(res: ModeControlResult<T>) -> Self {
+        use ModeControlResult::*;
+        match res {
+            LeaveTargetUntouched(_) => None,
+            HitTarget(v) => Some(v),
+        }
+    }
 }
