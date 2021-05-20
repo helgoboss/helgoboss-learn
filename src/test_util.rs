@@ -22,7 +22,9 @@ impl AbsDiffEq for ControlValue {
 
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
         match (self, other) {
-            (ControlValue::Absolute(v1), ControlValue::Absolute(v2)) => v1.abs_diff_eq(v2, epsilon),
+            (ControlValue::AbsoluteContinuous(v1), ControlValue::AbsoluteContinuous(v2)) => {
+                v1.abs_diff_eq(v2, epsilon)
+            }
             _ => self == other,
         }
     }

@@ -230,13 +230,13 @@ impl OscSource {
             let inc = if unit_value.get() > 0.0 { 1 } else { -1 };
             ControlValue::Relative(DiscreteIncrement::new(inc))
         } else {
-            ControlValue::Absolute(unit_value)
+            ControlValue::AbsoluteContinuous(unit_value)
         };
         Some(control_value)
     }
 
     pub fn format_control_value(&self, value: ControlValue) -> Result<String, &'static str> {
-        let v = value.as_absolute()?.get();
+        let v = value.as_unit_value()?.get();
         Ok(format_percentage_without_unit(v))
     }
 

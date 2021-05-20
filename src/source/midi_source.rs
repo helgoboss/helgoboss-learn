@@ -513,7 +513,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 _ => None,
             },
             S::ClockTempo => match value {
-                Tempo(bpm) => Some(ControlValue::Absolute(bpm.to_unit_value())),
+                Tempo(bpm) => Some(ControlValue::AbsoluteContinuous(bpm.to_unit_value())),
                 _ => None,
             },
             // TODO-low Support control for raw/sys-ex. Not difficult because we have the pattern
@@ -688,15 +688,15 @@ impl<S: MidiSourceScript> MidiSource<S> {
         use MidiSource::*;
         let result = match self {
             ClockTempo => {
-                let bpm = Bpm::from_unit_value(value.as_absolute()?);
+                let bpm = Bpm::from_unit_value(value.as_unit_value()?);
                 format!("{:.2}", bpm.get())
             }
             ClockTransport { .. } => {
                 return Err("clock transport sources have just one possible control value");
             }
-            Script { .. } => format_percentage_without_unit(value.as_absolute()?.get()),
+            Script { .. } => format_percentage_without_unit(value.as_unit_value()?.get()),
             _ => self
-                .convert_control_value_to_midi_value(value.as_absolute()?)?
+                .convert_control_value_to_midi_value(value.as_unit_value()?)?
                 .to_string(),
         };
         Ok(result)
@@ -945,7 +945,7 @@ mod tests {
             source
                 .control(&plain(note_on(0, 64, 127,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -957,7 +957,7 @@ mod tests {
             source
                 .control(&plain(note_on(0, 20, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -969,7 +969,7 @@ mod tests {
             source
                 .control(&plain(note_off(0, 20, 100,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1022,7 +1022,7 @@ mod tests {
             source
                 .control(&plain(note_on(4, 20, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1047,7 +1047,7 @@ mod tests {
             source
                 .control(&plain(note_on(0, 127, 55,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1059,7 +1059,7 @@ mod tests {
             source
                 .control(&plain(note_on(1, 0, 64,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1112,7 +1112,7 @@ mod tests {
             source
                 .control(&plain(note_on(1, 0, 64,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1147,7 +1147,7 @@ mod tests {
             source
                 .control(&plain(polyphonic_key_pressure(1, 14, 127,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1161,7 +1161,7 @@ mod tests {
             source
                 .control(&plain(polyphonic_key_pressure(1, 16, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1212,7 +1212,7 @@ mod tests {
             source
                 .control(&plain(polyphonic_key_pressure(1, 53, 127,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1252,7 +1252,7 @@ mod tests {
             source
                 .control(&plain(control_change(1, 64, 127,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1351,7 +1351,7 @@ mod tests {
             source
                 .control(&plain(program_change(5, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1363,7 +1363,7 @@ mod tests {
             source
                 .control(&plain(program_change(6, 127,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1415,7 +1415,7 @@ mod tests {
             source
                 .control(&plain(program_change(10, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1446,7 +1446,7 @@ mod tests {
             source
                 .control(&plain(channel_pressure(5, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1458,7 +1458,7 @@ mod tests {
             source
                 .control(&plain(channel_pressure(6, 127,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1511,7 +1511,7 @@ mod tests {
             source
                 .control(&plain(channel_pressure(15, 127,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1549,7 +1549,7 @@ mod tests {
             source
                 .control(&plain(pitch_bend_change(5, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1561,7 +1561,7 @@ mod tests {
             source
                 .control(&plain(pitch_bend_change(6, 4096,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.25)
         );
@@ -1573,7 +1573,7 @@ mod tests {
             source
                 .control(&plain(pitch_bend_change(6, 8192,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.5)
         );
@@ -1585,7 +1585,7 @@ mod tests {
             source
                 .control(&plain(pitch_bend_change(6, 12288,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.75)
         );
@@ -1599,7 +1599,7 @@ mod tests {
             source
                 .control(&plain(pitch_bend_change(6, 16383,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1653,7 +1653,7 @@ mod tests {
             source
                 .control(&plain(pitch_bend_change(3, 0,)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1704,7 +1704,7 @@ mod tests {
             source
                 .control(&cc(control_change_14_bit(1, 10, 4096)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.2500152597204419)
         );
@@ -1718,7 +1718,7 @@ mod tests {
             source
                 .control(&cc(control_change_14_bit(1, 10, 16383)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1777,7 +1777,7 @@ mod tests {
             source
                 .control(&cc(control_change_14_bit(1, 7, 16383)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1856,7 +1856,7 @@ mod tests {
             source
                 .control(&pn(rpn_14_bit(1, 520, 2048)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.12500762986022096)
         );
@@ -1868,7 +1868,7 @@ mod tests {
             source
                 .control(&pn(nrpn_14_bit(1, 520, 16383)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1880,7 +1880,7 @@ mod tests {
             source
                 .control(&pn(rpn(1, 342, 0)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1889,7 +1889,7 @@ mod tests {
             source
                 .control(&pn(nrpn(1, 520, 127)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1930,7 +1930,7 @@ mod tests {
             source
                 .control(&pn(rpn(7, 3000, 0)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
         );
@@ -1980,7 +1980,7 @@ mod tests {
             source
                 .control(&pn(rpn(7, 3000, 0)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -1992,7 +1992,7 @@ mod tests {
             source
                 .control(&pn(rpn(7, 3000, 50)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -2004,7 +2004,7 @@ mod tests {
             source
                 .control(&pn(rpn(7, 3000, 127)))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -2143,7 +2143,7 @@ mod tests {
             source
                 .control(&plain(r#continue()))
                 .unwrap()
-                .normalized()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
         );
@@ -2162,11 +2162,11 @@ mod tests {
     }
 
     fn abs(value: f64) -> ControlValue {
-        ControlValue::absolute(value)
+        ControlValue::absolute_continuous(value)
     }
 
     fn frac(actual: u32, max: u32) -> ControlValue {
-        ControlValue::discrete_absolute(actual, max)
+        ControlValue::absolute_discrete(actual, max)
     }
 
     fn rel(increment: i32) -> ControlValue {

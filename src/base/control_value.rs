@@ -6,7 +6,7 @@ pub enum ControlValue {
     /// Absolute value that represents a percentage (e.g. fader position on the scale from lowest to
     /// highest, knob position on the scale from closed to fully opened, key press on the scale from
     /// not pressed to pressed with full velocity, key release).
-    Absolute(UnitValue),
+    AbsoluteContinuous(UnitValue),
     /// Absolute value that is capable of retaining the original discrete value, e.g. the played
     /// note number, without immediately converting it into a UnitValue and thereby losing that
     /// information - which is important for the new "Discrete" mode.
@@ -17,12 +17,12 @@ pub enum ControlValue {
 
 impl ControlValue {
     /// Convenience method for creating an absolute control value
-    pub fn absolute(number: f64) -> ControlValue {
-        ControlValue::Absolute(UnitValue::new(number))
+    pub fn absolute_continuous(number: f64) -> ControlValue {
+        ControlValue::AbsoluteContinuous(UnitValue::new(number))
     }
 
     /// Convenience method for creating a discrete absolute control value
-    pub fn discrete_absolute(actual: u32, max: u32) -> ControlValue {
+    pub fn absolute_discrete(actual: u32, max: u32) -> ControlValue {
         ControlValue::AbsoluteDiscrete(Fraction::new(actual, max))
     }
 
@@ -32,16 +32,16 @@ impl ControlValue {
     }
 
     /// Extracts the unit value if this is an absolute control value.
-    pub fn as_absolute(self) -> Result<UnitValue, &'static str> {
+    pub fn as_unit_value(self) -> Result<UnitValue, &'static str> {
         match self {
-            ControlValue::Absolute(v) => Ok(v),
+            ControlValue::AbsoluteContinuous(v) => Ok(v),
             ControlValue::AbsoluteDiscrete(f) => Ok(f.into()),
             _ => Err("control value is not absolute"),
         }
     }
 
     /// Extracts the discrete increment if this is a relative control value.
-    pub fn as_relative(self) -> Result<DiscreteIncrement, &'static str> {
+    pub fn as_discrete_increment(self) -> Result<DiscreteIncrement, &'static str> {
         match self {
             ControlValue::Relative(v) => Ok(v),
             _ => Err("control value is not relative"),
@@ -50,17 +50,17 @@ impl ControlValue {
 
     pub fn inverse(self) -> ControlValue {
         match self {
-            ControlValue::Absolute(v) => ControlValue::Absolute(v.inverse()),
+            ControlValue::AbsoluteContinuous(v) => ControlValue::AbsoluteContinuous(v.inverse()),
             ControlValue::Relative(v) => ControlValue::Relative(v.inverse()),
             ControlValue::AbsoluteDiscrete(v) => ControlValue::AbsoluteDiscrete(v.inverse()),
         }
     }
 
-    pub fn normalized(self) -> Result<ControlValue, &'static str> {
+    pub fn to_absolute_continuous(self) -> Result<ControlValue, &'static str> {
         match self {
-            ControlValue::Absolute(v) => Ok(ControlValue::Absolute(v)),
+            ControlValue::AbsoluteContinuous(v) => Ok(ControlValue::AbsoluteContinuous(v)),
             ControlValue::Relative(_) => Err("relative value can't be normalized"),
-            ControlValue::AbsoluteDiscrete(v) => Ok(ControlValue::Absolute(v.into())),
+            ControlValue::AbsoluteDiscrete(v) => Ok(ControlValue::AbsoluteContinuous(v.into())),
         }
     }
 }

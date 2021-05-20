@@ -148,7 +148,9 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<ModeControlResult<ControlValue>> {
         match control_value {
             ControlValue::Relative(i) => self.control_relative(i, target, context, options),
-            ControlValue::Absolute(v) => self.control_absolute(v, target, context, true, options),
+            ControlValue::AbsoluteContinuous(v) => {
+                self.control_absolute(v, target, context, true, options)
+            }
             ControlValue::AbsoluteDiscrete(f) => {
                 self.control_absolute(f.into(), target, context, true, options)
             }
@@ -206,7 +208,7 @@ impl<T: Transformation> Mode<T> {
         if self.convert_relative_to_absolute {
             Some(
                 self.control_relative_to_absolute(i, target, context, options)?
-                    .map(ControlValue::Absolute),
+                    .map(ControlValue::AbsoluteContinuous),
             )
         } else {
             self.control_relative_normal(i, target, context, options)
@@ -230,14 +232,14 @@ impl<T: Transformation> Mode<T> {
         match self.absolute_mode {
             Normal => Some(
                 self.control_absolute_normal(v, target, context)?
-                    .map(ControlValue::Absolute),
+                    .map(ControlValue::AbsoluteContinuous),
             ),
             IncrementalButtons => {
                 self.control_absolute_incremental_buttons(v, target, context, options)
             }
             ToggleButtons => Some(
                 self.control_absolute_toggle_buttons(v, target, context)?
-                    .map(ControlValue::Absolute),
+                    .map(ControlValue::AbsoluteContinuous),
             ),
         }
     }
@@ -721,10 +723,12 @@ impl<T: Transformation> Mode<T> {
         };
         if v == current_target_value {
             return Some(ModeControlResult::LeaveTargetUntouched(
-                ControlValue::Absolute(v),
+                ControlValue::AbsoluteContinuous(v),
             ));
         }
-        Some(ModeControlResult::HitTarget(ControlValue::Absolute(v)))
+        Some(ModeControlResult::HitTarget(
+            ControlValue::AbsoluteContinuous(v),
+        ))
     }
 
     fn pep_up_discrete_increment(
@@ -3736,7 +3740,7 @@ mod tests {
     }
 
     fn abs(number: f64) -> ControlValue {
-        ControlValue::absolute(number)
+        ControlValue::absolute_continuous(number)
     }
 
     fn rel(increment: i32) -> ControlValue {
