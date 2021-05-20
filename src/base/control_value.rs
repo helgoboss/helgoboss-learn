@@ -21,6 +21,11 @@ impl ControlValue {
         ControlValue::Absolute(UnitValue::new(number))
     }
 
+    /// Convenience method for creating a discrete absolute control value
+    pub fn discrete_absolute(actual: u32, max: u32) -> ControlValue {
+        ControlValue::AbsoluteDiscrete(Fraction::new(actual, max))
+    }
+
     /// Convenience method for creating a relative control value
     pub fn relative(increment: i32) -> ControlValue {
         ControlValue::Relative(DiscreteIncrement::new(increment))
@@ -48,6 +53,14 @@ impl ControlValue {
             ControlValue::Absolute(v) => ControlValue::Absolute(v.inverse()),
             ControlValue::Relative(v) => ControlValue::Relative(v.inverse()),
             ControlValue::AbsoluteDiscrete(v) => ControlValue::AbsoluteDiscrete(v.inverse()),
+        }
+    }
+
+    pub fn normalized(self) -> Result<ControlValue, &'static str> {
+        match self {
+            ControlValue::Absolute(v) => Ok(ControlValue::Absolute(v)),
+            ControlValue::Relative(_) => Err("relative value can't be normalized"),
+            ControlValue::AbsoluteDiscrete(v) => Ok(ControlValue::Absolute(v.into())),
         }
     }
 }
