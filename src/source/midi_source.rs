@@ -949,6 +949,10 @@ mod tests {
                 .unwrap(),
             abs(1.0)
         );
+        assert_eq!(
+            source.control(&plain(note_on(0, 64, 127,))).unwrap(),
+            frac(127, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(note_on(0, 20, 0,)))
@@ -957,6 +961,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(note_on(0, 20, 0,))).unwrap(),
+            frac(0, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(note_off(0, 20, 100,)))
@@ -964,6 +972,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(note_off(0, 20, 100,))).unwrap(),
+            frac(0, 127)
         );
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
@@ -1014,6 +1026,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(note_on(4, 20, 0,))).unwrap(),
+            frac(0, 127)
+        );
         assert_eq!(source.control(&plain(note_off(15, 20, 100,))), None);
         assert_eq!(
             source.feedback::<RawShortMessage>(uv(0.5)),
@@ -1035,6 +1051,10 @@ mod tests {
                 .unwrap(),
             abs(1.0)
         );
+        assert_eq!(
+            source.control(&plain(note_on(0, 127, 55,))).unwrap(),
+            frac(127, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(note_on(1, 0, 64,)))
@@ -1042,6 +1062,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            frac(0, 127)
         );
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
@@ -1092,6 +1116,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            frac(0, 127)
+        );
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
         assert_eq!(
@@ -1123,6 +1151,12 @@ mod tests {
                 .unwrap(),
             abs(1.0)
         );
+        assert_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 14, 127,)))
+                .unwrap(),
+            frac(127, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(polyphonic_key_pressure(1, 16, 0,)))
@@ -1130,6 +1164,12 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 16, 0,)))
+                .unwrap(),
+            frac(0, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(3, 14, 127))),
@@ -1177,6 +1217,12 @@ mod tests {
             abs(1.0)
         );
         assert_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 53, 127,)))
+                .unwrap(),
+            frac(127, 127)
+        );
+        assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
             None
         );
@@ -1209,6 +1255,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(control_change(1, 64, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(source.control(&plain(program_change(5, 64,))), None);
         assert_eq!(
@@ -1305,6 +1355,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(program_change(5, 0,))).unwrap(),
+            frac(0, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(program_change(6, 127,)))
@@ -1312,6 +1366,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(program_change(6, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1361,6 +1419,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(program_change(10, 0,))).unwrap(),
+            frac(0, 127)
+        );
         assert_eq!(source.control(&plain(program_change(6, 127,))), None);
         assert_eq!(
             source.feedback::<RawShortMessage>(uv(0.5)),
@@ -1388,6 +1450,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(channel_pressure(5, 0,))).unwrap(),
+            frac(0, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(channel_pressure(6, 127,)))
@@ -1395,6 +1461,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(channel_pressure(6, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1446,6 +1516,10 @@ mod tests {
             abs(1.0)
         );
         assert_eq!(
+            source.control(&plain(channel_pressure(15, 127,))).unwrap(),
+            frac(127, 127)
+        );
+        assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
             None
         );
@@ -1479,6 +1553,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(5, 0,))).unwrap(),
+            frac(0, 16384)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(pitch_bend_change(6, 4096,)))
@@ -1486,6 +1564,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(0.25)
+        );
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(6, 4096,))).unwrap(),
+            frac(4096, 16384)
         );
         assert_abs_diff_eq!(
             source
@@ -1495,6 +1577,10 @@ mod tests {
                 .unwrap(),
             abs(0.5)
         );
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(6, 8192,))).unwrap(),
+            frac(8192, 16384)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(pitch_bend_change(6, 12288,)))
@@ -1503,6 +1589,12 @@ mod tests {
                 .unwrap(),
             abs(0.75)
         );
+        assert_eq!(
+            source
+                .control(&plain(pitch_bend_change(6, 12288,)))
+                .unwrap(),
+            frac(12288, 16384)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&plain(pitch_bend_change(6, 16383,)))
@@ -1510,6 +1602,12 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&plain(pitch_bend_change(6, 16383,)))
+                .unwrap(),
+            frac(16383, 16383)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1559,6 +1657,10 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(3, 0,))).unwrap(),
+            frac(0, 16384)
+        );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(
             source.feedback::<RawShortMessage>(uv(0.0)),
@@ -1606,6 +1708,12 @@ mod tests {
                 .unwrap(),
             abs(0.2500152597204419)
         );
+        assert_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 10, 4096)))
+                .unwrap(),
+            frac(4096, 16383)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&cc(control_change_14_bit(1, 10, 16383)))
@@ -1613,6 +1721,12 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 10, 16383)))
+                .unwrap(),
+            frac(16383, 16383)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1666,6 +1780,12 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 7, 16383)))
+                .unwrap(),
+            frac(16383, 16383)
         );
         assert_eq!(
             source.feedback::<RawShortMessage>(uv(0.0)),
@@ -1740,6 +1860,10 @@ mod tests {
                 .unwrap(),
             abs(0.12500762986022096)
         );
+        assert_eq!(
+            source.control(&pn(rpn_14_bit(1, 520, 2048))).unwrap(),
+            frac(2048, 16383)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&pn(nrpn_14_bit(1, 520, 16383)))
@@ -1747,6 +1871,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&pn(nrpn_14_bit(1, 520, 16383))).unwrap(),
+            frac(16383, 16383)
         );
         assert_abs_diff_eq!(
             source
@@ -1756,6 +1884,7 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(source.control(&pn(rpn(1, 342, 0))).unwrap(), frac(0, 127));
         assert_abs_diff_eq!(
             source
                 .control(&pn(nrpn(1, 520, 127)))
@@ -1763,6 +1892,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&pn(nrpn(1, 520, 127))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
@@ -1801,6 +1934,7 @@ mod tests {
                 .unwrap(),
             abs(0.0)
         );
+        assert_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), frac(0, 127));
         assert_eq!(source.control(&pn(nrpn_14_bit(7, 3000, 45))), None);
         assert_eq!(source.control(&pn(nrpn(7, 3000, 24))), None);
         assert_eq!(
@@ -1850,6 +1984,10 @@ mod tests {
                 .unwrap(),
             abs(1.0)
         );
+        assert_eq!(
+            source.control(&pn(rpn(7, 3000, 0))).unwrap(),
+            frac(127, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&pn(rpn(7, 3000, 50)))
@@ -1858,6 +1996,10 @@ mod tests {
                 .unwrap(),
             abs(1.0)
         );
+        assert_eq!(
+            source.control(&pn(rpn(7, 3000, 50))).unwrap(),
+            frac(127, 127)
+        );
         assert_abs_diff_eq!(
             source
                 .control(&pn(rpn(7, 3000, 127)))
@@ -1865,6 +2007,10 @@ mod tests {
                 .normalized()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&pn(rpn(7, 3000, 127))).unwrap(),
+            frac(127, 127)
         );
     }
 
@@ -2001,6 +2147,7 @@ mod tests {
                 .unwrap(),
             abs(1.0)
         );
+        assert_eq!(source.control(&plain(r#continue())).unwrap(), frac(1, 1));
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -2016,6 +2163,10 @@ mod tests {
 
     fn abs(value: f64) -> ControlValue {
         ControlValue::absolute(value)
+    }
+
+    fn frac(actual: u32, max: u32) -> ControlValue {
+        ControlValue::discrete_absolute(actual, max)
     }
 
     fn rel(increment: i32) -> ControlValue {
