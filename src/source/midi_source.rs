@@ -1,7 +1,7 @@
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, Bpm, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, MidiSourceScript, MidiSourceValue, RawMidiPattern,
-    UnitValue,
+    DetailedSourceCharacter, DiscreteIncrement, Fraction, MidiSourceScript, MidiSourceValue,
+    RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -389,7 +389,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         key_number: kn,
                         ..
                     } if matches(ch, *channel) && matches(kn, *key_number) => {
-                        Some(abs(UnitValue::MIN))
+                        Some(abs(MIN_U7_FRACTION))
                     }
                     _ => None,
                 },
@@ -509,11 +509,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 _ => None,
             },
             S::ClockTransport { message } => match value {
-                Plain(msg) if msg.r#type() == (*message).into() => Some(abs(UnitValue::MAX)),
+                Plain(msg) if msg.r#type() == (*message).into() => Some(abs(Fraction::new_max(1))),
                 _ => None,
             },
             S::ClockTempo => match value {
-                Tempo(bpm) => Some(abs(bpm.to_unit_value())),
+                Tempo(bpm) => Some(ControlValue::Absolute(bpm.to_unit_value())),
                 _ => None,
             },
             // TODO-low Support control for raw/sys-ex. Not difficult because we have the pattern
@@ -812,13 +812,13 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 if value < 0 {
                     return Err("negative values not supported");
                 }
-                UnitValue::try_from_discrete(value as u16, pattern.max_discrete_value())?
+                Fraction::new(value as _, pattern.max_discrete_value() as _)
             }
             ClockTempo | ClockTransport { .. } | Script { .. } => {
                 return Err("not supported");
             }
         };
-        Ok(unit_value)
+        Ok(unit_value.into())
     }
 }
 
@@ -839,7 +839,7 @@ fn calc_control_value_from_7_bit_cc(
         Encoder1 => rel(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),
         Encoder2 => rel(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
         Encoder3 => rel(DiscreteIncrement::from_encoder_3_value(cc_control_value)?),
-        ToggleButton => abs(UnitValue::MAX),
+        ToggleButton => abs(MAX_U7_FRACTION),
     };
     Ok(result)
 }
@@ -861,25 +861,29 @@ fn calc_control_value_from_14_bit_cc(
             };
             rel(increment)
         }
-        ToggleButton => abs(UnitValue::MAX),
+        ToggleButton => abs(MAX_U14_FRACTION),
     };
     Ok(result)
 }
 
-fn normalize_7_bit<T: Into<u8>>(value: T) -> UnitValue {
-    UnitValue::new(value.into() as f64 / U7::MAX.get() as f64)
+const MIN_U7_FRACTION: Fraction = Fraction::new_min(U7::MAX.get() as _);
+const MAX_U7_FRACTION: Fraction = Fraction::new_max(U7::MAX.get() as _);
+const MAX_U14_FRACTION: Fraction = Fraction::new_max(U14::MAX.get() as _);
+
+fn normalize_7_bit<T: Into<u32>>(value: T) -> Fraction {
+    Fraction::new(value.into(), U7::MAX.into())
 }
 
-fn normalize_14_bit(value: U14) -> UnitValue {
-    UnitValue::new(value.get() as f64 / U14::MAX.get() as f64)
+fn normalize_14_bit(value: U14) -> Fraction {
+    Fraction::new(value.into(), U14::MAX.into())
 }
 
 /// See denormalize_14_bit_centered for an explanation
-fn normalize_14_bit_centered(value: U14) -> UnitValue {
+fn normalize_14_bit_centered(value: U14) -> Fraction {
     if value == U14::MAX {
-        return UnitValue::MAX;
+        return Fraction::new_max(U14::MAX.into());
     }
-    UnitValue::new(value.get() as f64 / (U14::MAX.get() + 1) as f64)
+    Fraction::new(value.into(), U14::MAX.get() as u32 + 1)
 }
 
 fn denormalize_7_bit<T: From<U7>>(value: UnitValue) -> T {
@@ -910,11 +914,11 @@ fn denormalize_14_bit_centered<T: From<U14>>(value: UnitValue) -> T {
     unsafe { U14::new_unchecked(spread.min(16383)) }.into()
 }
 
-fn abs(value: UnitValue) -> ControlValue {
-    ControlValue::Absolute(value)
+const fn abs(value: Fraction) -> ControlValue {
+    ControlValue::AbsoluteDiscrete(value)
 }
 
-fn rel(increment: DiscreteIncrement) -> ControlValue {
+const fn rel(increment: DiscreteIncrement) -> ControlValue {
     ControlValue::Relative(increment)
 }
 
@@ -938,15 +942,27 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(0, 64, 127,))).unwrap(),
+            source
+                .control(&plain(note_on(0, 64, 127,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(1.0)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(0, 20, 0,))).unwrap(),
+            source
+                .control(&plain(note_on(0, 20, 0,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(note_off(0, 20, 100,))).unwrap(),
+            source
+                .control(&plain(note_off(0, 20, 100,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
@@ -991,7 +1007,11 @@ mod tests {
         // Then
         assert_eq!(source.control(&plain(note_on(0, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(4, 20, 0,))).unwrap(),
+            source
+                .control(&plain(note_on(4, 20, 0,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_eq!(source.control(&plain(note_off(15, 20, 100,))), None);
@@ -1008,11 +1028,19 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(0, 127, 55,))).unwrap(),
+            source
+                .control(&plain(note_on(0, 127, 55,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(1.0)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            source
+                .control(&plain(note_on(1, 0, 64,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
@@ -1057,7 +1085,11 @@ mod tests {
         // Then
         assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            source
+                .control(&plain(note_on(1, 0, 64,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
@@ -1086,12 +1118,16 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&plain(polyphonic_key_pressure(1, 14, 127,)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(1.0)
         );
         assert_abs_diff_eq!(
             source
                 .control(&plain(polyphonic_key_pressure(1, 16, 0,)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(0.0)
         );
@@ -1135,6 +1171,8 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&plain(polyphonic_key_pressure(1, 53, 127,)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(1.0)
         );
@@ -1165,7 +1203,11 @@ mod tests {
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(control_change(1, 64, 127,))).unwrap(),
+            source
+                .control(&plain(control_change(1, 64, 127,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(1.0)
         );
         assert_eq!(source.control(&plain(program_change(5, 64,))), None);
@@ -1256,11 +1298,19 @@ mod tests {
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(program_change(5, 0,))).unwrap(),
+            source
+                .control(&plain(program_change(5, 0,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(program_change(6, 127,))).unwrap(),
+            source
+                .control(&plain(program_change(6, 127,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(1.0)
         );
         assert_eq!(
@@ -1304,7 +1354,11 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(program_change(10, 0,))).unwrap(),
+            source
+                .control(&plain(program_change(10, 0,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_eq!(source.control(&plain(program_change(6, 127,))), None);
@@ -1327,11 +1381,19 @@ mod tests {
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(channel_pressure(5, 0,))).unwrap(),
+            source
+                .control(&plain(channel_pressure(5, 0,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(channel_pressure(6, 127,))).unwrap(),
+            source
+                .control(&plain(channel_pressure(6, 127,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(1.0)
         );
         assert_eq!(
@@ -1376,7 +1438,11 @@ mod tests {
         // Then
         assert_eq!(source.control(&plain(channel_pressure(5, 0,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(channel_pressure(15, 127,))).unwrap(),
+            source
+                .control(&plain(channel_pressure(15, 127,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(1.0)
         );
         assert_eq!(
@@ -1406,26 +1472,42 @@ mod tests {
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(5, 0,))).unwrap(),
+            source
+                .control(&plain(pitch_bend_change(5, 0,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(6, 4096,))).unwrap(),
+            source
+                .control(&plain(pitch_bend_change(6, 4096,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.25)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(6, 8192,))).unwrap(),
+            source
+                .control(&plain(pitch_bend_change(6, 8192,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.5)
         );
         assert_abs_diff_eq!(
             source
                 .control(&plain(pitch_bend_change(6, 12288,)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(0.75)
         );
         assert_abs_diff_eq!(
             source
                 .control(&plain(pitch_bend_change(6, 16383,)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(1.0)
         );
@@ -1470,7 +1552,11 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(3, 0,))).unwrap(),
+            source
+                .control(&plain(pitch_bend_change(3, 0,)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.0)
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
@@ -1515,12 +1601,16 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&cc(control_change_14_bit(1, 10, 4096)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(0.2500152597204419)
         );
         assert_abs_diff_eq!(
             source
                 .control(&cc(control_change_14_bit(1, 10, 16383)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(1.0)
         );
@@ -1572,6 +1662,8 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&cc(control_change_14_bit(1, 7, 16383)))
+                .unwrap()
+                .normalized()
                 .unwrap(),
             abs(1.0)
         );
@@ -1641,15 +1733,37 @@ mod tests {
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
         assert_abs_diff_eq!(
-            source.control(&pn(rpn_14_bit(1, 520, 2048))).unwrap(),
+            source
+                .control(&pn(rpn_14_bit(1, 520, 2048)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(0.12500762986022096)
         );
         assert_abs_diff_eq!(
-            source.control(&pn(nrpn_14_bit(1, 520, 16383))).unwrap(),
+            source
+                .control(&pn(nrpn_14_bit(1, 520, 16383)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
             abs(1.0)
         );
-        assert_abs_diff_eq!(source.control(&pn(rpn(1, 342, 0))).unwrap(), abs(0.0));
-        assert_abs_diff_eq!(source.control(&pn(nrpn(1, 520, 127))).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(1, 342, 0)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
+            abs(0.0)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(nrpn(1, 520, 127)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
+            abs(1.0)
+        );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
@@ -1679,7 +1793,14 @@ mod tests {
             None
         );
         assert_eq!(source.control(&pn(rpn_14_bit(7, 3000, 11253))), None);
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 0)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
+            abs(0.0)
+        );
         assert_eq!(source.control(&pn(nrpn_14_bit(7, 3000, 45))), None);
         assert_eq!(source.control(&pn(nrpn(7, 3000, 24))), None);
         assert_eq!(
@@ -1721,9 +1842,30 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), abs(1.0));
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 50))).unwrap(), abs(1.0));
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 127))).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 0)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 50)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 127)))
+                .unwrap()
+                .normalized()
+                .unwrap(),
+            abs(1.0)
+        );
     }
 
     #[test]
@@ -1851,7 +1993,14 @@ mod tests {
         assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(r#continue())), Some(abs(1.0)));
+        assert_eq!(
+            source
+                .control(&plain(r#continue()))
+                .unwrap()
+                .normalized()
+                .unwrap(),
+            abs(1.0)
+        );
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
