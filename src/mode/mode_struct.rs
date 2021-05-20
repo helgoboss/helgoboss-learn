@@ -77,6 +77,8 @@ pub struct Mode<T: Transformation> {
 pub enum AbsoluteMode {
     #[display(fmt = "Normal")]
     Normal = 0,
+    #[display(fmt = "Discrete")]
+    Discrete = 3,
     #[display(fmt = "Incremental buttons")]
     IncrementalButtons = 1,
     #[display(fmt = "Toggle buttons")]
@@ -230,7 +232,7 @@ impl<T: Transformation> Mode<T> {
         };
         use AbsoluteMode::*;
         match self.absolute_mode {
-            Normal => Some(
+            Normal | Discrete => Some(
                 self.control_absolute_normal(v, target, context)?
                     .map(ControlValue::AbsoluteContinuous),
             ),

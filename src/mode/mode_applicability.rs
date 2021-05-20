@@ -185,7 +185,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 match input.source_character {
                     MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
                         match input.absolute_mode {
-                            crate::AbsoluteMode::Normal => MakesSense(
+                            crate::AbsoluteMode::Normal | crate::AbsoluteMode::Discrete => MakesSense(
                                 "If enabled, switches the target off when pressed and on when released.",
                             ),
                             crate::AbsoluteMode::IncrementalButtons => MakesSense(
@@ -628,7 +628,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 match input.source_character {
                     MomentaryOnOffButton | PressOnlyButton | MomentaryVelocitySensitiveButton => {
                         match m {
-                            Normal => {
+                            Normal | Discrete => {
                                 if input.source_character == MomentaryVelocitySensitiveButton {
                                     MakesSense(
                                         "When pressing the button, sets the target value to a velocity-dependent value. Sets it back to minimum when releasing it.",
