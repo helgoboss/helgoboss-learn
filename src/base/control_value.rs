@@ -1,4 +1,5 @@
-use crate::{DiscreteIncrement, Fraction, UnitValue};
+use crate::{DiscreteIncrement, Fraction, Interval, UnitValue};
+use std::ops::Deref;
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -62,5 +63,39 @@ impl ControlValue {
             ControlValue::Relative(_) => Err("relative value can't be normalized"),
             ControlValue::AbsoluteDiscrete(v) => Ok(ControlValue::AbsoluteContinuous(v.into())),
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum AbsoluteValue {
+    Continuous(UnitValue),
+    Discrete(Fraction),
+}
+
+impl AbsoluteValue {
+    // TODO-high Maybe remove
+    pub fn to_unit_value(self) -> UnitValue {
+        match self {
+            AbsoluteValue::Continuous(v) => v,
+            AbsoluteValue::Discrete(v) => v.to_unit_value(),
+        }
+    }
+}
+
+// TODO-high Remove!!!
+impl Deref for AbsoluteValue {
+    type Target = UnitValue;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            AbsoluteValue::Continuous(v) => &v,
+            AbsoluteValue::Discrete(f) => &f.unit_value,
+        }
+    }
+}
+
+impl Default for AbsoluteValue {
+    fn default() -> Self {
+        Self::Continuous(Default::default())
     }
 }

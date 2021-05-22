@@ -1,4 +1,4 @@
-use crate::{FireMode, Interval, UnitValue};
+use crate::{AbsoluteValue, FireMode, Interval, UnitValue};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
@@ -15,14 +15,14 @@ pub struct PressDurationProcessor {
 #[derive(Clone, Debug)]
 struct ButtonPress {
     time: Instant,
-    value: UnitValue,
+    value: AbsoluteValue,
     time_of_last_turbo_fire: Option<Instant>,
     count: u32,
     released: bool,
 }
 
 impl ButtonPress {
-    pub fn new(value: UnitValue) -> Self {
+    pub fn new(value: AbsoluteValue) -> Self {
         Self {
             time: Instant::now(),
             value,
@@ -72,7 +72,10 @@ impl PressDurationProcessor {
         }
     }
 
-    pub fn process_press_or_release(&mut self, control_value: UnitValue) -> Option<UnitValue> {
+    pub fn process_press_or_release(
+        &mut self,
+        control_value: AbsoluteValue,
+    ) -> Option<AbsoluteValue> {
         let min = self.interval.min_val();
         let max = self.interval.max_val();
         match self.fire_mode {
@@ -208,7 +211,7 @@ impl PressDurationProcessor {
 
     /// Should be called regularly if `wants_to_be_polled()` returned `true` at initialization
     /// time.
-    pub fn poll(&mut self) -> Option<UnitValue> {
+    pub fn poll(&mut self) -> Option<AbsoluteValue> {
         match self.fire_mode {
             FireMode::WhenButtonReleased | FireMode::OnDoublePress => None,
             FireMode::AfterTimeout => {

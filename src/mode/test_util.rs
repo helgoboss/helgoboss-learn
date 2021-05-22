@@ -1,14 +1,14 @@
-use crate::{ControlType, Target, Transformation, UnitValue};
+use crate::{AbsoluteValue, ControlType, Target, Transformation, UnitValue};
 
 pub struct TestTarget {
-    pub current_value: Option<UnitValue>,
+    pub current_value: Option<AbsoluteValue>,
     pub control_type: ControlType,
 }
 
 impl<'a> Target<'a> for TestTarget {
     type Context = ();
 
-    fn current_value(&self, _: ()) -> Option<UnitValue> {
+    fn current_value(&self, _: ()) -> Option<AbsoluteValue> {
         self.current_value
     }
 
