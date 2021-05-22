@@ -116,6 +116,15 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
             Interval::new(Default::default(), Default::default())
         }
     }
+
+    pub fn union(&self, other: &Interval<T>) -> Interval<T>
+    where
+        T: Default,
+    {
+        let lowest_min = partial_min_max::min(self.min, other.min);
+        let greatest_max = partial_min_max::max(self.max, other.max);
+        Interval::new(lowest_min, greatest_max)
+    }
 }
 
 #[derive(Eq, PartialEq, Copy, Clone, Debug)]

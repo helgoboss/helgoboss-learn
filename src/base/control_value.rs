@@ -134,7 +134,7 @@ impl AbsoluteValue {
     ///
     /// - Continuous: Scales to unit interval (= scales up = decreases resolution).
     /// - Discrete: Uses the interval minimum as zero.
-    pub fn apply_source_interval(
+    pub fn normalize(
         self,
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
@@ -163,6 +163,42 @@ impl AbsoluteValue {
                         min_is_max_behavior,
                         BASE_EPSILON,
                     );
+                    Continuous(scaled)
+                }
+            }
+        }
+    }
+
+    /// Denormalizes this value with regard to the given interval.
+    ///
+    /// This value should be normalized!
+    ///
+    /// - Continuous: Scales from unit interval (= scales down = increases resolution).
+    /// - Discrete: Adds the interval minimum.
+    pub fn denormalize(
+        self,
+        continuous_interval: &Interval<UnitValue>,
+        discrete_interval: &Interval<u32>,
+        is_discrete_mode: bool,
+    ) -> Self {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(v) => {
+                let scaled = v.denormalize(continuous_interval);
+                Continuous(scaled)
+            }
+            Discrete(v) => {
+                if is_discrete_mode {
+                    // Denormalize without scaling.
+                    let unrooted = v.denormalize(discrete_interval);
+                    Discrete(unrooted)
+                } else if continuous_interval.is_full() {
+                    // Retain discreteness of value even in non-discrete mode if this is a no-op!
+                    Discrete(v)
+                } else {
+                    // Use scaling if we are in non-discrete mode, thereby destroying the
+                    // value's discreteness.
+                    let scaled = v.to_unit_value().denormalize(continuous_interval);
                     Continuous(scaled)
                 }
             }
@@ -240,5 +276,76 @@ impl Deref for AbsoluteValue {
 impl Default for AbsoluteValue {
     fn default() -> Self {
         Self::Continuous(Default::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::*;
+
+    #[test]
+    fn normalize_comparison() {
+        // Given
+        let continuous = AbsoluteValue::Continuous(UnitValue::new(105.0 / 127.0));
+        let continuous_interval =
+            Interval::new(UnitValue::new(100.0 / 127.0), UnitValue::new(120.0 / 127.0));
+        let discrete = AbsoluteValue::Discrete(Fraction::new(105, 127));
+        let discrete_interval = Interval::new(100, 120);
+        // When
+        let continuous_normalized = continuous.normalize(
+            &continuous_interval,
+            &discrete_interval,
+            MinIsMaxBehavior::PreferZero,
+            true,
+        );
+        let discrete_normalized = discrete.normalize(
+            &continuous_interval,
+            &discrete_interval,
+            MinIsMaxBehavior::PreferZero,
+            true,
+        );
+        // Then
+        assert_abs_diff_eq!(
+            continuous_normalized.to_unit_value().get(),
+            0.25,
+            epsilon = BASE_EPSILON
+        );
+        assert_eq!(
+            discrete_normalized,
+            AbsoluteValue::Discrete(Fraction::new(5, 20))
+        );
+        assert_abs_diff_eq!(
+            discrete_normalized.to_unit_value().get(),
+            0.25,
+            epsilon = BASE_EPSILON
+        );
+    }
+
+    #[test]
+    fn denormalize_comparison() {
+        // Given
+        let continuous = AbsoluteValue::Continuous(UnitValue::new(105.0 / 127.0));
+        let continuous_interval = Interval::new(
+            UnitValue::new(100.0 / 1000.0),
+            UnitValue::new(500.0 / 1000.0),
+        );
+        let discrete = AbsoluteValue::Discrete(Fraction::new(105, 127));
+        let discrete_interval = Interval::new(100, 500);
+        // When
+        let continuous_normalized =
+            continuous.denormalize(&continuous_interval, &discrete_interval, true);
+        let discrete_normalized =
+            discrete.denormalize(&continuous_interval, &discrete_interval, true);
+        // Then
+        assert_abs_diff_eq!(
+            continuous_normalized.to_unit_value().get(),
+            0.4307086614173229,
+            epsilon = BASE_EPSILON
+        );
+        assert_eq!(
+            discrete_normalized,
+            AbsoluteValue::Discrete(Fraction::new(205, 500))
+        );
     }
 }

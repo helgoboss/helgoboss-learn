@@ -247,9 +247,12 @@ impl<T: Transformation> Mode<T> {
                 self.control_absolute_normal_or_discrete(v, target, context)?
                     .map(ControlValue::from_absolute),
             ),
-            IncrementalButtons => {
-                self.control_absolute_incremental_buttons(v, target, context, options)
-            }
+            IncrementalButtons => self.control_absolute_incremental_buttons(
+                v.to_unit_value(),
+                target,
+                context,
+                options,
+            ),
             ToggleButtons => Some(
                 self.control_absolute_toggle_buttons(v, target, context)?
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
@@ -334,17 +337,15 @@ impl<T: Transformation> Mode<T> {
     /// "Incremental buttons" mode (convert absolute button presses to relative increments)
     fn control_absolute_incremental_buttons<'a, C: Copy>(
         &mut self,
-        control_value: AbsoluteValue,
+        control_value: UnitValue,
         target: &impl Target<'a, Context = C>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         if control_value.is_zero()
-            || !control_value
-                .matches_tolerant(
-                    &self.source_value_interval,
-                    &self.discrete_source_value_interval,
-                )
+            || !self
+                .source_value_interval
+                .value_matches_tolerant(control_value, BASE_EPSILON)
                 .matches()
         {
             return None;
@@ -555,7 +556,7 @@ impl<T: Transformation> Mode<T> {
     ) -> AbsoluteValue {
         // 1. Apply source interval
         let is_discrete_mode = self.absolute_mode == AbsoluteMode::Discrete;
-        let mut v = control_value.apply_source_interval(
+        let mut v = control_value.normalize(
             &self.source_value_interval,
             &self.discrete_source_value_interval,
             min_is_max_behavior,
@@ -572,12 +573,16 @@ impl<T: Transformation> Mode<T> {
             v = v.inverse();
         };
         // 4. Apply target interval
-        let mut v = v.to_unit_value().denormalize(&self.target_value_interval);
+        v = v.denormalize(
+            &self.target_value_interval,
+            &self.discrete_target_value_interval,
+            is_discrete_mode,
+        );
         // 5. Apply rounding
-        v = if self.round_target_value {
-            round_to_nearest_discrete_value(control_type, v)
+        let mut v = if self.round_target_value {
+            round_to_nearest_discrete_value(control_type, v.to_unit_value())
         } else {
-            v
+            v.to_unit_value()
         };
         AbsoluteValue::Continuous(v)
     }
@@ -818,7 +823,7 @@ impl<T: Transformation> Mode<T> {
 
     fn convert_to_discrete_increment(
         &mut self,
-        control_value: AbsoluteValue,
+        control_value: UnitValue,
     ) -> Option<DiscreteIncrement> {
         let factor = control_value
             .normalize(

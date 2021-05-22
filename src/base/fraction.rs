@@ -88,11 +88,18 @@ impl Fraction {
         interval: &Interval<u32>,
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> Self {
-        use IntervalMatchResult::*;
         let new_max = self.interval().intersect(interval).span();
+        use IntervalMatchResult::*;
         match interval.value_matches(self.actual) {
             Between => {
-                let rooted_actual = self.actual - interval.min_val();
+                let unrooted_actual = self.actual;
+                let unrooted_max = self.max;
+                // actual
+                let rooted_actual = unrooted_actual - interval.min_val();
+                // max
+                // let min_span = unrooted_max - interval.min_val();
+                // let rooted_max = min_span;
+                // fraction
                 Fraction::new(rooted_actual, new_max)
             }
             MinAndMax => {
@@ -105,6 +112,20 @@ impl Fraction {
             Min | Lower => Fraction::new_min(new_max),
             Max | Greater => Fraction::new_max(new_max),
         }
+    }
+
+    /// This value is supposed to be normalized (0-rooted).
+    pub fn denormalize(&self, interval: &Interval<u32>) -> Self {
+        let rooted_actual = self.actual;
+        let rooted_max = self.max;
+        // actual
+        let unrooted_actual = interval.min_val() + rooted_actual;
+        let unrooted_actual = std::cmp::min(unrooted_actual, interval.max_val());
+        // max
+        let min_span = std::cmp::min(rooted_max, interval.span());
+        let unrooted_max = interval.min_val() + min_span;
+        // fraction
+        Fraction::new(unrooted_actual, unrooted_max)
     }
 }
 
@@ -179,6 +200,54 @@ mod tests {
         assert_eq!(
             Fraction::new(127, 20).normalize(&source_interval, MinIsMaxBehavior::PreferZero),
             Fraction::new(10, 10)
+        );
+    }
+
+    #[test]
+    fn denormalize_subset() {
+        // Given
+        let source_interval = Interval::new(100, 120);
+        // When
+        // Then
+        assert_eq!(
+            Fraction::new(5, 127).denormalize(&source_interval),
+            Fraction::new(105, 120)
+        );
+        assert_eq!(
+            Fraction::new(0, 127).denormalize(&source_interval),
+            Fraction::new(100, 120)
+        );
+        assert_eq!(
+            Fraction::new(20, 127).denormalize(&source_interval),
+            Fraction::new(120, 120)
+        );
+        assert_eq!(
+            Fraction::new(30, 127).denormalize(&source_interval),
+            Fraction::new(120, 120)
+        );
+    }
+
+    #[test]
+    fn denormalize_intersection() {
+        // Given
+        let source_interval = Interval::new(10, 100);
+        // When
+        // Then
+        assert_eq!(
+            Fraction::new(0, 20).denormalize(&source_interval),
+            Fraction::new(10, 100)
+        );
+        assert_eq!(
+            Fraction::new(5, 20).denormalize(&source_interval),
+            Fraction::new(15, 100)
+        );
+        assert_eq!(
+            Fraction::new(10, 20).denormalize(&source_interval),
+            Fraction::new(20, 100)
+        );
+        assert_eq!(
+            Fraction::new(15, 20).denormalize(&source_interval),
+            Fraction::new(25, 100)
         );
     }
 }
