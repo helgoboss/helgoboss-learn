@@ -546,10 +546,6 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
-    fn enforce_scaling(&self) -> bool {
-        self.absolute_mode != AbsoluteMode::Discrete
-    }
-
     fn pep_up_control_value(
         &self,
         control_value: AbsoluteValue,
@@ -558,26 +554,25 @@ impl<T: Transformation> Mode<T> {
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> AbsoluteValue {
         // 1. Apply source interval
+        let is_discrete_mode = self.absolute_mode == AbsoluteMode::Discrete;
         let mut v = control_value.apply_source_interval(
             &self.source_value_interval,
             &self.discrete_source_value_interval,
             min_is_max_behavior,
-            self.enforce_scaling(),
+            is_discrete_mode,
         );
         // 2. Apply transformation
-        let mut v = self
-            .control_transformation
-            .as_ref()
-            .and_then(|t| {
-                t.transform(
-                    v.to_unit_value(),
-                    current_target_value.unwrap_or_default().to_unit_value(),
-                )
-                .ok()
-            })
-            .unwrap_or(v.to_unit_value());
+        if let Some(transformation) = self.control_transformation.as_ref() {
+            if let Ok(res) = v.transform(transformation, current_target_value, is_discrete_mode) {
+                v = res;
+            }
+        };
         // 3. Apply reverse
-        v = if self.reverse { v.inverse() } else { v };
+        let mut v = if self.reverse {
+            v.inverse()
+        } else {
+            v.to_unit_value()
+        };
         // 4. Apply target interval
         v = v.denormalize(&self.target_value_interval);
         // 5. Apply rounding
@@ -1554,7 +1549,7 @@ mod tests {
         fn transformation_ok() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                control_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
+                control_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1817,7 +1812,7 @@ mod tests {
         fn feedback_transformation() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                feedback_transformation: Some(TestTransformation::new(|input| Ok(input.inverse()))),
+                feedback_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
                 ..Default::default()
             };
             // When

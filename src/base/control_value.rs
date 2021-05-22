@@ -1,6 +1,6 @@
 use crate::{
-    DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue,
-    BASE_EPSILON,
+    DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior, Transformation,
+    UnitValue, BASE_EPSILON,
 };
 use std::ops::Deref;
 
@@ -139,8 +139,8 @@ impl AbsoluteValue {
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
         min_is_max_behavior: MinIsMaxBehavior,
-        enforce_scaling: bool,
-    ) -> AbsoluteValue {
+        is_discrete_mode: bool,
+    ) -> Self {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => {
@@ -148,16 +148,69 @@ impl AbsoluteValue {
                 Continuous(scaled)
             }
             Discrete(v) => {
-                if enforce_scaling {
+                if is_discrete_mode {
+                    // Normalize without scaling.
+                    let rooted = v.normalize(discrete_interval, min_is_max_behavior);
+                    Discrete(rooted)
+                } else if continuous_interval.is_full() {
+                    // Retain discreteness of value even in non-discrete mode if this is a no-op!
+                    Discrete(v)
+                } else {
+                    // Use scaling if we are in non-discrete mode, thereby destroying the
+                    // value's discreteness.
                     let scaled = v.to_unit_value().normalize(
                         continuous_interval,
                         min_is_max_behavior,
                         BASE_EPSILON,
                     );
                     Continuous(scaled)
-                } else {
-                    let rooted = v.normalize(discrete_interval, min_is_max_behavior);
-                    Discrete(rooted)
+                }
+            }
+        }
+    }
+
+    pub fn transform<T: Transformation>(
+        self,
+        transformation: &T,
+        current_target_value: Option<AbsoluteValue>,
+        is_discrete_mode: bool,
+    ) -> Result<Self, &'static str> {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(v) => {
+                // Input value is continuous.
+                let current_target_value = current_target_value
+                    .map(|t| t.to_unit_value())
+                    .unwrap_or_default();
+                let res = transformation.transform_continuous(v, current_target_value)?;
+                Ok(Continuous(res))
+            }
+            Discrete(v) => {
+                // Input value is discrete.
+                let current_target_value = current_target_value
+                    .unwrap_or_else(|| AbsoluteValue::Discrete(v.with_actual(0)));
+                match current_target_value {
+                    Continuous(t) => {
+                        // Target value is continuous.
+                        let res = transformation.transform_continuous(v.to_unit_value(), t)?;
+                        Ok(Continuous(res))
+                    }
+                    Discrete(t) => {
+                        // Target value is also discrete.
+                        if is_discrete_mode {
+                            // Discrete mode.
+                            // Transform using non-normalized rounded floating point values.
+                            let res = transformation.transform_discrete(v, t)?;
+                            Ok(Discrete(res))
+                        } else {
+                            // Continuous mode.
+                            // Transform using normalized floating point values, thereby destroying
+                            // the value's discreteness.
+                            let res = transformation
+                                .transform_continuous(v.to_unit_value(), t.to_unit_value())?;
+                            Ok(Continuous(res))
+                        }
+                    }
                 }
             }
         }

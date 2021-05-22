@@ -54,7 +54,7 @@ pub(crate) fn feedback<T: Transformation>(
     // 2. Apply transformation
     v = transformation
         .as_ref()
-        .and_then(|t| t.transform(v, v).ok())
+        .and_then(|t| t.transform_continuous(v, v).ok())
         .unwrap_or(v);
     // 1. Apply source interval
     Some(v.denormalize(source_value_interval))

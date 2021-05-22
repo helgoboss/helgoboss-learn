@@ -18,12 +18,12 @@ impl<'a> Target<'a> for TestTarget {
 }
 
 pub struct TestTransformation {
-    transformer: Box<dyn Fn(UnitValue) -> Result<UnitValue, &'static str>>,
+    transformer: Box<dyn Fn(f64) -> Result<f64, &'static str>>,
 }
 
 impl TestTransformation {
     pub fn new(
-        transformer: impl Fn(UnitValue) -> Result<UnitValue, &'static str> + 'static,
+        transformer: impl Fn(f64) -> Result<f64, &'static str> + 'static,
     ) -> TestTransformation {
         Self {
             transformer: Box::new(transformer),
@@ -32,7 +32,7 @@ impl TestTransformation {
 }
 
 impl Transformation for TestTransformation {
-    fn transform(&self, input_value: UnitValue, _: UnitValue) -> Result<UnitValue, &'static str> {
+    fn transform(&self, input_value: f64, _: f64) -> Result<f64, &'static str> {
         (self.transformer)(input_value)
     }
 }
