@@ -88,19 +88,19 @@ impl Fraction {
         interval: &Interval<u32>,
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> Self {
-        let new_max = self.interval().intersect(interval).span();
+        let rooted_max = {
+            let unrooted_max = self.max;
+            let min_span = unrooted_max - interval.min_val();
+            std::cmp::min(min_span, interval.span())
+        };
         use IntervalMatchResult::*;
         match interval.value_matches(self.actual) {
             Between => {
                 let unrooted_actual = self.actual;
-                let unrooted_max = self.max;
                 // actual
                 let rooted_actual = unrooted_actual - interval.min_val();
-                // max
-                // let min_span = unrooted_max - interval.min_val();
-                // let rooted_max = min_span;
                 // fraction
-                Fraction::new(rooted_actual, new_max)
+                Fraction::new(rooted_actual, rooted_max)
             }
             MinAndMax => {
                 use MinIsMaxBehavior::*;
@@ -109,8 +109,8 @@ impl Fraction {
                     PreferOne => Self::new_max(1),
                 }
             }
-            Min | Lower => Fraction::new_min(new_max),
-            Max | Greater => Fraction::new_max(new_max),
+            Min | Lower => Fraction::new_min(rooted_max),
+            Max | Greater => Fraction::new_max(rooted_max),
         }
     }
 
@@ -235,19 +235,19 @@ mod tests {
         // Then
         assert_eq!(
             Fraction::new(0, 20).denormalize(&source_interval),
-            Fraction::new(10, 100)
+            Fraction::new(10, 30)
         );
         assert_eq!(
             Fraction::new(5, 20).denormalize(&source_interval),
-            Fraction::new(15, 100)
+            Fraction::new(15, 30)
         );
         assert_eq!(
             Fraction::new(10, 20).denormalize(&source_interval),
-            Fraction::new(20, 100)
+            Fraction::new(20, 30)
         );
         assert_eq!(
             Fraction::new(15, 20).denormalize(&source_interval),
-            Fraction::new(25, 100)
+            Fraction::new(25, 30)
         );
     }
 }
