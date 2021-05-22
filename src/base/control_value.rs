@@ -254,11 +254,11 @@ impl AbsoluteValue {
         }
     }
 
-    pub fn inverse(self) -> Self {
+    pub fn inverse(self, discrete_max: u32) -> Self {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => Self::Continuous(v.inverse()),
-            Discrete(f) => Self::Discrete(f.inverse()),
+            Discrete(f) => Self::Discrete(f.with_max(discrete_max).inverse()),
         }
     }
 

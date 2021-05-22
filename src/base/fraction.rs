@@ -53,6 +53,10 @@ impl Fraction {
         Self::new(actual, self.max)
     }
 
+    pub fn with_max(&self, max: u32) -> Self {
+        Self::new(self.actual, max)
+    }
+
     pub fn inverse(&self) -> Self {
         Self {
             actual: self.max - self.actual_clamped(),
