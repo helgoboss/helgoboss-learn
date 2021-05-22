@@ -244,8 +244,8 @@ impl<T: Transformation> Mode<T> {
         use AbsoluteMode::*;
         match self.absolute_mode {
             Normal | Discrete => Some(
-                self.control_absolute_normal(v, target, context)?
-                    .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
+                self.control_absolute_normal_or_discrete(v, target, context)?
+                    .map(ControlValue::from_absolute),
             ),
             IncrementalButtons => {
                 self.control_absolute_incremental_buttons(v, target, context, options)
@@ -259,7 +259,7 @@ impl<T: Transformation> Mode<T> {
 
     /// Processes the given control value in absolute mode and maybe returns an appropriate target
     /// value.
-    fn control_absolute_normal<'a, C: Copy>(
+    fn control_absolute_normal_or_discrete<'a, C: Copy>(
         &mut self,
         control_value: AbsoluteValue,
         target: &impl Target<'a, Context = C>,
@@ -275,8 +275,11 @@ impl<T: Transformation> Mode<T> {
             _ => {}
         };
         let (source_bound_value, min_is_max_behavior) = if control_value
-            .is_within_interval_tolerant(&self.source_value_interval, BASE_EPSILON)
-        {
+            .is_within_interval_tolerant(
+                &self.source_value_interval,
+                &self.discrete_source_value_interval,
+                BASE_EPSILON,
+            ) {
             // Control value is within source value interval
             (control_value.to_unit_value(), MinIsMaxBehavior::PreferOne)
         } else {
@@ -329,7 +332,11 @@ impl<T: Transformation> Mode<T> {
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         if control_value.is_zero()
-            || !control_value.is_within_interval_tolerant(&self.source_value_interval, BASE_EPSILON)
+            || !control_value.is_within_interval_tolerant(
+                &self.source_value_interval,
+                &self.discrete_source_value_interval,
+                BASE_EPSILON,
+            )
         {
             return None;
         }
@@ -450,7 +457,11 @@ impl<T: Transformation> Mode<T> {
         };
         self.current_absolute_value = abs_input_value;
         // Do the usual absolute processing
-        self.control_absolute_normal(AbsoluteValue::Continuous(abs_input_value), target, context)
+        self.control_absolute_normal_or_discrete(
+            AbsoluteValue::Continuous(abs_input_value),
+            target,
+            context,
+        )
     }
 
     // Classic relative mode: We are getting encoder increments from the source.

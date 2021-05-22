@@ -32,6 +32,13 @@ impl ControlValue {
         ControlValue::Relative(DiscreteIncrement::new(increment))
     }
 
+    pub fn from_absolute(value: AbsoluteValue) -> ControlValue {
+        match value {
+            AbsoluteValue::Continuous(v) => Self::AbsoluteContinuous(v),
+            AbsoluteValue::Discrete(f) => Self::AbsoluteDiscrete(f),
+        }
+    }
+
     /// Extracts the unit value if this is an absolute control value.
     pub fn as_unit_value(self) -> Result<UnitValue, &'static str> {
         match self {
@@ -78,6 +85,21 @@ impl AbsoluteValue {
         match self {
             AbsoluteValue::Continuous(v) => v,
             AbsoluteValue::Discrete(v) => v.to_unit_value(),
+        }
+    }
+
+    /// Tests if this value is within the given interval.
+    pub fn is_within_interval_tolerant(
+        &self,
+        continuous_interval: &Interval<UnitValue>,
+        discrete_interval: &Interval<u32>,
+        epsilon: f64,
+    ) -> bool {
+        match self {
+            AbsoluteValue::Continuous(v) => {
+                v.is_within_interval_tolerant(continuous_interval, epsilon)
+            }
+            AbsoluteValue::Discrete(v) => todo!(),
         }
     }
 }
