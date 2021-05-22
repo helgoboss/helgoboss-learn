@@ -57,5 +57,5 @@ pub(crate) fn feedback<T: Transformation>(
         .and_then(|t| t.transform(v, v).ok())
         .unwrap_or(v);
     // 1. Apply source interval
-    Some(v.map_from_unit_interval_to(source_value_interval))
+    Some(v.denormalize(source_value_interval))
 }

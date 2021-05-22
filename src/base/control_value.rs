@@ -1,4 +1,7 @@
-use crate::{DiscreteIncrement, Fraction, Interval, UnitValue};
+use crate::{
+    DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue,
+    BASE_EPSILON,
+};
 use std::ops::Deref;
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
@@ -88,18 +91,75 @@ impl AbsoluteValue {
         }
     }
 
-    /// Tests if this value is within the given interval.
-    pub fn is_within_interval_tolerant(
-        &self,
+    pub fn matches_tolerant(
+        self,
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
-        epsilon: f64,
-    ) -> bool {
+    ) -> IntervalMatchResult {
         match self {
             AbsoluteValue::Continuous(v) => {
-                v.is_within_interval_tolerant(continuous_interval, epsilon)
+                continuous_interval.value_matches_tolerant(v, BASE_EPSILON)
             }
-            AbsoluteValue::Discrete(v) => todo!(),
+            AbsoluteValue::Discrete(v) => discrete_interval.value_matches(v.actual()),
+        }
+    }
+
+    pub fn select_appropriate_interval_min(
+        self,
+        continuous_interval: &Interval<UnitValue>,
+        discrete_interval: &Interval<u32>,
+    ) -> AbsoluteValue {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(_) => Continuous(continuous_interval.min_val()),
+            Discrete(v) => Discrete(v.with_actual(discrete_interval.min_val())),
+        }
+    }
+
+    pub fn select_appropriate_interval_max(
+        self,
+        continuous_interval: &Interval<UnitValue>,
+        discrete_interval: &Interval<u32>,
+    ) -> AbsoluteValue {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(_) => Continuous(continuous_interval.max_val()),
+            Discrete(v) => Discrete(v.with_actual(discrete_interval.max_val())),
+        }
+    }
+
+    /// Normalizes this value with regard to the given interval.
+    ///
+    /// This value should be in the given interval!
+    ///
+    /// - Continuous: Scales to unit interval (= scales up = decreases resolution).
+    /// - Discrete: Uses the interval minimum as zero.
+    pub fn apply_source_interval(
+        self,
+        continuous_interval: &Interval<UnitValue>,
+        discrete_interval: &Interval<u32>,
+        min_is_max_behavior: MinIsMaxBehavior,
+        enforce_scaling: bool,
+    ) -> AbsoluteValue {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(v) => {
+                let scaled = v.normalize(continuous_interval, min_is_max_behavior, BASE_EPSILON);
+                Continuous(scaled)
+            }
+            Discrete(v) => {
+                if enforce_scaling {
+                    let scaled = v.to_unit_value().normalize(
+                        continuous_interval,
+                        min_is_max_behavior,
+                        BASE_EPSILON,
+                    );
+                    Continuous(scaled)
+                } else {
+                    let rooted = v.normalize(discrete_interval, min_is_max_behavior);
+                    Discrete(rooted)
+                }
+            }
         }
     }
 }

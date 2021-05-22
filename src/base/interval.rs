@@ -48,6 +48,16 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     {
         let is_min = (self.min - value).abs() < epsilon;
         let is_max = (value - self.max).abs() < epsilon;
+        self.value_matches_internal(value, is_min, is_max)
+    }
+
+    pub fn value_matches(&self, value: T) -> IntervalMatchResult {
+        let is_min = value == self.min;
+        let is_max = value == self.max;
+        self.value_matches_internal(value, is_min, is_max)
+    }
+
+    fn value_matches_internal(&self, value: T, is_min: bool, is_max: bool) -> IntervalMatchResult {
         if is_min && is_max {
             IntervalMatchResult::MinAndMax
         } else if is_min {
@@ -92,8 +102,23 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     pub fn span(&self) -> T::Output {
         self.max - self.min
     }
+
+    /// If there's no intersection, a zero interval (with default values) will be returned.
+    pub fn intersect(&self, other: &Interval<T>) -> Interval<T>
+    where
+        T: Default,
+    {
+        let greatest_min = partial_min_max::max(self.min, other.min);
+        let lowest_max = partial_min_max::min(self.max, other.max);
+        if greatest_min <= lowest_max {
+            Interval::new(greatest_min, lowest_max)
+        } else {
+            Interval::new(Default::default(), Default::default())
+        }
+    }
 }
 
+#[derive(Eq, PartialEq, Copy, Clone, Debug)]
 pub enum IntervalMatchResult {
     Between,
     Min,
@@ -101,4 +126,14 @@ pub enum IntervalMatchResult {
     MinAndMax,
     Lower,
     Greater,
+}
+
+impl IntervalMatchResult {
+    pub fn matches(self) -> bool {
+        use IntervalMatchResult::*;
+        match self {
+            Between | Min | Max | MinAndMax => true,
+            Lower | Greater => false,
+        }
+    }
 }

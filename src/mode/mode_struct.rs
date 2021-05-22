@@ -1,9 +1,9 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     mode::feedback_util, negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue,
-    DiscreteIncrement, DiscreteValue, EncoderUsage, Interval, MinIsMaxBehavior, OutOfRangeBehavior,
-    PressDurationProcessor, TakeoverMode, Target, Transformation, UnitIncrement, UnitValue,
-    BASE_EPSILON,
+    DiscreteIncrement, DiscreteValue, EncoderUsage, Interval, IntervalMatchResult,
+    MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target,
+    Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -274,33 +274,41 @@ impl<T: Transformation> Mode<T> {
             ButtonUsage::ReleaseOnly if !control_value.is_zero() => return None,
             _ => {}
         };
-        let (source_bound_value, min_is_max_behavior) = if control_value
-            .is_within_interval_tolerant(
-                &self.source_value_interval,
-                &self.discrete_source_value_interval,
-                BASE_EPSILON,
-            ) {
+        let interval_match_result = control_value.matches_tolerant(
+            &self.source_value_interval,
+            &self.discrete_source_value_interval,
+        );
+        let (source_bound_value, min_is_max_behavior) = if interval_match_result.matches() {
             // Control value is within source value interval
-            (control_value.to_unit_value(), MinIsMaxBehavior::PreferOne)
+            (control_value, MinIsMaxBehavior::PreferOne)
         } else {
             // Control value is outside source value interval
             use OutOfRangeBehavior::*;
             match self.out_of_range_behavior {
                 MinOrMax => {
-                    if control_value.to_unit_value() < self.source_value_interval.min_val() {
+                    if interval_match_result == IntervalMatchResult::Lower {
                         (
-                            self.source_value_interval.min_val(),
+                            control_value.select_appropriate_interval_min(
+                                &self.source_value_interval,
+                                &self.discrete_source_value_interval,
+                            ),
                             MinIsMaxBehavior::PreferZero,
                         )
                     } else {
                         (
-                            self.source_value_interval.max_val(),
+                            control_value.select_appropriate_interval_max(
+                                &self.source_value_interval,
+                                &self.discrete_source_value_interval,
+                            ),
                             MinIsMaxBehavior::PreferOne,
                         )
                     }
                 }
                 Min => (
-                    self.source_value_interval.min_val(),
+                    control_value.select_appropriate_interval_min(
+                        &self.source_value_interval,
+                        &self.discrete_source_value_interval,
+                    ),
                     MinIsMaxBehavior::PreferZero,
                 ),
                 Ignore => return None,
@@ -310,7 +318,7 @@ impl<T: Transformation> Mode<T> {
         // Control value is within source value interval
         let control_type = target.control_type();
         let pepped_up_control_value = self.pep_up_control_value(
-            AbsoluteValue::Continuous(source_bound_value),
+            source_bound_value,
             control_type,
             current_target_value,
             min_is_max_behavior,
@@ -332,11 +340,12 @@ impl<T: Transformation> Mode<T> {
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         if control_value.is_zero()
-            || !control_value.is_within_interval_tolerant(
-                &self.source_value_interval,
-                &self.discrete_source_value_interval,
-                BASE_EPSILON,
-            )
+            || !control_value
+                .matches_tolerant(
+                    &self.source_value_interval,
+                    &self.discrete_source_value_interval,
+                )
+                .matches()
         {
             return None;
         }
@@ -356,12 +365,12 @@ impl<T: Transformation> Mode<T> {
                 // - Maximum target step size (enables accurate maximum increment, clamped)
                 // - Target value interval (absolute, important for rotation only, clamped)
                 let step_size_value = control_value
-                    .map_to_unit_interval_from(
+                    .normalize(
                         &self.source_value_interval,
                         MinIsMaxBehavior::PreferOne,
                         BASE_EPSILON
                     )
-                    .map_from_unit_interval_to(&self.step_size_interval);
+                    .denormalize(&self.step_size_interval);
                 let step_size_increment =
                     step_size_value.to_increment(negative_if(self.reverse))?;
                 self.hit_target_absolutely_with_unit_increment(
@@ -537,6 +546,10 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
+    fn enforce_scaling(&self) -> bool {
+        self.absolute_mode != AbsoluteMode::Discrete
+    }
+
     fn pep_up_control_value(
         &self,
         control_value: AbsoluteValue,
@@ -545,24 +558,28 @@ impl<T: Transformation> Mode<T> {
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> AbsoluteValue {
         // 1. Apply source interval
-        let mut v = control_value.map_to_unit_interval_from(
+        let mut v = control_value.apply_source_interval(
             &self.source_value_interval,
+            &self.discrete_source_value_interval,
             min_is_max_behavior,
-            BASE_EPSILON,
+            self.enforce_scaling(),
         );
         // 2. Apply transformation
-        v = self
+        let mut v = self
             .control_transformation
             .as_ref()
             .and_then(|t| {
-                t.transform(v, current_target_value.unwrap_or_default().to_unit_value())
-                    .ok()
+                t.transform(
+                    v.to_unit_value(),
+                    current_target_value.unwrap_or_default().to_unit_value(),
+                )
+                .ok()
             })
-            .unwrap_or(v);
+            .unwrap_or(v.to_unit_value());
         // 3. Apply reverse
         v = if self.reverse { v.inverse() } else { v };
         // 4. Apply target interval
-        v = v.map_from_unit_interval_to(&self.target_value_interval);
+        v = v.denormalize(&self.target_value_interval);
         // 5. Apply rounding
         v = if self.round_target_value {
             round_to_nearest_discrete_value(control_type, v)
@@ -625,7 +642,7 @@ impl<T: Transformation> Mode<T> {
                     }
                 }
                 LongTimeNoSee => {
-                    let approach_distance = distance.map_from_unit_interval_to(&self.jump_interval);
+                    let approach_distance = distance.denormalize(&self.jump_interval);
                     let approach_increment = approach_distance.to_increment(negative_if(
                         control_value.to_unit_value() < current_target_value.to_unit_value(),
                     ))?;
@@ -811,12 +828,12 @@ impl<T: Transformation> Mode<T> {
         control_value: AbsoluteValue,
     ) -> Option<DiscreteIncrement> {
         let factor = control_value
-            .map_to_unit_interval_from(
+            .normalize(
                 &self.source_value_interval,
                 MinIsMaxBehavior::PreferOne,
                 BASE_EPSILON,
             )
-            .map_from_unit_interval_to_discrete_increment(&self.step_count_interval);
+            .denormalize_discrete_increment(&self.step_count_interval);
         // This mode supports positive increment only.
         let discrete_value = if factor.is_positive() {
             factor.to_value()
@@ -893,8 +910,7 @@ mod tests {
                 mode.control(abs_dis(63, 127), &target, ()).unwrap(),
                 abs_con(0.49606299212598426)
             );
-            assert!(mode.control(abs_con(0.777), &target, ()).is_none());
-            assert!(mode.control(abs_dis(777, 1000), &target, ()).is_none());
+            assert_eq!(mode.control(abs_con(0.777), &target, ()), None);
             assert_abs_diff_eq!(
                 mode.control(abs_con(1.0), &target, ()).unwrap(),
                 abs_con(1.0)
@@ -5472,5 +5488,7 @@ impl<T> From<ModeControlResult<T>> for Option<T> {
 }
 
 fn full_discrete_interval() -> Interval<u32> {
-    Interval::new(0, 99)
+    // Using 7-bit as a default (MIDI) makes discrete tests easy because they use examples
+    // inspired by MIDI control scenarios.
+    Interval::new(0, 127)
 }
