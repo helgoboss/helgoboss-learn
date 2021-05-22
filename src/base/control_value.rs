@@ -1,6 +1,6 @@
 use crate::{
-    DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior, Transformation,
-    UnitValue, BASE_EPSILON,
+    ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
+    Transformation, UnitValue, BASE_EPSILON,
 };
 use std::ops::Deref;
 
@@ -46,7 +46,7 @@ impl ControlValue {
     pub fn as_unit_value(self) -> Result<UnitValue, &'static str> {
         match self {
             ControlValue::AbsoluteContinuous(v) => Ok(v),
-            ControlValue::AbsoluteDiscrete(f) => Ok(f.into()),
+            ControlValue::AbsoluteDiscrete(f) => Ok(f.to_unit_value()),
             _ => Err("control value is not absolute"),
         }
     }
@@ -71,7 +71,9 @@ impl ControlValue {
         match self {
             ControlValue::AbsoluteContinuous(v) => Ok(ControlValue::AbsoluteContinuous(v)),
             ControlValue::Relative(_) => Err("relative value can't be normalized"),
-            ControlValue::AbsoluteDiscrete(v) => Ok(ControlValue::AbsoluteContinuous(v.into())),
+            ControlValue::AbsoluteDiscrete(v) => {
+                Ok(ControlValue::AbsoluteContinuous(v.to_unit_value()))
+            }
         }
     }
 }
@@ -259,6 +261,17 @@ impl AbsoluteValue {
             Discrete(f) => Self::Discrete(f.inverse()),
         }
     }
+
+    pub fn round(self, control_type: ControlType) -> Self {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(v) => {
+                let value = round_to_nearest_discrete_value(control_type, v);
+                Self::Continuous(value)
+            }
+            Discrete(f) => Self::Discrete(f),
+        }
+    }
 }
 
 // TODO-high Remove!!!
@@ -348,4 +361,25 @@ mod tests {
             AbsoluteValue::Discrete(Fraction::new(205, 500))
         );
     }
+}
+
+fn round_to_nearest_discrete_value(
+    control_type: ControlType,
+    approximate_control_value: UnitValue,
+) -> UnitValue {
+    // round() is the right choice here vs. floor() because we don't want slight numerical
+    // inaccuracies lead to surprising jumps
+    use ControlType::*;
+    let step_size = match control_type {
+        AbsoluteContinuousRoundable { rounding_step_size } => rounding_step_size,
+        AbsoluteDiscrete { atomic_step_size } => atomic_step_size,
+        AbsoluteContinuousRetriggerable
+        | AbsoluteContinuous
+        | Relative
+        | VirtualMulti
+        | VirtualButton => {
+            return approximate_control_value;
+        }
+    };
+    approximate_control_value.snap_to_grid_by_interval_size(step_size)
 }

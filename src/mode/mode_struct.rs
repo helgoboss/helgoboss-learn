@@ -579,12 +579,10 @@ impl<T: Transformation> Mode<T> {
             is_discrete_mode,
         );
         // 5. Apply rounding
-        let mut v = if self.round_target_value {
-            round_to_nearest_discrete_value(control_type, v.to_unit_value())
-        } else {
-            v.to_unit_value()
+        if self.round_target_value {
+            v = v.round(control_type);
         };
-        AbsoluteValue::Continuous(v)
+        v
     }
 
     fn hitting_target_considering_max_jump(
@@ -603,6 +601,7 @@ impl<T: Transformation> Mode<T> {
             // No jump restrictions whatsoever
             return self.hit_if_changed(control_value, current_target_value, control_type);
         }
+        // TODO-high Implement for discrete values, too!
         let distance = control_value.calc_distance_from(current_target_value.to_unit_value());
         if distance > self.jump_interval.max_val() {
             // Distance is too large
@@ -846,27 +845,6 @@ impl<T: Transformation> Mode<T> {
         };
         discrete_value.to_increment(negative_if(self.reverse))
     }
-}
-
-fn round_to_nearest_discrete_value(
-    control_type: ControlType,
-    approximate_control_value: UnitValue,
-) -> UnitValue {
-    // round() is the right choice here vs. floor() because we don't want slight numerical
-    // inaccuracies lead to surprising jumps
-    use ControlType::*;
-    let step_size = match control_type {
-        AbsoluteContinuousRoundable { rounding_step_size } => rounding_step_size,
-        AbsoluteDiscrete { atomic_step_size } => atomic_step_size,
-        AbsoluteContinuousRetriggerable
-        | AbsoluteContinuous
-        | Relative
-        | VirtualMulti
-        | VirtualButton => {
-            return approximate_control_value;
-        }
-    };
-    approximate_control_value.snap_to_grid_by_interval_size(step_size)
 }
 
 #[cfg(test)]

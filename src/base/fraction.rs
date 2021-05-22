@@ -129,13 +129,6 @@ impl Fraction {
     }
 }
 
-// TODO-high Delete
-impl From<Fraction> for UnitValue {
-    fn from(f: Fraction) -> Self {
-        f.to_unit_value()
-    }
-}
-
 fn to_unit_value(actual: u32, max: u32) -> UnitValue {
     if max == 0 {
         return UnitValue::MIN;

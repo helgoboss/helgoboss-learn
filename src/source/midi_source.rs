@@ -818,7 +818,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 return Err("not supported");
             }
         };
-        Ok(unit_value.into())
+        Ok(unit_value.to_unit_value())
     }
 }
 
