@@ -717,7 +717,9 @@ impl<T: Transformation> Mode<T> {
         current_target_value: AbsoluteValue,
         control_type: ControlType,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
-        if !control_type.is_retriggerable() && current_target_value == desired_target_value {
+        if !control_type.is_retriggerable()
+            && current_target_value.has_same_effect_as(desired_target_value)
+        {
             return Some(ModeControlResult::LeaveTargetUntouched(
                 desired_target_value,
             ));
@@ -865,7 +867,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: Some(continuous_value(0.777)),
+                current_value: Some(continuous_value(0.3779527559055118)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -876,24 +878,25 @@ mod tests {
             );
             assert_abs_diff_eq!(
                 mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_con(0.0)
+                abs_dis(0, 127)
             );
+            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
+            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
             assert_abs_diff_eq!(
                 mode.control(abs_con(0.5), &target, ()).unwrap(),
                 abs_con(0.5)
             );
             assert_abs_diff_eq!(
                 mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_con(0.49606299212598426)
+                abs_dis(63, 127)
             );
-            assert_eq!(mode.control(abs_con(0.777), &target, ()), None);
             assert_abs_diff_eq!(
                 mode.control(abs_con(1.0), &target, ()).unwrap(),
                 abs_con(1.0)
             );
             assert_abs_diff_eq!(
                 mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_con(1.0)
+                abs_dis(127, 127)
             );
         }
 
@@ -1815,7 +1818,7 @@ mod tests {
                 ..Default::default()
             };
             let target = TestTarget {
-                current_value: Some(continuous_value(0.777)),
+                current_value: Some(discrete_value(48, 127)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
@@ -1828,6 +1831,8 @@ mod tests {
                 mode.control(abs_con(0.0), &target, ()).unwrap(),
                 abs_con(0.0)
             );
+            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
+            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
             assert_abs_diff_eq!(
                 mode.control(abs_dis(63, 127), &target, ()).unwrap(),
                 abs_dis(63, 127)
@@ -1836,8 +1841,6 @@ mod tests {
                 mode.control(abs_con(0.5), &target, ()).unwrap(),
                 abs_con(0.5)
             );
-            assert!(mode.control(abs_dis(777, 1000), &target, ()).is_none());
-            assert!(mode.control(abs_con(0.777), &target, ()).is_none());
             assert_abs_diff_eq!(
                 mode.control(abs_dis(127, 127), &target, ()).unwrap(),
                 abs_dis(127, 127)
@@ -1847,37 +1850,37 @@ mod tests {
                 abs_con(1.0)
             );
         }
-        //
-        //     #[test]
-        //     fn default_target_is_trigger() {
-        //         // Given
-        //         let mut mode: Mode<TestTransformation> = Mode {
-        //             ..Default::default()
-        //         };
-        //         let target = TestTarget {
-        //             current_value: Some(continuous_value(0.777)),
-        //             control_type: ControlType::AbsoluteContinuousRetriggerable,
-        //         };
-        //         // When
-        //         // Then
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.0), &target, ()).unwrap(),
-        //             abs_con(0.0)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.5), &target, ()).unwrap(),
-        //             abs_con(0.5)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.777), &target, ()).unwrap(),
-        //             abs_con(0.777)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(1.0), &target, ()).unwrap(),
-        //             abs_con(1.0)
-        //         );
-        //     }
-        //
+
+        // #[test]
+        // fn default_target_is_trigger() {
+        //     // Given
+        //     let mut mode: Mode<TestTransformation> = Mode {
+        //         ..Default::default()
+        //     };
+        //     let target = TestTarget {
+        //         current_value: Some(continuous_value(0.777)),
+        //         control_type: ControlType::AbsoluteContinuousRetriggerable,
+        //     };
+        //     // When
+        //     // Then
+        //     assert_abs_diff_eq!(
+        //         mode.control(abs_con(0.0), &target, ()).unwrap(),
+        //         abs_con(0.0)
+        //     );
+        //     assert_abs_diff_eq!(
+        //         mode.control(abs_con(0.5), &target, ()).unwrap(),
+        //         abs_con(0.5)
+        //     );
+        //     assert_abs_diff_eq!(
+        //         mode.control(abs_con(0.777), &target, ()).unwrap(),
+        //         abs_con(0.777)
+        //     );
+        //     assert_abs_diff_eq!(
+        //         mode.control(abs_con(1.0), &target, ()).unwrap(),
+        //         abs_con(1.0)
+        //     );
+        // }
+
         //     #[test]
         //     fn relative_target() {
         //         // Given

@@ -272,6 +272,14 @@ impl AbsoluteValue {
             Discrete(f) => Self::Discrete(f),
         }
     }
+
+    pub fn has_same_effect_as(self, other: AbsoluteValue) -> bool {
+        if let (AbsoluteValue::Discrete(f1), AbsoluteValue::Discrete(f2)) = (self, other) {
+            f1.actual() == f2.actual()
+        } else {
+            self.to_unit_value() == other.to_unit_value()
+        }
+    }
 }
 
 // TODO-high Remove!!!
