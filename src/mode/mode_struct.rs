@@ -597,13 +597,16 @@ impl<T: Transformation> Mode<T> {
             None => return Some(ModeControlResult::HitTarget(control_value)),
             Some(v) => v,
         };
-        if self.jump_interval.is_full() {
+        let is_discrete_mode = self.absolute_mode == AbsoluteMode::Discrete;
+        if (!is_discrete_mode || control_value.is_continuous()) && self.jump_interval.is_full() {
             // No jump restrictions whatsoever
             return self.hit_if_changed(control_value, current_target_value, control_type);
         }
-        // TODO-high Implement for discrete values, too!
-        let distance = control_value.calc_distance_from(current_target_value.to_unit_value());
-        if distance > self.jump_interval.max_val() {
+        let distance = control_value.calc_distance_from(current_target_value);
+        if distance.is_greater_than(
+            self.jump_interval.max_val(),
+            self.discrete_jump_interval.max_val(),
+        ) {
             // Distance is too large
             use TakeoverMode::*;
             return match self.takeover_mode {
@@ -612,6 +615,7 @@ impl<T: Transformation> Mode<T> {
                     None
                 }
                 Parallel => {
+                    // TODO-high Implement for discrete values, too!
                     if let Some(prev) = previous_control_value {
                         let relative_increment =
                             control_value.to_unit_value() - prev.to_unit_value();
@@ -639,7 +643,12 @@ impl<T: Transformation> Mode<T> {
                     }
                 }
                 LongTimeNoSee => {
-                    let approach_distance = distance.denormalize(&self.jump_interval);
+                    // TODO-high Implement for discrete values, too!
+                    let approach_distance = distance.denormalize(
+                        &self.jump_interval,
+                        &self.discrete_jump_interval,
+                        is_discrete_mode,
+                    );
                     let approach_increment = approach_distance.to_increment(negative_if(
                         control_value.to_unit_value() < current_target_value.to_unit_value(),
                     ))?;
@@ -655,6 +664,7 @@ impl<T: Transformation> Mode<T> {
                     )
                 }
                 CatchUp => {
+                    // TODO-high Implement for discrete values, too!
                     if let Some(prev) = previous_control_value {
                         let relative_increment =
                             control_value.to_unit_value() - prev.to_unit_value();
@@ -704,7 +714,10 @@ impl<T: Transformation> Mode<T> {
             };
         }
         // Distance is not too large
-        if distance < self.jump_interval.min_val() {
+        if distance.is_lower_than(
+            self.jump_interval.min_val(),
+            self.discrete_jump_interval.min_val(),
+        ) {
             return None;
         }
         // Distance is also not too small
@@ -2368,64 +2381,74 @@ mod tests {
             );
         }
 
-        //     #[test]
-        //     fn jump_interval() {
-        //         // Given
-        //         let mut mode: Mode<TestTransformation> = Mode {
-        //             jump_interval: create_unit_value_interval(0.0, 0.2),
-        //             ..Default::default()
-        //         };
-        //         let target = TestTarget {
-        //             current_value: Some(continuous_value(0.5)),
-        //             control_type: ControlType::AbsoluteContinuous,
-        //         };
-        //         // When
-        //         // Then
-        //         assert!(mode.control(abs_con(0.0), &target, ()).is_none());
-        //         assert!(mode.control(abs_con(0.1), &target, ()).is_none());
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.4), &target, ()).unwrap(),
-        //             abs_con(0.4)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.6), &target, ()).unwrap(),
-        //             abs_con(0.6)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.7), &target, ()).unwrap(),
-        //             abs_con(0.7)
-        //         );
-        //         assert!(mode.control(abs_con(0.8), &target, ()).is_none());
-        //         assert!(mode.control(abs_con(0.9), &target, ()).is_none());
-        //         assert!(mode.control(abs_con(1.0), &target, ()).is_none());
-        //     }
-        //
-        //     #[test]
-        //     fn jump_interval_min() {
-        //         // Given
-        //         let mut mode: Mode<TestTransformation> = Mode {
-        //             jump_interval: create_unit_value_interval(0.1, 1.0),
-        //             ..Default::default()
-        //         };
-        //         let target = TestTarget {
-        //             current_value: Some(continuous_value(0.5)),
-        //             control_type: ControlType::AbsoluteContinuous,
-        //         };
-        //         // When
-        //         // Then
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.1), &target, ()).unwrap(),
-        //             abs_con(0.1)
-        //         );
-        //         assert!(mode.control(abs_con(0.4), &target, ()).is_none());
-        //         assert!(mode.control(abs_con(0.5), &target, ()).is_none());
-        //         assert!(mode.control(abs_con(0.6), &target, ()).is_none());
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(1.0), &target, ()).unwrap(),
-        //             abs_con(1.0)
-        //         );
-        //     }
-        //
+        #[test]
+        fn jump_interval() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::Discrete,
+                discrete_jump_interval: Interval::new(0, 2),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: Some(discrete_value(60, 127)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_eq!(mode.control(abs_dis(0, 127), &target, ()), None);
+            assert_eq!(mode.control(abs_dis(57, 127), &target, ()), None);
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(58, 127), &target, ()).unwrap(),
+                abs_dis(58, 127)
+            );
+            assert_eq!(mode.control(abs_dis(60, 127), &target, ()), None);
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(61, 127), &target, ()).unwrap(),
+                abs_dis(61, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(62, 127), &target, ()).unwrap(),
+                abs_dis(62, 127)
+            );
+            assert!(mode.control(abs_dis(63, 127), &target, ()).is_none());
+            assert!(mode.control(abs_dis(127, 127), &target, ()).is_none());
+        }
+
+        #[test]
+        fn jump_interval_min() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode {
+                absolute_mode: AbsoluteMode::Discrete,
+                discrete_jump_interval: Interval::new(10, 100),
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: Some(discrete_value(60, 127)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(1, 127), &target, ()).unwrap(),
+                abs_dis(1, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(50, 127), &target, ()).unwrap(),
+                abs_dis(50, 127)
+            );
+            assert!(mode.control(abs_dis(55, 127), &target, ()).is_none());
+            assert!(mode.control(abs_dis(65, 127), &target, ()).is_none());
+            assert!(mode.control(abs_dis(69, 127), &target, ()).is_none());
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(70, 127), &target, ()).unwrap(),
+                abs_dis(70, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                abs_dis(127, 127)
+            );
+        }
+
         //     #[test]
         //     fn jump_interval_approach() {
         //         // Given

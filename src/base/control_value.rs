@@ -93,6 +93,10 @@ impl AbsoluteValue {
         }
     }
 
+    pub fn is_continuous(&self) -> bool {
+        matches!(self, AbsoluteValue::Continuous(_))
+    }
+
     pub fn matches_tolerant(
         self,
         continuous_interval: &Interval<UnitValue>,
@@ -278,6 +282,36 @@ impl AbsoluteValue {
             f1.actual() == f2.actual()
         } else {
             self.to_unit_value() == other.to_unit_value()
+        }
+    }
+
+    pub fn calc_distance_from(self, rhs: Self) -> Self {
+        use AbsoluteValue::*;
+        match (self, rhs) {
+            (Discrete(f1), Discrete(f2)) => {
+                let distance = (f2.actual() as i32 - f1.actual() as i32).abs() as u32;
+                Self::Discrete(Fraction::new_max(distance))
+            }
+            _ => {
+                let distance = self.to_unit_value().calc_distance_from(rhs.to_unit_value());
+                Self::Continuous(distance)
+            }
+        }
+    }
+
+    pub fn is_greater_than(&self, continuous_jump_max: UnitValue, discrete_jump_max: u32) -> bool {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(d) => *d > continuous_jump_max,
+            Discrete(d) => d.actual() > discrete_jump_max,
+        }
+    }
+
+    pub fn is_lower_than(&self, continuous_jump_min: UnitValue, discrete_jump_min: u32) -> bool {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(d) => *d < continuous_jump_min,
+            Discrete(d) => d.actual() < discrete_jump_min,
         }
     }
 }
