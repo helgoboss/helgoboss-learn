@@ -215,6 +215,14 @@ impl AbsoluteValue {
             }
         }
     }
+
+    pub fn inverse(self) -> Self {
+        use AbsoluteValue::*;
+        match self {
+            Continuous(v) => Self::Continuous(v.inverse()),
+            Discrete(f) => Self::Discrete(f.inverse()),
+        }
+    }
 }
 
 // TODO-high Remove!!!

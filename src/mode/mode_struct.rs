@@ -568,13 +568,11 @@ impl<T: Transformation> Mode<T> {
             }
         };
         // 3. Apply reverse
-        let mut v = if self.reverse {
-            v.inverse()
-        } else {
-            v.to_unit_value()
+        if self.reverse {
+            v = v.inverse();
         };
         // 4. Apply target interval
-        v = v.denormalize(&self.target_value_interval);
+        let mut v = v.to_unit_value().denormalize(&self.target_value_interval);
         // 5. Apply rounding
         v = if self.round_target_value {
             round_to_nearest_discrete_value(control_type, v)
