@@ -608,11 +608,12 @@ impl<T: Transformation> Mode<T> {
                             let relative_increment = UnitIncrement::new(relative_increment);
                             let restrained_increment =
                                 relative_increment.clamp_to_interval(&self.jump_interval)?;
-                            let final_target_value = current_target_value.add_clamping(
-                                restrained_increment,
-                                &self.target_value_interval,
-                                BASE_EPSILON,
-                            );
+                            let final_target_value =
+                                current_target_value.to_unit_value().add_clamping(
+                                    restrained_increment,
+                                    &self.target_value_interval,
+                                    BASE_EPSILON,
+                                );
                             self.hit_if_changed(
                                 AbsoluteValue::Continuous(final_target_value),
                                 current_target_value,
@@ -631,10 +632,11 @@ impl<T: Transformation> Mode<T> {
                         &self.discrete_jump_interval,
                         is_discrete_mode,
                     );
-                    let approach_increment = approach_distance.to_increment(negative_if(
-                        control_value.to_unit_value() < current_target_value.to_unit_value(),
-                    ))?;
-                    let final_target_value = current_target_value.add_clamping(
+                    let approach_increment =
+                        approach_distance.to_unit_value().to_increment(negative_if(
+                            control_value.to_unit_value() < current_target_value.to_unit_value(),
+                        ))?;
+                    let final_target_value = current_target_value.to_unit_value().add_clamping(
                         approach_increment,
                         &self.target_value_interval,
                         BASE_EPSILON,
@@ -647,8 +649,8 @@ impl<T: Transformation> Mode<T> {
                 }
                 CatchUp => {
                     if let Some(prev) = previous_control_value {
-                        let relative_increment =
-                            control_value.to_unit_value() - prev.to_unit_value();
+                        let prev = prev.to_unit_value();
+                        let relative_increment = control_value.to_unit_value() - prev;
                         if relative_increment == 0.0 {
                             None
                         } else {
@@ -658,6 +660,7 @@ impl<T: Transformation> Mode<T> {
                             } else {
                                 prev.get()
                             };
+                            let current_target_value = current_target_value.to_unit_value();
                             let target_distance_from_border = if goes_up {
                                 1.0 - current_target_value.get()
                             } else {
@@ -681,7 +684,7 @@ impl<T: Transformation> Mode<T> {
                                 );
                                 self.hit_if_changed(
                                     AbsoluteValue::Continuous(final_target_value),
-                                    current_target_value,
+                                    AbsoluteValue::Continuous(current_target_value),
                                     control_type,
                                 )
                             }
@@ -757,8 +760,9 @@ impl<T: Transformation> Mode<T> {
         // that might occur is that the current target value only *appears* out-of-range
         // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
         // experiences. Therefore we snap the current target value to grid first in that case.
+        let current_target_value = current_target_value.to_unit_value();
         let mut v = if current_target_value.is_within_interval(&snapped_target_value_interval) {
-            current_target_value.to_unit_value()
+            current_target_value
         } else {
             current_target_value.snap_to_grid_by_interval_size(grid_interval_size)
         };
@@ -767,7 +771,7 @@ impl<T: Transformation> Mode<T> {
         } else {
             v.add_clamping(increment, &snapped_target_value_interval, BASE_EPSILON)
         };
-        if v == current_target_value.to_unit_value() {
+        if v == current_target_value {
             return Some(ModeControlResult::LeaveTargetUntouched(
                 ControlValue::AbsoluteContinuous(v),
             ));

@@ -85,11 +85,21 @@ pub enum AbsoluteValue {
 }
 
 impl AbsoluteValue {
-    // TODO-high Maybe remove
+    pub fn is_on(&self) -> bool {
+        !self.is_zero()
+    }
+
     pub fn to_unit_value(self) -> UnitValue {
         match self {
             AbsoluteValue::Continuous(v) => v,
             AbsoluteValue::Discrete(v) => v.to_unit_value(),
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            AbsoluteValue::Continuous(v) => v.is_zero(),
+            AbsoluteValue::Discrete(v) => v.is_zero(),
         }
     }
 
@@ -312,18 +322,6 @@ impl AbsoluteValue {
         match self {
             Continuous(d) => *d < continuous_jump_min,
             Discrete(d) => d.actual() < discrete_jump_min,
-        }
-    }
-}
-
-// TODO-high Remove!!!
-impl Deref for AbsoluteValue {
-    type Target = UnitValue;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            AbsoluteValue::Continuous(v) => &v,
-            AbsoluteValue::Discrete(f) => &f.unit_value,
         }
     }
 }

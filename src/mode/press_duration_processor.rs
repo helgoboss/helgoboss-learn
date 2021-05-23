@@ -87,7 +87,7 @@ impl PressDurationProcessor {
                     // press duration if user chooses max very high)!
                     return Some(control_value);
                 }
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // This is a button press.
                     // Don't fire now because we don't know yet how long it will be pressed.
                     self.last_button_press = Some(ButtonPress::new(control_value));
@@ -116,7 +116,7 @@ impl PressDurationProcessor {
                     // No-op case: Fire immediately.
                     return Some(control_value);
                 }
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // Button press
                     self.last_button_press = Some(ButtonPress::new(control_value));
                     None
@@ -127,7 +127,7 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::AfterTimeoutKeepFiring => {
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // Button press
                     let mut button_press = ButtonPress::new(control_value);
                     let result = if min == ZERO_DURATION {
@@ -147,7 +147,7 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::OnSinglePress => {
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // Button press
                     if let Some(press) = self.last_button_press.as_mut() {
                         // Must be more than single press already.
@@ -183,7 +183,7 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::OnDoublePress => {
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     if let Some(press) = &self.last_button_press {
                         // Button was pressed before
                         let (result, next_press) = if press.time.elapsed() <= self.multi_press_span
