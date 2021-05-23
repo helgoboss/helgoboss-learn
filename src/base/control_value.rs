@@ -101,11 +101,10 @@ impl AbsoluteValue {
         self,
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
+        epsilon: f64,
     ) -> IntervalMatchResult {
         match self {
-            AbsoluteValue::Continuous(v) => {
-                continuous_interval.value_matches_tolerant(v, BASE_EPSILON)
-            }
+            AbsoluteValue::Continuous(v) => continuous_interval.value_matches_tolerant(v, epsilon),
             AbsoluteValue::Discrete(v) => discrete_interval.value_matches(v.actual()),
         }
     }
@@ -146,11 +145,12 @@ impl AbsoluteValue {
         discrete_interval: &Interval<u32>,
         min_is_max_behavior: MinIsMaxBehavior,
         is_discrete_mode: bool,
+        epsilon: f64,
     ) -> Self {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => {
-                let scaled = v.normalize(continuous_interval, min_is_max_behavior, BASE_EPSILON);
+                let scaled = v.normalize(continuous_interval, min_is_max_behavior, epsilon);
                 Continuous(scaled)
             }
             Discrete(v) => {
@@ -167,7 +167,7 @@ impl AbsoluteValue {
                     let scaled = v.to_unit_value().normalize(
                         continuous_interval,
                         min_is_max_behavior,
-                        BASE_EPSILON,
+                        epsilon,
                     );
                     Continuous(scaled)
                 }
@@ -353,12 +353,14 @@ mod tests {
             &discrete_interval,
             MinIsMaxBehavior::PreferZero,
             true,
+            BASE_EPSILON,
         );
         let discrete_normalized = discrete.normalize(
             &continuous_interval,
             &discrete_interval,
             MinIsMaxBehavior::PreferZero,
             true,
+            BASE_EPSILON,
         );
         // Then
         assert_abs_diff_eq!(

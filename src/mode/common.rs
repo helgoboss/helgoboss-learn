@@ -1,3 +1,4 @@
+use crate::{AbsoluteValue, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -41,6 +42,45 @@ pub enum OutOfRangeBehavior {
 impl Default for OutOfRangeBehavior {
     fn default() -> Self {
         OutOfRangeBehavior::MinOrMax
+    }
+}
+
+impl OutOfRangeBehavior {
+    pub fn process(
+        &self,
+        control_value: AbsoluteValue,
+        interval_match_result: IntervalMatchResult,
+        continuous_interval: &Interval<UnitValue>,
+        discrete_interval: &Interval<u32>,
+    ) -> Option<(AbsoluteValue, MinIsMaxBehavior)> {
+        use OutOfRangeBehavior::*;
+        match self {
+            MinOrMax => {
+                if interval_match_result == IntervalMatchResult::Lower {
+                    Some((
+                        control_value.select_appropriate_interval_min(
+                            continuous_interval,
+                            discrete_interval,
+                        ),
+                        MinIsMaxBehavior::PreferZero,
+                    ))
+                } else {
+                    Some((
+                        control_value.select_appropriate_interval_max(
+                            continuous_interval,
+                            discrete_interval,
+                        ),
+                        MinIsMaxBehavior::PreferOne,
+                    ))
+                }
+            }
+            Min => Some((
+                control_value
+                    .select_appropriate_interval_min(continuous_interval, discrete_interval),
+                MinIsMaxBehavior::PreferZero,
+            )),
+            Ignore => None,
+        }
     }
 }
 

@@ -178,8 +178,11 @@ impl<T: Transformation> Mode<T> {
             self.reverse,
             &self.feedback_transformation,
             &self.source_value_interval,
+            &self.discrete_source_value_interval,
             &self.target_value_interval,
+            &self.discrete_target_value_interval,
             self.out_of_range_behavior,
+            self.absolute_mode == AbsoluteMode::Discrete,
         )
     }
 
@@ -272,6 +275,7 @@ impl<T: Transformation> Mode<T> {
         let previous_control_value = self
             .previous_absolute_control_value
             .replace(control_value.to_unit_value());
+        // Filter
         match self.button_usage {
             ButtonUsage::PressOnly if control_value.is_zero() => return None,
             ButtonUsage::ReleaseOnly if !control_value.is_zero() => return None,
@@ -280,45 +284,22 @@ impl<T: Transformation> Mode<T> {
         let interval_match_result = control_value.matches_tolerant(
             &self.source_value_interval,
             &self.discrete_source_value_interval,
+            BASE_EPSILON,
         );
         let (source_bound_value, min_is_max_behavior) = if interval_match_result.matches() {
             // Control value is within source value interval
             (control_value, MinIsMaxBehavior::PreferOne)
         } else {
             // Control value is outside source value interval
-            use OutOfRangeBehavior::*;
-            match self.out_of_range_behavior {
-                MinOrMax => {
-                    if interval_match_result == IntervalMatchResult::Lower {
-                        (
-                            control_value.select_appropriate_interval_min(
-                                &self.source_value_interval,
-                                &self.discrete_source_value_interval,
-                            ),
-                            MinIsMaxBehavior::PreferZero,
-                        )
-                    } else {
-                        (
-                            control_value.select_appropriate_interval_max(
-                                &self.source_value_interval,
-                                &self.discrete_source_value_interval,
-                            ),
-                            MinIsMaxBehavior::PreferOne,
-                        )
-                    }
-                }
-                Min => (
-                    control_value.select_appropriate_interval_min(
-                        &self.source_value_interval,
-                        &self.discrete_source_value_interval,
-                    ),
-                    MinIsMaxBehavior::PreferZero,
-                ),
-                Ignore => return None,
-            }
+            self.out_of_range_behavior.process(
+                control_value,
+                interval_match_result,
+                &self.source_value_interval,
+                &self.discrete_source_value_interval,
+            )?
         };
-        let current_target_value = target.current_value(context);
         // Control value is within source value interval
+        let current_target_value = target.current_value(context);
         let control_type = target.control_type();
         let pepped_up_control_value = self.pep_up_control_value(
             source_bound_value,
@@ -561,6 +542,7 @@ impl<T: Transformation> Mode<T> {
             &self.discrete_source_value_interval,
             min_is_max_behavior,
             is_discrete_mode,
+            BASE_EPSILON,
         );
         // 2. Apply transformation
         if let Some(transformation) = self.control_transformation.as_ref() {

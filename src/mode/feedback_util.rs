@@ -1,7 +1,7 @@
 use crate::ControlValue::AbsoluteContinuous;
 use crate::{
-    AbsoluteValue, Interval, IntervalMatchResult, OutOfRangeBehavior, Transformation, UnitValue,
-    BASE_EPSILON,
+    AbsoluteValue, Interval, IntervalMatchResult, MinIsMaxBehavior, OutOfRangeBehavior,
+    Transformation, UnitValue, BASE_EPSILON,
 };
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -18,10 +18,30 @@ pub(crate) fn feedback<T: Transformation>(
     reverse: bool,
     transformation: &Option<T>,
     source_value_interval: &Interval<UnitValue>,
+    discrete_source_value_interval: &Interval<u32>,
     target_value_interval: &Interval<UnitValue>,
+    discrete_target_value_interval: &Interval<u32>,
     out_of_range_behavior: OutOfRangeBehavior,
+    is_discrete_mode: bool,
 ) -> Option<AbsoluteValue> {
-    let mut v = target_value.to_unit_value();
+    // Filter
+    let interval_match_result = target_value.matches_tolerant(
+        target_value_interval,
+        discrete_target_value_interval,
+        FEEDBACK_EPSILON,
+    );
+    let (target_bound_value, min_is_max_behavior) = if interval_match_result.matches() {
+        // Target value is within target value interval
+        (target_value, MinIsMaxBehavior::PreferOne)
+    } else {
+        // Target value is outside target value interval
+        out_of_range_behavior.process(
+            target_value,
+            interval_match_result,
+            target_value_interval,
+            discrete_target_value_interval,
+        )?
+    };
     // 4. Apply target interval
     // Tolerant interval bounds test because of https://github.com/helgoboss/realearn/issues/263.
     // TODO-medium The most elaborate solution to deal with discrete values would be to actually
@@ -31,26 +51,15 @@ pub(crate) fn feedback<T: Transformation>(
     //  rounds them or uses more a ceil/floor approach ... I don't think this is standardized for
     //  VST parameters. We could solve it for our own parameters in future. Until then, having a
     //  fixed epsilon deals at least with most issues I guess.
-    v = {
-        use IntervalMatchResult::*;
-        match target_value_interval.value_matches_tolerant(v, FEEDBACK_EPSILON) {
-            Between => UnitValue::new_clamped(
-                (v - target_value_interval.min_val()) / target_value_interval.span(),
-            ),
-            MinAndMax => UnitValue::MAX,
-            Min => UnitValue::MIN,
-            Max => UnitValue::MAX,
-            Lower => match out_of_range_behavior {
-                OutOfRangeBehavior::MinOrMax | OutOfRangeBehavior::Min => UnitValue::MIN,
-                OutOfRangeBehavior::Ignore => return None,
-            },
-            Greater => match out_of_range_behavior {
-                OutOfRangeBehavior::MinOrMax => UnitValue::MAX,
-                OutOfRangeBehavior::Min => UnitValue::MIN,
-                OutOfRangeBehavior::Ignore => return None,
-            },
-        }
-    };
+    let mut v = target_bound_value
+        .normalize(
+            target_value_interval,
+            discrete_target_value_interval,
+            min_is_max_behavior,
+            is_discrete_mode,
+            FEEDBACK_EPSILON,
+        )
+        .to_unit_value();
     // 3. Apply reverse
     v = if reverse { v.inverse() } else { v };
     // 2. Apply transformation
