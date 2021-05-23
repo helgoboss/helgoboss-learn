@@ -73,6 +73,7 @@ pub struct Mode<T: Transformation> {
     /// For absolute-to-relative mode and value-scaling takeover mode.
     pub previous_absolute_control_value: Option<UnitValue>,
     pub discrete_previous_absolute_control_value: Option<u32>,
+    pub use_discrete_processing: bool,
 }
 
 #[derive(
@@ -83,8 +84,6 @@ pub struct Mode<T: Transformation> {
 pub enum AbsoluteMode {
     #[display(fmt = "Normal")]
     Normal = 0,
-    #[display(fmt = "Discrete")]
-    Discrete = 3,
     #[display(fmt = "Incremental buttons")]
     IncrementalButtons = 1,
     #[display(fmt = "Toggle buttons")]
@@ -125,6 +124,7 @@ impl<T: Transformation> Default for Mode<T> {
             discrete_current_absolute_value: 0,
             previous_absolute_control_value: None,
             discrete_previous_absolute_control_value: None,
+            use_discrete_processing: false,
         }
     }
 }
@@ -182,7 +182,7 @@ impl<T: Transformation> Mode<T> {
             &self.target_value_interval,
             &self.discrete_target_value_interval,
             self.out_of_range_behavior,
-            self.absolute_mode == AbsoluteMode::Discrete,
+            self.use_discrete_processing,
         )
     }
 
@@ -246,8 +246,8 @@ impl<T: Transformation> Mode<T> {
         };
         use AbsoluteMode::*;
         match self.absolute_mode {
-            Normal | Discrete => Some(
-                self.control_absolute_normal_or_discrete(v, target, context)?
+            Normal => Some(
+                self.control_absolute_normal(v, target, context)?
                     .map(ControlValue::from_absolute),
             ),
             IncrementalButtons => self.control_absolute_incremental_buttons(
@@ -265,7 +265,7 @@ impl<T: Transformation> Mode<T> {
 
     /// Processes the given control value in absolute mode and maybe returns an appropriate target
     /// value.
-    fn control_absolute_normal_or_discrete<'a, C: Copy>(
+    fn control_absolute_normal<'a, C: Copy>(
         &mut self,
         control_value: AbsoluteValue,
         target: &impl Target<'a, Context = C>,
@@ -448,11 +448,7 @@ impl<T: Transformation> Mode<T> {
         };
         self.current_absolute_value = abs_input_value;
         // Do the usual absolute processing
-        self.control_absolute_normal_or_discrete(
-            AbsoluteValue::Continuous(abs_input_value),
-            target,
-            context,
-        )
+        self.control_absolute_normal(AbsoluteValue::Continuous(abs_input_value), target, context)
     }
 
     // Classic relative mode: We are getting encoder increments from the source.
@@ -536,17 +532,20 @@ impl<T: Transformation> Mode<T> {
         min_is_max_behavior: MinIsMaxBehavior,
     ) -> AbsoluteValue {
         // 1. Apply source interval
-        let is_discrete_mode = self.absolute_mode == AbsoluteMode::Discrete;
         let mut v = control_value.normalize(
             &self.source_value_interval,
             &self.discrete_source_value_interval,
             min_is_max_behavior,
-            is_discrete_mode,
+            self.use_discrete_processing,
             BASE_EPSILON,
         );
         // 2. Apply transformation
         if let Some(transformation) = self.control_transformation.as_ref() {
-            if let Ok(res) = v.transform(transformation, current_target_value, is_discrete_mode) {
+            if let Ok(res) = v.transform(
+                transformation,
+                current_target_value,
+                self.use_discrete_processing,
+            ) {
                 v = res;
             }
         };
@@ -558,7 +557,7 @@ impl<T: Transformation> Mode<T> {
         v = v.denormalize(
             &self.target_value_interval,
             &self.discrete_target_value_interval,
-            is_discrete_mode,
+            self.use_discrete_processing,
         );
         // 5. Apply rounding
         if self.round_target_value {
@@ -579,8 +578,9 @@ impl<T: Transformation> Mode<T> {
             None => return Some(ModeControlResult::HitTarget(control_value)),
             Some(v) => v,
         };
-        let is_discrete_mode = self.absolute_mode == AbsoluteMode::Discrete;
-        if (!is_discrete_mode || control_value.is_continuous()) && self.jump_interval.is_full() {
+        if (!self.use_discrete_processing || control_value.is_continuous())
+            && self.jump_interval.is_full()
+        {
             // No jump restrictions whatsoever
             return self.hit_if_changed(control_value, current_target_value, control_type);
         }
@@ -630,7 +630,7 @@ impl<T: Transformation> Mode<T> {
                     let approach_distance = distance.denormalize(
                         &self.jump_interval,
                         &self.discrete_jump_interval,
-                        is_discrete_mode,
+                        self.use_discrete_processing,
                     );
                     let approach_increment =
                         approach_distance.to_unit_value().to_increment(negative_if(
@@ -1815,7 +1815,7 @@ mod tests {
         fn default() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1856,7 +1856,7 @@ mod tests {
         fn default_target_is_trigger() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1904,7 +1904,7 @@ mod tests {
         fn relative_target() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 ..Default::default()
             };
             let target = TestTarget {
@@ -1932,7 +1932,7 @@ mod tests {
         fn source_interval() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(20, 60),
                 ..Default::default()
             };
@@ -1977,7 +1977,7 @@ mod tests {
         fn source_interval_out_of_range_ignore() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(20, 60),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -2010,7 +2010,7 @@ mod tests {
         fn source_interval_out_of_range_min() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(20, 60),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -2055,7 +2055,7 @@ mod tests {
         fn source_interval_out_of_range_ignore_source_one_value() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(60, 60),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -2082,7 +2082,7 @@ mod tests {
         fn source_interval_out_of_range_min_source_one_value() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(60, 60),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -2119,7 +2119,7 @@ mod tests {
         fn source_interval_out_of_range_min_max_source_one_value() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(60, 60),
                 out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
                 ..Default::default()
@@ -2156,7 +2156,7 @@ mod tests {
         fn target_interval() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(20, 60),
                 ..Default::default()
             };
@@ -2192,7 +2192,7 @@ mod tests {
         fn target_interval_reverse() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(70, 100),
                 reverse: true,
                 ..Default::default()
@@ -2229,7 +2229,7 @@ mod tests {
         fn source_and_target_interval() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(20, 60),
                 discrete_target_value_interval: Interval::new(20, 60),
                 ..Default::default()
@@ -2270,7 +2270,7 @@ mod tests {
         fn source_and_target_interval_shifted() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(20, 60),
                 discrete_target_value_interval: Interval::new(40, 80),
                 ..Default::default()
@@ -2307,7 +2307,7 @@ mod tests {
         fn reverse() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 reverse: true,
                 ..Default::default()
             };
@@ -2335,7 +2335,7 @@ mod tests {
         fn round() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 round_target_value: true,
                 ..Default::default()
             };
@@ -2373,7 +2373,7 @@ mod tests {
         fn jump_interval() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_jump_interval: Interval::new(0, 2),
                 ..Default::default()
             };
@@ -2406,7 +2406,7 @@ mod tests {
         fn jump_interval_min() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_jump_interval: Interval::new(10, 100),
                 ..Default::default()
             };
@@ -2486,7 +2486,7 @@ mod tests {
         fn transformation_ok() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 control_transformation: Some(TestTransformation::new(|input| Ok(input + 20.0))),
                 ..Default::default()
             };
@@ -2514,7 +2514,7 @@ mod tests {
         fn transformation_negative() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 control_transformation: Some(TestTransformation::new(|input| Ok(input - 20.0))),
                 ..Default::default()
             };
@@ -2542,7 +2542,7 @@ mod tests {
         fn transformation_err() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
                 ..Default::default()
             };
@@ -2570,7 +2570,7 @@ mod tests {
         fn feedback() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 ..Default::default()
             };
             // When
@@ -2584,7 +2584,7 @@ mod tests {
         fn feedback_reverse() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 reverse: true,
                 ..Default::default()
             };
@@ -2599,7 +2599,7 @@ mod tests {
         fn feedback_target_interval() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(20, 100),
                 ..Default::default()
             };
@@ -2617,7 +2617,7 @@ mod tests {
         fn feedback_target_interval_reverse() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(20, 100),
                 reverse: true,
                 ..Default::default()
@@ -2636,7 +2636,7 @@ mod tests {
         fn feedback_source_and_target_interval() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_source_value_interval: Interval::new(20, 80),
                 discrete_target_value_interval: Interval::new(40, 100),
                 ..Default::default()
@@ -2653,7 +2653,7 @@ mod tests {
         fn feedback_out_of_range_ignore() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(20, 80),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -2669,7 +2669,7 @@ mod tests {
         fn feedback_out_of_range_min() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(20, 80),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -2687,7 +2687,7 @@ mod tests {
         fn feedback_out_of_range_min_max_okay() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(2, 2),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -2704,7 +2704,7 @@ mod tests {
         fn feedback_out_of_range_min_max_issue_263() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(3, 3),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -2722,7 +2722,7 @@ mod tests {
         fn feedback_out_of_range_min_target_one_value() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(50, 50),
                 out_of_range_behavior: OutOfRangeBehavior::Min,
                 ..Default::default()
@@ -2740,7 +2740,7 @@ mod tests {
         fn feedback_out_of_range_min_max_target_one_value() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(50, 50),
                 ..Default::default()
             };
@@ -2757,7 +2757,7 @@ mod tests {
         fn feedback_out_of_range_ignore_target_one_value() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 discrete_target_value_interval: Interval::new(50, 50),
                 out_of_range_behavior: OutOfRangeBehavior::Ignore,
                 ..Default::default()
@@ -2775,7 +2775,7 @@ mod tests {
         fn feedback_transformation() {
             // Given
             let mode: Mode<TestTransformation> = Mode {
-                absolute_mode: AbsoluteMode::Discrete,
+                use_discrete_processing: true,
                 feedback_transformation: Some(TestTransformation::new(|input| Ok(input - 10.0))),
                 ..Default::default()
             };
