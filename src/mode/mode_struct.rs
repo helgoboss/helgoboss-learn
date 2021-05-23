@@ -230,6 +230,7 @@ impl<T: Transformation> Mode<T> {
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
+        // TODO-high In discrete processing, don't interpret current target value as percentage!
         match self.encoder_usage {
             EncoderUsage::IncrementOnly if !i.is_positive() => return None,
             EncoderUsage::DecrementOnly if i.is_positive() => return None,
@@ -337,6 +338,7 @@ impl<T: Transformation> Mode<T> {
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
+        // TODO-high In discrete processing, don't interpret current target value as percentage!
         if control_value.is_zero()
             || !self
                 .source_value_interval
@@ -423,6 +425,7 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = C>,
         context: C,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
+        // TODO-high In discrete processing, don't interpret current target value as percentage!
         if control_value.is_zero() {
             return None;
         }
