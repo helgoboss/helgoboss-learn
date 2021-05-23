@@ -7,34 +7,19 @@ pub struct Fraction {
     /// Soft maximum value: Good to know in order to be able to instantly convert to a UnitValue
     /// whenever we want to go absolute-continuous.
     max: u32,
-    // TODO-high Remove!!!
-    pub unit_value: UnitValue,
 }
 
 impl Fraction {
-    // TODO-high Make const
-    pub fn new(actual: u32, max: u32) -> Self {
-        Self {
-            actual,
-            max,
-            unit_value: to_unit_value(actual, max),
-        }
+    pub const fn new(actual: u32, max: u32) -> Self {
+        Self { actual, max }
     }
 
     pub const fn new_min(max: u32) -> Self {
-        Self {
-            actual: 0,
-            max,
-            unit_value: UnitValue::MIN,
-        }
+        Self::new(0, max)
     }
 
     pub const fn new_max(max: u32) -> Self {
-        Self {
-            actual: max,
-            max,
-            unit_value: UnitValue::MAX,
-        }
+        Self::new(max, max)
     }
 
     pub fn actual(&self) -> u32 {
@@ -61,7 +46,6 @@ impl Fraction {
         Self {
             actual: self.max - self.actual_clamped(),
             max: self.max,
-            unit_value: self.unit_value.inverse(),
         }
     }
 
@@ -70,7 +54,10 @@ impl Fraction {
     }
 
     pub fn to_unit_value(&self) -> UnitValue {
-        to_unit_value(self.actual, self.max)
+        if self.max == 0 {
+            return UnitValue::MIN;
+        }
+        UnitValue::new(std::cmp::min(self.actual, self.max) as f64 / self.max as f64)
     }
 
     /// Tests if this value is within the given interval.
@@ -131,13 +118,6 @@ impl Fraction {
         // fraction
         Fraction::new(unrooted_actual, unrooted_max)
     }
-}
-
-fn to_unit_value(actual: u32, max: u32) -> UnitValue {
-    if max == 0 {
-        return UnitValue::MIN;
-    }
-    UnitValue::new(std::cmp::min(actual, max) as f64 / max as f64)
 }
 
 #[cfg(test)]
