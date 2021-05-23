@@ -1,6 +1,6 @@
 use crate::{Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Fraction {
     /// Concrete discrete value.
     actual: u32,
@@ -30,7 +30,7 @@ impl Fraction {
         std::cmp::min(self.actual, self.max)
     }
 
-    pub fn max(&self) -> u32 {
+    pub fn max_val(&self) -> u32 {
         self.max
     }
 

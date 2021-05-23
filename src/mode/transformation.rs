@@ -27,7 +27,7 @@ pub trait Transformation {
         let actual = res.round() as _;
         Ok(Fraction::new(
             actual,
-            std::cmp::max(input_value.max(), actual),
+            std::cmp::max(input_value.max_val(), actual),
         ))
     }
 }

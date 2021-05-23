@@ -78,7 +78,7 @@ impl ControlValue {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum AbsoluteValue {
     Continuous(UnitValue),
     Discrete(Fraction),
