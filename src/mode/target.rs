@@ -38,6 +38,11 @@ impl ControlType {
             _ => None,
         }
     }
+
+    pub fn is_virtual(&self) -> bool {
+        use ControlType::*;
+        matches!(self, VirtualMulti | VirtualButton)
+    }
 }
 
 pub trait Target<'a> {

@@ -16,6 +16,11 @@ pub struct ModeControlOptions {
     pub enforce_rotate: bool,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+pub struct ModeFeedbackOptions {
+    pub source_is_virtual: bool,
+}
+
 /// Settings for processing all kinds of control values.
 ///
 /// ## How relative control values are processed (or button taps interpreted as increments).
@@ -133,7 +138,7 @@ impl<T: Transformation> Mode<T> {
     /// Processes the given control value and maybe returns an appropriate target control value.
     ///
     /// `None` either means ignored or target value already has desired value.
-    pub fn control<'a, C: Copy>(
+    pub(crate) fn control<'a, C: Copy>(
         &mut self,
         control_value: ControlValue,
         target: &impl Target<'a, Context = C>,
@@ -170,9 +175,17 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
+    pub(crate) fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
+        self.feedback_with_options(target_value, ModeFeedbackOptions::default())
+    }
+
     /// Takes a target value, interprets and transforms it conforming to mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
+    pub fn feedback_with_options(
+        &self,
+        target_value: AbsoluteValue,
+        options: ModeFeedbackOptions,
+    ) -> Option<AbsoluteValue> {
         feedback_util::feedback(
             target_value,
             self.reverse,
@@ -183,6 +196,7 @@ impl<T: Transformation> Mode<T> {
             &self.discrete_target_value_interval,
             self.out_of_range_behavior,
             self.use_discrete_processing,
+            options,
         )
     }
 
@@ -332,7 +346,8 @@ impl<T: Transformation> Mode<T> {
             return None;
         }
         use ControlType::*;
-        match target.control_type() {
+        let control_type = target.control_type();
+        match control_type {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
             // TODO-low I think trigger and switch targets don't make sense at all here because
@@ -359,7 +374,8 @@ impl<T: Transformation> Mode<T> {
                     step_size_increment,
                     self.step_size_interval.min_val(),
                     target.current_value(context)?,
-                    options
+                    options,
+                    control_type
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -372,7 +388,7 @@ impl<T: Transformation> Mode<T> {
                 // - Target value interval (absolute, important for rotation only, clamped)
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                self.hit_discrete_target_absolutely(discrete_increment, atomic_step_size, options, || {
+                self.hit_discrete_target_absolutely(discrete_increment, atomic_step_size, options, control_type, || {
                     target.current_value(context)
                 })
             }
@@ -422,9 +438,11 @@ impl<T: Transformation> Mode<T> {
         // If the settings make sense for toggling, the desired target value should *always*
         // be different than the current value. Therefore no need to check if the target value
         // already has that value.
-        Some(ModeControlResult::HitTarget(AbsoluteValue::Continuous(
-            desired_target_value,
-        )))
+        let final_absolute_value = self.get_final_absolute_value(
+            AbsoluteValue::Continuous(desired_target_value),
+            target.control_type(),
+        );
+        Some(ModeControlResult::HitTarget(final_absolute_value))
     }
 
     // Relative-to-absolute conversion mode.
@@ -463,7 +481,8 @@ impl<T: Transformation> Mode<T> {
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         use ControlType::*;
-        match target.control_type() {
+        let control_type = target.control_type();
+        match control_type {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
             // TODO-low Controlling a switch/trigger target with +/- n doesn't make sense.
@@ -489,7 +508,8 @@ impl<T: Transformation> Mode<T> {
                     clamped_unit_increment,
                     self.step_size_interval.min_val(),
                     target.current_value(context)?,
-                    options
+                    options,
+                    control_type
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -502,7 +522,7 @@ impl<T: Transformation> Mode<T> {
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
-                self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, options, || {
+                self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, options, control_type, || {
                     target.current_value(context)
                 })
             }
@@ -575,7 +595,11 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
-            None => return Some(ModeControlResult::HitTarget(control_value)),
+            None => {
+                return Some(ModeControlResult::HitTarget(
+                    self.get_final_absolute_value(control_value, control_type),
+                ))
+            }
             Some(v) => v,
         };
         if (!self.use_discrete_processing || control_value.is_continuous())
@@ -721,7 +745,32 @@ impl<T: Transformation> Mode<T> {
                 desired_target_value,
             ));
         }
-        Some(ModeControlResult::HitTarget(desired_target_value))
+        let final_value = self.get_final_absolute_value(desired_target_value, control_type);
+        Some(ModeControlResult::HitTarget(final_value))
+    }
+
+    fn get_final_absolute_value(
+        &self,
+        desired_target_value: AbsoluteValue,
+        control_type: ControlType,
+    ) -> AbsoluteValue {
+        if self.use_discrete_processing || control_type.is_virtual() {
+            desired_target_value
+        } else {
+            // If discrete processing is not explicitly enabled, we must NOT send discrete values to
+            // a real target! This is not just for backward compatibility. It would change how
+            // discrete targets react in a surprising way (discrete behavior without having discrete
+            // processing enabled). The reason why we don't "go continuous" right at the start of
+            // the processing in this case is that we also have mappings with virtual targets. It's
+            // important that they don't destroy the discreteness of a value, otherwise existing
+            // controller presets which don't have "discrete processing" enabled would not be
+            // compatible with main mappings that have discrete targets and want to use discrete
+            // processing. There would have been other ways to deal with this (e.g. migration) but
+            // the concept of letting a discrete value survive as long as possible (= not turning
+            // it into a continuous one and thereby losing information) sounds like a good idea in
+            // general.
+            AbsoluteValue::Continuous(desired_target_value.to_unit_value())
+        }
     }
 
     fn hit_discrete_target_absolutely(
@@ -729,6 +778,7 @@ impl<T: Transformation> Mode<T> {
         discrete_increment: DiscreteIncrement,
         target_step_size: UnitValue,
         options: ModeControlOptions,
+        control_type: ControlType,
         current_value: impl Fn() -> Option<AbsoluteValue>,
     ) -> Option<ModeControlResult<ControlValue>> {
         let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
@@ -737,6 +787,7 @@ impl<T: Transformation> Mode<T> {
             target_step_size,
             current_value()?,
             options,
+            control_type,
         )
     }
 
@@ -746,6 +797,7 @@ impl<T: Transformation> Mode<T> {
         grid_interval_size: UnitValue,
         current_target_value: AbsoluteValue,
         options: ModeControlOptions,
+        control_type: ControlType,
     ) -> Option<ModeControlResult<ControlValue>> {
         let snapped_target_value_interval = Interval::new(
             self.target_value_interval
@@ -776,9 +828,11 @@ impl<T: Transformation> Mode<T> {
                 ControlValue::AbsoluteContinuous(v),
             ));
         }
-        Some(ModeControlResult::HitTarget(
-            ControlValue::AbsoluteContinuous(v),
-        ))
+        let final_absolute_value =
+            self.get_final_absolute_value(AbsoluteValue::Continuous(v), control_type);
+        Some(ModeControlResult::HitTarget(ControlValue::from_absolute(
+            final_absolute_value,
+        )))
     }
 
     fn pep_up_discrete_increment(
@@ -867,6 +921,46 @@ mod tests {
             let target = TestTarget {
                 current_value: Some(con_val(0.3779527559055118)),
                 control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.0), &target, ()).unwrap(),
+                abs_con(0.0)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                abs_con(0.0)
+            );
+            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
+            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.5), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                abs_con(0.49606299212598426)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(1.0), &target, ()).unwrap(),
+                abs_con(1.0)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                abs_con(1.0)
+            );
+        }
+
+        #[test]
+        fn default_with_virtual_target() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode {
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: Some(con_val(0.3779527559055118)),
+                control_type: ControlType::VirtualMulti,
             };
             // When
             // Then
@@ -1590,8 +1684,54 @@ mod tests {
             // When
             // Then
             assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+            assert_abs_diff_eq!(mode.feedback(dis_val(0, 127)).unwrap(), con_val(0.0));
             assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
+            assert_abs_diff_eq!(
+                mode.feedback(dis_val(60, 127)).unwrap(),
+                con_val(0.47244094488188976)
+            );
             assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(1.0));
+            assert_abs_diff_eq!(mode.feedback(dis_val(127, 127)).unwrap(), con_val(1.0));
+        }
+
+        #[test]
+        fn feedback_with_virtual_source() {
+            // Given
+            let mode: Mode<TestTransformation> = Mode {
+                ..Default::default()
+            };
+            let options = ModeFeedbackOptions {
+                source_is_virtual: true,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(con_val(0.0), options).unwrap(),
+                con_val(0.0)
+            );
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(dis_val(0, 127), options)
+                    .unwrap(),
+                dis_val(0, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(con_val(0.5), options).unwrap(),
+                con_val(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(dis_val(60, 127), options)
+                    .unwrap(),
+                dis_val(60, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(con_val(1.0), options).unwrap(),
+                con_val(1.0)
+            );
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(dis_val(127, 127), options)
+                    .unwrap(),
+                dis_val(127, 127)
+            );
         }
 
         #[test]
@@ -1821,6 +1961,47 @@ mod tests {
             let target = TestTarget {
                 current_value: Some(dis_val(48, 127)),
                 control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                abs_dis(0, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.0), &target, ()).unwrap(),
+                abs_con(0.0)
+            );
+            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
+            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                abs_dis(63, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.5), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                abs_dis(127, 127)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(1.0), &target, ()).unwrap(),
+                abs_con(1.0)
+            );
+        }
+
+        #[test]
+        fn default_with_virtual_target() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode {
+                use_discrete_processing: true,
+                ..Default::default()
+            };
+            let target = TestTarget {
+                current_value: Some(dis_val(48, 127)),
+                control_type: ControlType::VirtualMulti,
             };
             // When
             // Then
@@ -2578,6 +2759,33 @@ mod tests {
             assert_abs_diff_eq!(mode.feedback(dis_val(0, 10)).unwrap(), dis_val(0, 10));
             assert_abs_diff_eq!(mode.feedback(dis_val(5, 10)).unwrap(), dis_val(5, 10));
             assert_abs_diff_eq!(mode.feedback(dis_val(10, 10)).unwrap(), dis_val(10, 10));
+        }
+
+        #[test]
+        fn feedback_with_virtual_source() {
+            // Given
+            let mode: Mode<TestTransformation> = Mode {
+                use_discrete_processing: true,
+                ..Default::default()
+            };
+            let options = ModeFeedbackOptions {
+                source_is_virtual: true,
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(dis_val(0, 10), options).unwrap(),
+                dis_val(0, 10)
+            );
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(dis_val(5, 10), options).unwrap(),
+                dis_val(5, 10)
+            );
+            assert_abs_diff_eq!(
+                mode.feedback_with_options(dis_val(10, 10), options)
+                    .unwrap(),
+                dis_val(10, 10)
+            );
         }
 
         #[test]

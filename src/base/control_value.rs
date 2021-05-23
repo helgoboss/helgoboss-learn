@@ -78,31 +78,11 @@ impl ControlValue {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum AbsoluteValue {
     Continuous(UnitValue),
     Discrete(Fraction),
 }
-
-impl PartialOrd for AbsoluteValue {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.to_unit_value().partial_cmp(&other.to_unit_value())
-    }
-}
-
-impl PartialEq for AbsoluteValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.to_unit_value() == other.to_unit_value()
-    }
-}
-
-impl Ord for AbsoluteValue {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.to_unit_value().cmp(&other.to_unit_value())
-    }
-}
-
-impl Eq for AbsoluteValue {}
 
 impl AbsoluteValue {
     pub fn is_on(&self) -> bool {

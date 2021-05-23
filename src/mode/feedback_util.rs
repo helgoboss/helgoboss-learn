@@ -1,6 +1,6 @@
 use crate::{
-    AbsoluteValue, Interval, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, UnitValue,
-    BASE_EPSILON,
+    AbsoluteValue, Interval, MinIsMaxBehavior, ModeFeedbackOptions, OutOfRangeBehavior,
+    Transformation, UnitValue, BASE_EPSILON,
 };
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -22,6 +22,7 @@ pub(crate) fn feedback<T: Transformation>(
     discrete_target_value_interval: &Interval<u32>,
     out_of_range_behavior: OutOfRangeBehavior,
     is_discrete_mode: bool,
+    options: ModeFeedbackOptions,
 ) -> Option<AbsoluteValue> {
     // Filter
     let interval_match_result = target_value.matches_tolerant(
@@ -70,9 +71,20 @@ pub(crate) fn feedback<T: Transformation>(
         }
     };
     // 1. Apply source interval
-    Some(v.denormalize(
+    v = v.denormalize(
         source_value_interval,
         discrete_source_value_interval,
         is_discrete_mode,
-    ))
+    );
+    //
+    v = if is_discrete_mode || options.source_is_virtual {
+        v
+    } else {
+        // If discrete processing is not explicitly enabled, we must NOT send discrete values to
+        // a real (non-virtual) source! This is not just for backward compatibility. It would change
+        // how discrete sources react in a surprising way (discrete behavior without having
+        // discrete processing enabled).
+        AbsoluteValue::Continuous(v.to_unit_value())
+    };
+    Some(v)
 }
