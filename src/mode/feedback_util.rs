@@ -51,24 +51,29 @@ pub(crate) fn feedback<T: Transformation>(
     //  rounds them or uses more a ceil/floor approach ... I don't think this is standardized for
     //  VST parameters. We could solve it for our own parameters in future. Until then, having a
     //  fixed epsilon deals at least with most issues I guess.
-    let mut v = target_bound_value
-        .normalize(
-            target_value_interval,
-            discrete_target_value_interval,
-            min_is_max_behavior,
-            is_discrete_mode,
-            FEEDBACK_EPSILON,
-        )
-        .to_unit_value();
+    let mut v = target_bound_value.normalize(
+        target_value_interval,
+        discrete_target_value_interval,
+        min_is_max_behavior,
+        is_discrete_mode,
+        FEEDBACK_EPSILON,
+    );
     // 3. Apply reverse
-    v = if reverse { v.inverse() } else { v };
+    v = if reverse {
+        v.inverse(discrete_target_value_interval.span())
+    } else {
+        v
+    };
     // 2. Apply transformation
-    v = transformation
-        .as_ref()
-        .and_then(|t| t.transform_continuous(v, v).ok())
-        .unwrap_or(v);
+    if let Some(transformation) = transformation.as_ref() {
+        if let Ok(res) = v.transform(transformation, Some(v), is_discrete_mode) {
+            v = res;
+        }
+    };
     // 1. Apply source interval
-    Some(AbsoluteValue::Continuous(
-        v.denormalize(source_value_interval),
+    Some(v.denormalize(
+        source_value_interval,
+        discrete_source_value_interval,
+        is_discrete_mode,
     ))
 }
