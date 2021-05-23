@@ -402,7 +402,7 @@ mod tests {
         );
         assert_eq!(
             discrete_normalized,
-            AbsoluteValue::Discrete(Fraction::new(205, 500))
+            AbsoluteValue::Discrete(Fraction::new(205, 227))
         );
     }
 }
