@@ -172,7 +172,7 @@ impl<T: Transformation> Mode<T> {
 
     /// Takes a target value, interprets and transforms it conforming to mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback(&self, target_value: UnitValue) -> Option<UnitValue> {
+    pub fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
         feedback_util::feedback(
             target_value,
             self.reverse,
@@ -5441,8 +5441,8 @@ mod tests {
         }
     }
 
-    fn uv(number: f64) -> UnitValue {
-        UnitValue::new(number)
+    fn uv(number: f64) -> AbsoluteValue {
+        AbsoluteValue::Continuous(UnitValue::new(number))
     }
 
     fn abs_con(number: f64) -> ControlValue {

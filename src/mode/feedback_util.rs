@@ -1,5 +1,7 @@
+use crate::ControlValue::AbsoluteContinuous;
 use crate::{
-    Interval, IntervalMatchResult, OutOfRangeBehavior, Transformation, UnitValue, BASE_EPSILON,
+    AbsoluteValue, Interval, IntervalMatchResult, OutOfRangeBehavior, Transformation, UnitValue,
+    BASE_EPSILON,
 };
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -12,14 +14,14 @@ use crate::{
 pub const FEEDBACK_EPSILON: f64 = BASE_EPSILON;
 
 pub(crate) fn feedback<T: Transformation>(
-    target_value: UnitValue,
+    target_value: AbsoluteValue,
     reverse: bool,
     transformation: &Option<T>,
     source_value_interval: &Interval<UnitValue>,
     target_value_interval: &Interval<UnitValue>,
     out_of_range_behavior: OutOfRangeBehavior,
-) -> Option<UnitValue> {
-    let mut v = target_value;
+) -> Option<AbsoluteValue> {
+    let mut v = target_value.to_unit_value();
     // 4. Apply target interval
     // Tolerant interval bounds test because of https://github.com/helgoboss/realearn/issues/263.
     // TODO-medium The most elaborate solution to deal with discrete values would be to actually
@@ -57,5 +59,7 @@ pub(crate) fn feedback<T: Transformation>(
         .and_then(|t| t.transform_continuous(v, v).ok())
         .unwrap_or(v);
     // 1. Apply source interval
-    Some(v.denormalize(source_value_interval))
+    Some(AbsoluteValue::Continuous(
+        v.denormalize(source_value_interval),
+    ))
 }
