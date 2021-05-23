@@ -1,9 +1,9 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     mode::feedback_util, negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue,
-    DiscreteIncrement, DiscreteValue, EncoderUsage, Interval, IntervalMatchResult,
-    MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target,
-    Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
+    DiscreteIncrement, DiscreteValue, EncoderUsage, Interval, MinIsMaxBehavior, OutOfRangeBehavior,
+    PressDurationProcessor, TakeoverMode, Target, Transformation, UnitIncrement, UnitValue,
+    BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;

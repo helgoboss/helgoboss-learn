@@ -1,8 +1,8 @@
 use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
-    Transformation, UnitValue, BASE_EPSILON,
+    Transformation, UnitValue,
 };
-use std::ops::Deref;
+use std::cmp::Ordering;
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -78,11 +78,31 @@ impl ControlValue {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 pub enum AbsoluteValue {
     Continuous(UnitValue),
     Discrete(Fraction),
 }
+
+impl PartialOrd for AbsoluteValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.to_unit_value().partial_cmp(&other.to_unit_value())
+    }
+}
+
+impl PartialEq for AbsoluteValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.to_unit_value() == other.to_unit_value()
+    }
+}
+
+impl Ord for AbsoluteValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.to_unit_value().cmp(&other.to_unit_value())
+    }
+}
+
+impl Eq for AbsoluteValue {}
 
 impl AbsoluteValue {
     pub fn is_on(&self) -> bool {
@@ -335,6 +355,7 @@ impl Default for AbsoluteValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BASE_EPSILON;
     use approx::*;
 
     #[test]

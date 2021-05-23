@@ -1,4 +1,4 @@
-use crate::{AbsoluteValue, FireMode, Interval, UnitValue};
+use crate::{AbsoluteValue, FireMode, Interval};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]

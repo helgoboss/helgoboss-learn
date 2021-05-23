@@ -1,7 +1,6 @@
-use crate::ControlValue::AbsoluteContinuous;
 use crate::{
-    AbsoluteValue, Interval, IntervalMatchResult, MinIsMaxBehavior, OutOfRangeBehavior,
-    Transformation, UnitValue, BASE_EPSILON,
+    AbsoluteValue, Interval, MinIsMaxBehavior, OutOfRangeBehavior, Transformation, UnitValue,
+    BASE_EPSILON,
 };
 
 /// When interpreting target value, make only 4 fractional digits matter.

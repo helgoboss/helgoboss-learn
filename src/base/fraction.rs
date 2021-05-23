@@ -69,10 +69,6 @@ impl Fraction {
         }
     }
 
-    fn interval(&self) -> Interval<u32> {
-        Interval::new(0, self.max)
-    }
-
     /// This value is supposed to be in the given interval.
     pub fn normalize(
         &self,
@@ -118,6 +114,10 @@ impl Fraction {
         // fraction
         Fraction::new(unrooted_actual, unrooted_max)
     }
+}
+
+pub fn full_discrete_interval() -> Interval<u32> {
+    Interval::new(0, u32::MAX)
 }
 
 #[cfg(test)]

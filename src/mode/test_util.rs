@@ -1,4 +1,4 @@
-use crate::{AbsoluteValue, ControlType, Target, Transformation, UnitValue};
+use crate::{AbsoluteValue, ControlType, Target, Transformation};
 
 pub struct TestTarget {
     pub current_value: Option<AbsoluteValue>,
