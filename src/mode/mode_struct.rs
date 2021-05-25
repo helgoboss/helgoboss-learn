@@ -1,9 +1,9 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     mode::feedback_util, negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue,
-    DiscreteIncrement, DiscreteValue, EncoderUsage, Interval, MinIsMaxBehavior, OutOfRangeBehavior,
-    PressDurationProcessor, TakeoverMode, Target, Transformation, UnitIncrement, UnitValue,
-    BASE_EPSILON,
+    DiscreteIncrement, DiscreteValue, EncoderUsage, Fraction, Interval, MinIsMaxBehavior,
+    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, Transformation,
+    UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -230,7 +230,6 @@ impl<T: Transformation> Mode<T> {
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
-        // TODO-high In discrete processing, don't interpret current target value as percentage!
         match self.encoder_usage {
             EncoderUsage::IncrementOnly if !i.is_positive() => return None,
             EncoderUsage::DecrementOnly if i.is_positive() => return None,
@@ -375,7 +374,7 @@ impl<T: Transformation> Mode<T> {
                 self.hit_target_absolutely_with_unit_increment(
                     step_size_increment,
                     self.step_size_interval.min_val(),
-                    target.current_value(context)?,
+                    target.current_value(context)?.to_unit_value(),
                     options,
                     control_type
                 )
@@ -510,7 +509,7 @@ impl<T: Transformation> Mode<T> {
                 self.hit_target_absolutely_with_unit_increment(
                     clamped_unit_increment,
                     self.step_size_interval.min_val(),
-                    target.current_value(context)?,
+                    target.current_value(context)?.to_unit_value(),
                     options,
                     control_type
                 )
@@ -784,21 +783,44 @@ impl<T: Transformation> Mode<T> {
         control_type: ControlType,
         current_value: impl Fn() -> Option<AbsoluteValue>,
     ) -> Option<ModeControlResult<ControlValue>> {
-        let unit_increment = discrete_increment.to_unit_increment(target_step_size)?;
-        self.hit_target_absolutely_with_unit_increment(
-            unit_increment,
-            target_step_size,
-            current_value()?,
-            options,
-            control_type,
-        )
+        if self.use_discrete_processing {
+            // Discrete processing for discrete target. Good!
+            match current_value()? {
+                AbsoluteValue::Continuous(v) => {
+                    // But target reports continuous value!? Shouldn't happen. Whatever, fall back
+                    // to continuous processing.
+                    self.hit_target_absolutely_with_unit_increment(
+                        discrete_increment.to_unit_increment(target_step_size)?,
+                        target_step_size,
+                        current_value()?.to_unit_value(),
+                        options,
+                        control_type,
+                    )
+                }
+                AbsoluteValue::Discrete(f) => self.hit_target_absolutely_with_discrete_increment(
+                    discrete_increment,
+                    f,
+                    options,
+                    control_type,
+                ),
+            }
+        } else {
+            // Continuous processing although target is discrete. Kept for backward compatibility.
+            self.hit_target_absolutely_with_unit_increment(
+                discrete_increment.to_unit_increment(target_step_size)?,
+                target_step_size,
+                current_value()?.to_unit_value(),
+                options,
+                control_type,
+            )
+        }
     }
 
     fn hit_target_absolutely_with_unit_increment(
         &self,
         increment: UnitIncrement,
         grid_interval_size: UnitValue,
-        current_target_value: AbsoluteValue,
+        current_target_value: UnitValue,
         options: ModeControlOptions,
         control_type: ControlType,
     ) -> Option<ModeControlResult<ControlValue>> {
@@ -815,7 +837,6 @@ impl<T: Transformation> Mode<T> {
         // that might occur is that the current target value only *appears* out-of-range
         // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
         // experiences. Therefore we snap the current target value to grid first in that case.
-        let current_target_value = current_target_value.to_unit_value();
         let mut v = if current_target_value.is_within_interval(&snapped_target_value_interval) {
             current_target_value
         } else {
@@ -833,6 +854,31 @@ impl<T: Transformation> Mode<T> {
         }
         let final_absolute_value =
             self.get_final_absolute_value(AbsoluteValue::Continuous(v), control_type);
+        Some(ModeControlResult::HitTarget(ControlValue::from_absolute(
+            final_absolute_value,
+        )))
+    }
+
+    fn hit_target_absolutely_with_discrete_increment(
+        &self,
+        increment: DiscreteIncrement,
+        current_target_value: Fraction,
+        options: ModeControlOptions,
+        control_type: ControlType,
+    ) -> Option<ModeControlResult<ControlValue>> {
+        let mut v = current_target_value;
+        v = if options.enforce_rotate || self.rotate {
+            v.add_rotating(increment, &self.discrete_target_value_interval)
+        } else {
+            v.add_clamping(increment, &self.discrete_target_value_interval)
+        };
+        if v.actual() == current_target_value.actual() {
+            return Some(ModeControlResult::LeaveTargetUntouched(
+                ControlValue::AbsoluteDiscrete(v),
+            ));
+        }
+        let final_absolute_value =
+            self.get_final_absolute_value(AbsoluteValue::Discrete(v), control_type);
         Some(ModeControlResult::HitTarget(ControlValue::from_absolute(
             final_absolute_value,
         )))
@@ -915,2086 +961,2126 @@ mod tests {
     mod absolute_normal {
         use super::*;
 
-        #[test]
-        fn default() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.3779527559055118)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
-            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_con(0.49606299212598426)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn default_with_virtual_target() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.3779527559055118)),
-                control_type: ControlType::VirtualMulti,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
-            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_dis(63, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-        }
-
-        #[test]
-        fn default_target_is_trigger() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuousRetriggerable,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.777), &target, ()).unwrap(),
-                abs_con(0.777)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn relative_target() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::Relative,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert!(mode.control(abs_con(0.777), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn source_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.2, 0.6),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.1), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(13, 127), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(25, 127), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(51, 127), &target, ()).unwrap(),
-                abs_con(0.5039370078740157)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(76, 127), &target, ()).unwrap(),
-                abs_con(0.9960629921259844)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.8), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(80, 127), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn source_interval_out_of_range_ignore() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.2, 0.6),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert!(mode.control(abs_con(0.0), &target, ()).is_none());
-            assert!(mode.control(abs_con(0.1), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert!(mode.control(abs_con(0.8), &target, ()).is_none());
-            assert!(mode.control(abs_con(1.0), &target, ()).is_none());
-        }
-
-        #[test]
-        fn source_interval_out_of_range_min() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.2, 0.6),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.1), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.8), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-        }
-
-        #[test]
-        fn source_interval_out_of_range_ignore_source_one_value() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.5, 0.5),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert!(mode.control(abs_con(0.0), &target, ()).is_none());
-            assert!(mode.control(abs_con(0.4), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert!(mode.control(abs_con(0.6), &target, ()).is_none());
-            assert!(mode.control(abs_con(1.0), &target, ()).is_none());
-        }
-
-        #[test]
-        fn source_interval_out_of_range_min_source_one_value() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.5, 0.5),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-        }
-
-        #[test]
-        fn source_interval_out_of_range_min_max_source_one_value() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.5, 0.5),
-                out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn target_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.2, 0.6),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.28)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.25), &target, ()).unwrap(),
-                abs_con(0.3)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.75), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-        }
-
-        #[test]
-        fn target_interval_reverse() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.6, 1.0),
-                reverse: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.25), &target, ()).unwrap(),
-                abs_con(0.9)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.8)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.75), &target, ()).unwrap(),
-                abs_con(0.7)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-        }
-
-        #[test]
-        fn source_and_target_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.2, 0.6),
-                target_value_interval: create_unit_value_interval(0.2, 0.6),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.8), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-        }
-
-        #[test]
-        fn source_and_target_interval_shifted() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.2, 0.6),
-                target_value_interval: create_unit_value_interval(0.4, 0.8),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(0.8)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.8), &target, ()).unwrap(),
-                abs_con(0.8)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.8)
-            );
-        }
-
-        #[test]
-        fn reverse() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                reverse: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-        }
-
-        #[test]
-        fn round() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                round_target_value: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteDiscrete {
-                    atomic_step_size: UnitValue::new(0.2),
-                },
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.11), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.19), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.35), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.49), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn jump_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                jump_interval: create_unit_value_interval(0.0, 0.2),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.5)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert!(mode.control(abs_con(0.0), &target, ()).is_none());
-            assert!(mode.control(abs_con(0.1), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.7), &target, ()).unwrap(),
-                abs_con(0.7)
-            );
-            assert!(mode.control(abs_con(0.8), &target, ()).is_none());
-            assert!(mode.control(abs_con(0.9), &target, ()).is_none());
-            assert!(mode.control(abs_con(1.0), &target, ()).is_none());
-        }
-
-        #[test]
-        fn jump_interval_min() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                jump_interval: create_unit_value_interval(0.1, 1.0),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.5)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.1), &target, ()).unwrap(),
-                abs_con(0.1)
-            );
-            assert!(mode.control(abs_con(0.4), &target, ()).is_none());
-            assert!(mode.control(abs_con(0.5), &target, ()).is_none());
-            assert!(mode.control(abs_con(0.6), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn jump_interval_approach() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                jump_interval: create_unit_value_interval(0.0, 0.2),
-                takeover_mode: TakeoverMode::LongTimeNoSee,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.5)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.1), &target, ()).unwrap(),
-                abs_con(0.42)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.6), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.7), &target, ()).unwrap(),
-                abs_con(0.7)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.8), &target, ()).unwrap(),
-                abs_con(0.56)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-        }
-
-        #[test]
-        fn transformation_ok() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                control_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-        }
-
-        #[test]
-        fn transformation_err() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(con_val(0.777)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn feedback() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 127)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
-            assert_abs_diff_eq!(
-                mode.feedback(dis_val(60, 127)).unwrap(),
-                con_val(0.47244094488188976)
-            );
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(127, 127)).unwrap(), con_val(1.0));
-        }
-
-        #[test]
-        fn feedback_with_virtual_source() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                ..Default::default()
-            };
-            let options = ModeFeedbackOptions {
-                source_is_virtual: true,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(con_val(0.0), options).unwrap(),
-                con_val(0.0)
-            );
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(dis_val(0, 127), options)
-                    .unwrap(),
-                dis_val(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(con_val(0.5), options).unwrap(),
-                con_val(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(dis_val(60, 127), options)
-                    .unwrap(),
-                dis_val(60, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(con_val(1.0), options).unwrap(),
-                con_val(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(dis_val(127, 127), options)
-                    .unwrap(),
-                dis_val(127, 127)
-            );
-        }
-
-        #[test]
-        fn feedback_reverse() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                reverse: true,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
-        }
-
-        #[test]
-        fn feedback_target_interval() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.2, 1.0),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.2)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.4)).unwrap(), con_val(0.25));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.6)).unwrap(), con_val(0.5));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.8)).unwrap(), con_val(0.75));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(1.0));
-        }
-
-        #[test]
-        fn feedback_target_interval_reverse() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.2, 1.0),
-                reverse: true,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.2)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.4)).unwrap(), con_val(0.75));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.6)).unwrap(), con_val(0.5));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.8)).unwrap(), con_val(0.25));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
-        }
-
-        #[test]
-        fn feedback_source_and_target_interval() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                source_value_interval: create_unit_value_interval(0.2, 0.8),
-                target_value_interval: create_unit_value_interval(0.4, 1.0),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.2));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.4)).unwrap(), con_val(0.2));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.7)).unwrap(), con_val(0.5));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.8));
-        }
-
-        #[test]
-        fn feedback_out_of_range_ignore() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.2, 0.8),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert!(mode.feedback(con_val(0.0)).is_none());
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
-            assert!(mode.feedback(con_val(1.0)).is_none());
-        }
-
-        #[test]
-        fn feedback_out_of_range_min() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.2, 0.8),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.1)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.9)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_max_okay() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.02, 0.02),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.01)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.02)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.03)).unwrap(), con_val(0.0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_max_issue_263() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.03, 0.03),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.01)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.03)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.04)).unwrap(), con_val(0.0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_max_issue_263_more() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.03, 0.03),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.01)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(
-                mode.feedback(con_val(0.029999999329447746)).unwrap(),
-                con_val(1.0)
-            );
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0300000001)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.04)).unwrap(), con_val(0.0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_target_one_value() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.5, 0.5),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.1)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.9)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_max_target_one_value() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.5, 0.5),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.1)).unwrap(), con_val(0.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.9)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(1.0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_ignore_target_one_value() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                target_value_interval: create_unit_value_interval(0.5, 0.5),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert!(mode.feedback(con_val(0.0)).is_none());
-            assert!(mode.feedback(con_val(0.1)).is_none());
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(1.0));
-            assert!(mode.feedback(con_val(0.9)).is_none());
-            assert!(mode.feedback(con_val(1.0)).is_none());
-        }
-
-        #[test]
-        fn feedback_transformation() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                feedback_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(1.0));
-            assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
-            assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
-        }
-    }
-
-    mod absolute_discrete {
-        use super::*;
-
-        #[test]
-        fn default() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(48, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
-            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_dis(63, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn default_with_virtual_target() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(48, 127)),
-                control_type: ControlType::VirtualMulti,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
-            assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_dis(63, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn default_target_is_trigger() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(48, 127)),
-                control_type: ControlType::AbsoluteContinuousRetriggerable,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
-            assert_eq!(
-                mode.control(abs_dis(48, 127), &target, ()).unwrap(),
-                abs_dis(48, 127)
-            );
-            assert_eq!(
-                mode.control(abs_con(0.3779527559055118), &target, ())
-                    .unwrap(),
-                abs_con(0.3779527559055118)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_dis(63, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-        }
-
-        #[test]
-        fn relative_target() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(48, 127)),
-                control_type: ControlType::Relative,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert!(mode.control(abs_dis(48, 127), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_dis(63, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-        }
-
-        #[test]
-        fn source_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(20, 60),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(13, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(51, 127), &target, ()).unwrap(),
-                abs_dis(31, 40)
-            );
-            assert_eq!(mode.control(abs_dis(58, 127), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(76, 127), &target, ()).unwrap(),
-                abs_dis(40, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(80, 127), &target, ()).unwrap(),
-                abs_dis(40, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(40, 40)
-            );
-        }
-
-        #[test]
-        fn source_interval_out_of_range_ignore() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(20, 60),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(48, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert!(mode.control(abs_dis(0, 127), &target, ()).is_none());
-            assert!(mode.control(abs_dis(19, 127), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(40, 127), &target, ()).unwrap(),
-                abs_dis(20, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(40, 40)
-            );
-            assert!(mode.control(abs_dis(70, 127), &target, ()).is_none());
-            assert!(mode.control(abs_dis(100, 127), &target, ()).is_none());
-        }
-
-        #[test]
-        fn source_interval_out_of_range_min() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(20, 60),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(1, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(40, 127), &target, ()).unwrap(),
-                abs_dis(20, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(40, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(90, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(0, 40)
-            );
-        }
-
-        #[test]
-        fn source_interval_out_of_range_ignore_source_one_value() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(60, 60),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert!(mode.control(abs_dis(0, 127), &target, ()).is_none());
-            assert!(mode.control(abs_dis(59, 127), &target, ()).is_none());
-            // TODO-high Not sure if this abs_dis(1, 1) is serving the actual use case here
-            //  and in following tests...
-            assert_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(1, 1)
-            );
-            assert!(mode.control(abs_dis(61, 127), &target, ()).is_none());
-            assert!(mode.control(abs_dis(127, 127), &target, ()).is_none());
-        }
-
-        #[test]
-        fn source_interval_out_of_range_min_source_one_value() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(60, 60),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(59, 127), &target, ()).unwrap(),
-                abs_dis(0, 0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(1, 1)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                abs_dis(0, 0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                abs_dis(0, 0)
-            );
-        }
-
-        #[test]
-        fn source_interval_out_of_range_min_max_source_one_value() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(60, 60),
-                out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(59, 127), &target, ()).unwrap(),
-                abs_dis(0, 0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(1, 1)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                abs_dis(1, 1)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(1, 1)
-            );
-        }
-
-        #[test]
-        fn target_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(20, 60),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(20, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(10, 127), &target, ()).unwrap(),
-                abs_dis(30, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(25, 127), &target, ()).unwrap(),
-                abs_dis(45, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(40, 127), &target, ()).unwrap(),
-                abs_dis(60, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(50, 127), &target, ()).unwrap(),
-                abs_dis(60, 60)
-            );
-        }
-
-        #[test]
-        fn target_interval_reverse() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(70, 100),
-                reverse: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(100, 100)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(1, 127), &target, ()).unwrap(),
-                abs_dis(99, 100)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(15, 127), &target, ()).unwrap(),
-                abs_dis(85, 100)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(30, 100), &target, ()).unwrap(),
-                abs_dis(70, 100)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(40, 100), &target, ()).unwrap(),
-                abs_dis(70, 100)
-            );
-        }
-
-        #[test]
-        fn source_and_target_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(20, 60),
-                discrete_target_value_interval: Interval::new(20, 60),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(20, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                abs_dis(20, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(30, 127), &target, ()).unwrap(),
-                abs_dis(30, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(40, 127), &target, ()).unwrap(),
-                abs_dis(40, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(60, 60)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(100, 127), &target, ()).unwrap(),
-                abs_dis(60, 60)
-            );
-        }
-
-        #[test]
-        fn source_and_target_interval_shifted() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(20, 60),
-                discrete_target_value_interval: Interval::new(40, 80),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(40, 80)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                abs_dis(40, 80)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(40, 127), &target, ()).unwrap(),
-                abs_dis(60, 80)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(80, 80)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(100, 127), &target, ()).unwrap(),
-                abs_dis(80, 80)
-            );
-        }
-
-        #[test]
-        fn reverse() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                reverse: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                abs_dis(64, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-        }
-
-        #[test]
-        fn round() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                round_target_value: true,
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteDiscrete {
-                    atomic_step_size: UnitValue::new(0.2),
-                },
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.11), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(2, 127), &target, ()).unwrap(),
-                abs_dis(2, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-        }
-
-        #[test]
-        fn jump_interval() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_jump_interval: Interval::new(0, 2),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(60, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_eq!(mode.control(abs_dis(0, 127), &target, ()), None);
-            assert_eq!(mode.control(abs_dis(57, 127), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(58, 127), &target, ()).unwrap(),
-                abs_dis(58, 127)
-            );
-            assert_eq!(mode.control(abs_dis(60, 127), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                abs_dis(61, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(62, 127), &target, ()).unwrap(),
-                abs_dis(62, 127)
-            );
-            assert!(mode.control(abs_dis(63, 127), &target, ()).is_none());
-            assert!(mode.control(abs_dis(127, 127), &target, ()).is_none());
-        }
-
-        #[test]
-        fn jump_interval_min() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_jump_interval: Interval::new(10, 100),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(60, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(1, 127), &target, ()).unwrap(),
-                abs_dis(1, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(50, 127), &target, ()).unwrap(),
-                abs_dis(50, 127)
-            );
-            assert!(mode.control(abs_dis(55, 127), &target, ()).is_none());
-            assert!(mode.control(abs_dis(65, 127), &target, ()).is_none());
-            assert!(mode.control(abs_dis(69, 127), &target, ()).is_none());
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(70, 127), &target, ()).unwrap(),
-                abs_dis(70, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-        }
-
-        //     #[test]
-        //     fn jump_interval_approach() {
-        //         // Given
-        //         let mut mode: Mode<TestTransformation> = Mode {
-        //             jump_interval: create_unit_value_interval(0.0, 0.2),
-        //             takeover_mode: TakeoverMode::LongTimeNoSee,
-        //             ..Default::default()
-        //         };
-        //         let target = TestTarget {
-        //             current_value: Some(continuous_value(0.5)),
-        //             control_type: ControlType::AbsoluteContinuous,
-        //         };
-        //         // When
-        //         // Then
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.0), &target, ()).unwrap(),
-        //             abs_con(0.4)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.1), &target, ()).unwrap(),
-        //             abs_con(0.42)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.4), &target, ()).unwrap(),
-        //             abs_con(0.4)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.6), &target, ()).unwrap(),
-        //             abs_con(0.6)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.7), &target, ()).unwrap(),
-        //             abs_con(0.7)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(0.8), &target, ()).unwrap(),
-        //             abs_con(0.56)
-        //         );
-        //         assert_abs_diff_eq!(
-        //             mode.control(abs_con(1.0), &target, ()).unwrap(),
-        //             abs_con(0.6)
-        //         );
-        //     }
-        //
-
-        #[test]
-        fn transformation_ok() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                control_transformation: Some(TestTransformation::new(|input| Ok(input + 20.0))),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(20, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(80, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(120, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-        }
-
-        #[test]
-        fn transformation_negative() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                control_transformation: Some(TestTransformation::new(|input| Ok(input - 20.0))),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(120, 127), &target, ()).unwrap(),
-                abs_dis(100, 127)
-            );
-        }
-
-        #[test]
-        fn transformation_err() {
-            // Given
-            let mut mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
-                ..Default::default()
-            };
-            let target = TestTarget {
-                current_value: Some(dis_val(38, 127)),
-                control_type: ControlType::AbsoluteContinuous,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                abs_dis(0, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                abs_dis(60, 127)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                abs_dis(127, 127)
-            );
-        }
-
-        #[test]
-        fn feedback() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 10)).unwrap(), dis_val(0, 10));
-            assert_abs_diff_eq!(mode.feedback(dis_val(5, 10)).unwrap(), dis_val(5, 10));
-            assert_abs_diff_eq!(mode.feedback(dis_val(10, 10)).unwrap(), dis_val(10, 10));
-        }
-
-        #[test]
-        fn feedback_with_virtual_source() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                ..Default::default()
-            };
-            let options = ModeFeedbackOptions {
-                source_is_virtual: true,
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(dis_val(0, 10), options).unwrap(),
-                dis_val(0, 10)
-            );
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(dis_val(5, 10), options).unwrap(),
-                dis_val(5, 10)
-            );
-            assert_abs_diff_eq!(
-                mode.feedback_with_options(dis_val(10, 10), options)
-                    .unwrap(),
-                dis_val(10, 10)
-            );
-        }
-
-        #[test]
-        fn feedback_reverse() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                reverse: true,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 127)).unwrap(), dis_val(127, 127));
-            assert_abs_diff_eq!(mode.feedback(dis_val(5, 127)).unwrap(), dis_val(122, 127));
-            assert_abs_diff_eq!(mode.feedback(dis_val(10, 127)).unwrap(), dis_val(117, 127));
-        }
-
-        #[test]
-        fn feedback_target_interval() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(20, 100),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(20, 100)).unwrap(), dis_val(0, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(40, 100)).unwrap(), dis_val(20, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(60, 100)).unwrap(), dis_val(40, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(80, 100)).unwrap(), dis_val(60, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(80, 80));
-        }
-
-        #[test]
-        fn feedback_target_interval_reverse() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(20, 100),
-                reverse: true,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(80, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(20, 100)).unwrap(), dis_val(80, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(40, 100)).unwrap(), dis_val(60, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(60, 100)).unwrap(), dis_val(40, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(80, 100)).unwrap(), dis_val(20, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(0, 80));
-        }
-
-        #[test]
-        fn feedback_source_and_target_interval() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_source_value_interval: Interval::new(20, 80),
-                discrete_target_value_interval: Interval::new(40, 100),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(20, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(40, 100)).unwrap(), dis_val(20, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(70, 100)).unwrap(), dis_val(50, 80));
-            assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(80, 80));
-        }
-
-        #[test]
-        fn feedback_out_of_range_ignore() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(20, 80),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_eq!(mode.feedback(dis_val(0, 100)), None);
-            assert_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(30, 60));
-            assert_eq!(mode.feedback(dis_val(100, 100)), None);
-        }
-
-        #[test]
-        fn feedback_out_of_range_min() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(20, 80),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 60));
-            assert_abs_diff_eq!(mode.feedback(dis_val(10, 100)).unwrap(), dis_val(0, 60));
-            assert_abs_diff_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(30, 60));
-            assert_abs_diff_eq!(mode.feedback(dis_val(90, 100)).unwrap(), dis_val(0, 60));
-            assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(0, 60));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_max_okay() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(2, 2),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(1, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(2, 100)).unwrap(), dis_val(1, 1));
-            assert_abs_diff_eq!(mode.feedback(dis_val(3, 100)).unwrap(), dis_val(0, 0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_max_issue_263() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(3, 3),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(1, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(2, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(3, 100)).unwrap(), dis_val(1, 1));
-            assert_abs_diff_eq!(mode.feedback(dis_val(4, 100)).unwrap(), dis_val(0, 0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_target_one_value() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(50, 50),
-                out_of_range_behavior: OutOfRangeBehavior::Min,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(10, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(1, 1));
-            assert_abs_diff_eq!(mode.feedback(dis_val(90, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(0, 0));
-        }
-
-        #[test]
-        fn feedback_out_of_range_min_max_target_one_value() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(50, 50),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(10, 100)).unwrap(), dis_val(0, 0));
-            assert_abs_diff_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(1, 1));
-            assert_abs_diff_eq!(mode.feedback(dis_val(90, 100)).unwrap(), dis_val(1, 1));
-            assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(1, 1));
-        }
-
-        #[test]
-        fn feedback_out_of_range_ignore_target_one_value() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                discrete_target_value_interval: Interval::new(50, 50),
-                out_of_range_behavior: OutOfRangeBehavior::Ignore,
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_eq!(mode.feedback(dis_val(0, 100)), None);
-            assert_eq!(mode.feedback(dis_val(10, 100)), None);
-            assert_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(1, 1));
-            assert_eq!(mode.feedback(dis_val(90, 100)), None);
-            assert_eq!(mode.feedback(dis_val(100, 100)), None);
-        }
-
-        #[test]
-        fn feedback_transformation() {
-            // Given
-            let mode: Mode<TestTransformation> = Mode {
-                use_discrete_processing: true,
-                feedback_transformation: Some(TestTransformation::new(|input| Ok(input - 10.0))),
-                ..Default::default()
-            };
-            // When
-            // Then
-            assert_abs_diff_eq!(mode.feedback(dis_val(00, 127)).unwrap(), dis_val(0, 127));
-            assert_abs_diff_eq!(mode.feedback(dis_val(50, 127)).unwrap(), dis_val(40, 127));
-            assert_abs_diff_eq!(mode.feedback(dis_val(100, 127)).unwrap(), dis_val(90, 127));
+        mod continuous_processing {
+            use super::*;
+
+            #[test]
+            fn default() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.3779527559055118)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
+                assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                    abs_con(0.49606299212598426)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn default_with_virtual_target() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.3779527559055118)),
+                    control_type: ControlType::VirtualMulti,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
+                assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                    abs_dis(63, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+            }
+
+            #[test]
+            fn default_target_is_trigger() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuousRetriggerable,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.777), &target, ()).unwrap(),
+                    abs_con(0.777)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn relative_target() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::Relative,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert!(mode.control(abs_con(0.777), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn source_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.2, 0.6),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.1), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(13, 127), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(25, 127), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(51, 127), &target, ()).unwrap(),
+                    abs_con(0.5039370078740157)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(76, 127), &target, ()).unwrap(),
+                    abs_con(0.9960629921259844)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.8), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(80, 127), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn source_interval_out_of_range_ignore() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.2, 0.6),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs_con(0.0), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.1), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert!(mode.control(abs_con(0.8), &target, ()).is_none());
+                assert!(mode.control(abs_con(1.0), &target, ()).is_none());
+            }
+
+            #[test]
+            fn source_interval_out_of_range_min() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.2, 0.6),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.1), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.8), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+            }
+
+            #[test]
+            fn source_interval_out_of_range_ignore_source_one_value() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.5, 0.5),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs_con(0.0), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.4), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert!(mode.control(abs_con(0.6), &target, ()).is_none());
+                assert!(mode.control(abs_con(1.0), &target, ()).is_none());
+            }
+
+            #[test]
+            fn source_interval_out_of_range_min_source_one_value() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.5, 0.5),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+            }
+
+            #[test]
+            fn source_interval_out_of_range_min_max_source_one_value() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.5, 0.5),
+                    out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.2, 0.6),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.28)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.25), &target, ()).unwrap(),
+                    abs_con(0.3)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.75), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+            }
+
+            #[test]
+            fn target_interval_reverse() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.6, 1.0),
+                    reverse: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.25), &target, ()).unwrap(),
+                    abs_con(0.9)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.8)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.75), &target, ()).unwrap(),
+                    abs_con(0.7)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+            }
+
+            #[test]
+            fn source_and_target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.2, 0.6),
+                    target_value_interval: create_unit_value_interval(0.2, 0.6),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.8), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+            }
+
+            #[test]
+            fn source_and_target_interval_shifted() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.2, 0.6),
+                    target_value_interval: create_unit_value_interval(0.4, 0.8),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(0.8)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.8), &target, ()).unwrap(),
+                    abs_con(0.8)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.8)
+                );
+            }
+
+            #[test]
+            fn reverse() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    reverse: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+            }
+
+            #[test]
+            fn discrete_target() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(4, 5)),
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(0.2),
+                    },
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_eq!(mode.control(abs_con(0.8), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.19), &target, ()).unwrap(),
+                    abs_con(0.19)
+                );
+
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.49), &target, ()).unwrap(),
+                    abs_con(0.49)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn round() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    round_target_value: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(4, 5)),
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(0.2),
+                    },
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.11), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.19), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.35), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.49), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn jump_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    jump_interval: create_unit_value_interval(0.0, 0.2),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.5)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs_con(0.0), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.1), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.7), &target, ()).unwrap(),
+                    abs_con(0.7)
+                );
+                assert!(mode.control(abs_con(0.8), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.9), &target, ()).is_none());
+                assert!(mode.control(abs_con(1.0), &target, ()).is_none());
+            }
+
+            #[test]
+            fn jump_interval_min() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    jump_interval: create_unit_value_interval(0.1, 1.0),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.5)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.1), &target, ()).unwrap(),
+                    abs_con(0.1)
+                );
+                assert!(mode.control(abs_con(0.4), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.5), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.6), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn jump_interval_approach() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    jump_interval: create_unit_value_interval(0.0, 0.2),
+                    takeover_mode: TakeoverMode::LongTimeNoSee,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.5)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.1), &target, ()).unwrap(),
+                    abs_con(0.42)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.4), &target, ()).unwrap(),
+                    abs_con(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.6), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.7), &target, ()).unwrap(),
+                    abs_con(0.7)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.8), &target, ()).unwrap(),
+                    abs_con(0.56)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.6)
+                );
+            }
+
+            #[test]
+            fn transformation_ok() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    control_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+            }
+
+            #[test]
+            fn transformation_err() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.777)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn feedback() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 127)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
+                assert_abs_diff_eq!(
+                    mode.feedback(dis_val(60, 127)).unwrap(),
+                    con_val(0.47244094488188976)
+                );
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(127, 127)).unwrap(), con_val(1.0));
+            }
+
+            #[test]
+            fn feedback_with_virtual_source() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    ..Default::default()
+                };
+                let options = ModeFeedbackOptions {
+                    source_is_virtual: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(con_val(0.0), options).unwrap(),
+                    con_val(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(dis_val(0, 127), options)
+                        .unwrap(),
+                    dis_val(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(con_val(0.5), options).unwrap(),
+                    con_val(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(dis_val(60, 127), options)
+                        .unwrap(),
+                    dis_val(60, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(con_val(1.0), options).unwrap(),
+                    con_val(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(dis_val(127, 127), options)
+                        .unwrap(),
+                    dis_val(127, 127)
+                );
+            }
+
+            #[test]
+            fn feedback_reverse() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    reverse: true,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
+            }
+
+            #[test]
+            fn feedback_target_interval() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.2, 1.0),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.2)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.4)).unwrap(), con_val(0.25));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.6)).unwrap(), con_val(0.5));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.8)).unwrap(), con_val(0.75));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(1.0));
+            }
+
+            #[test]
+            fn feedback_target_interval_reverse() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.2, 1.0),
+                    reverse: true,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.2)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.4)).unwrap(), con_val(0.75));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.6)).unwrap(), con_val(0.5));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.8)).unwrap(), con_val(0.25));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
+            }
+
+            #[test]
+            fn feedback_source_and_target_interval() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    source_value_interval: create_unit_value_interval(0.2, 0.8),
+                    target_value_interval: create_unit_value_interval(0.4, 1.0),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.2));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.4)).unwrap(), con_val(0.2));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.7)).unwrap(), con_val(0.5));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.8));
+            }
+
+            #[test]
+            fn feedback_out_of_range_ignore() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert!(mode.feedback(con_val(0.0)).is_none());
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
+                assert!(mode.feedback(con_val(1.0)).is_none());
+            }
+
+            #[test]
+            fn feedback_out_of_range_min() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.2, 0.8),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.1)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.9)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_max_okay() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.02, 0.02),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.01)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.02)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.03)).unwrap(), con_val(0.0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_max_issue_263() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.03, 0.03),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.01)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.03)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.04)).unwrap(), con_val(0.0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_max_issue_263_more() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.03, 0.03),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.01)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(
+                    mode.feedback(con_val(0.029999999329447746)).unwrap(),
+                    con_val(1.0)
+                );
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0300000001)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.04)).unwrap(), con_val(0.0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_target_one_value() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.5, 0.5),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.1)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.9)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_max_target_one_value() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.5, 0.5),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.1)).unwrap(), con_val(0.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.9)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(1.0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_ignore_target_one_value() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    target_value_interval: create_unit_value_interval(0.5, 0.5),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert!(mode.feedback(con_val(0.0)).is_none());
+                assert!(mode.feedback(con_val(0.1)).is_none());
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(1.0));
+                assert!(mode.feedback(con_val(0.9)).is_none());
+                assert!(mode.feedback(con_val(1.0)).is_none());
+            }
+
+            #[test]
+            fn feedback_transformation() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    feedback_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(con_val(0.0)).unwrap(), con_val(1.0));
+                assert_abs_diff_eq!(mode.feedback(con_val(0.5)).unwrap(), con_val(0.5));
+                assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.0));
+            }
+        }
+
+        mod discrete_processing {
+            use super::*;
+
+            #[test]
+            fn default() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(48, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
+                assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                    abs_dis(63, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn default_with_virtual_target() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(48, 127)),
+                    control_type: ControlType::VirtualMulti,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_eq!(mode.control(abs_dis(48, 127), &target, ()), None);
+                assert_eq!(mode.control(abs_con(0.3779527559055118), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                    abs_dis(63, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn default_target_is_trigger() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(48, 127)),
+                    control_type: ControlType::AbsoluteContinuousRetriggerable,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+                assert_eq!(
+                    mode.control(abs_dis(48, 127), &target, ()).unwrap(),
+                    abs_dis(48, 127)
+                );
+                assert_eq!(
+                    mode.control(abs_con(0.3779527559055118), &target, ())
+                        .unwrap(),
+                    abs_con(0.3779527559055118)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                    abs_dis(63, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.5), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+            }
+
+            #[test]
+            fn relative_target() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(48, 127)),
+                    control_type: ControlType::Relative,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert!(mode.control(abs_dis(48, 127), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                    abs_dis(63, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+            }
+
+            #[test]
+            fn source_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(20, 60),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(13, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(20, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(51, 127), &target, ()).unwrap(),
+                    abs_dis(31, 40)
+                );
+                assert_eq!(mode.control(abs_dis(58, 127), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(76, 127), &target, ()).unwrap(),
+                    abs_dis(40, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(80, 127), &target, ()).unwrap(),
+                    abs_dis(40, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(40, 40)
+                );
+            }
+
+            #[test]
+            fn source_interval_out_of_range_ignore() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(20, 60),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(48, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs_dis(0, 127), &target, ()).is_none());
+                assert!(mode.control(abs_dis(19, 127), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(20, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(40, 127), &target, ()).unwrap(),
+                    abs_dis(20, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(40, 40)
+                );
+                assert!(mode.control(abs_dis(70, 127), &target, ()).is_none());
+                assert!(mode.control(abs_dis(100, 127), &target, ()).is_none());
+            }
+
+            #[test]
+            fn source_interval_out_of_range_min() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(20, 60),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(1, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(20, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(40, 127), &target, ()).unwrap(),
+                    abs_dis(20, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(40, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(90, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(0, 40)
+                );
+            }
+
+            #[test]
+            fn source_interval_out_of_range_ignore_source_one_value() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(60, 60),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert!(mode.control(abs_dis(0, 127), &target, ()).is_none());
+                assert!(mode.control(abs_dis(59, 127), &target, ()).is_none());
+                // TODO-high Not sure if this abs_dis(1, 1) is serving the actual use case here
+                //  and in following tests...
+                assert_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(1, 1)
+                );
+                assert!(mode.control(abs_dis(61, 127), &target, ()).is_none());
+                assert!(mode.control(abs_dis(127, 127), &target, ()).is_none());
+            }
+
+            #[test]
+            fn source_interval_out_of_range_min_source_one_value() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(60, 60),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(59, 127), &target, ()).unwrap(),
+                    abs_dis(0, 0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(1, 1)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(61, 127), &target, ()).unwrap(),
+                    abs_dis(0, 0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(61, 127), &target, ()).unwrap(),
+                    abs_dis(0, 0)
+                );
+            }
+
+            #[test]
+            fn source_interval_out_of_range_min_max_source_one_value() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(60, 60),
+                    out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(59, 127), &target, ()).unwrap(),
+                    abs_dis(0, 0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(1, 1)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(61, 127), &target, ()).unwrap(),
+                    abs_dis(1, 1)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(1, 1)
+                );
+            }
+
+            #[test]
+            fn target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(20, 60),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(20, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(10, 127), &target, ()).unwrap(),
+                    abs_dis(30, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(25, 127), &target, ()).unwrap(),
+                    abs_dis(45, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(40, 127), &target, ()).unwrap(),
+                    abs_dis(60, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(50, 127), &target, ()).unwrap(),
+                    abs_dis(60, 60)
+                );
+            }
+
+            #[test]
+            fn target_interval_reverse() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(70, 100),
+                    reverse: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(100, 100)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(1, 127), &target, ()).unwrap(),
+                    abs_dis(99, 100)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(15, 127), &target, ()).unwrap(),
+                    abs_dis(85, 100)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(30, 100), &target, ()).unwrap(),
+                    abs_dis(70, 100)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(40, 100), &target, ()).unwrap(),
+                    abs_dis(70, 100)
+                );
+            }
+
+            #[test]
+            fn source_and_target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(20, 60),
+                    discrete_target_value_interval: Interval::new(20, 60),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(20, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(20, 127), &target, ()).unwrap(),
+                    abs_dis(20, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(30, 127), &target, ()).unwrap(),
+                    abs_dis(30, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(40, 127), &target, ()).unwrap(),
+                    abs_dis(40, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(60, 60)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(100, 127), &target, ()).unwrap(),
+                    abs_dis(60, 60)
+                );
+            }
+
+            #[test]
+            fn source_and_target_interval_shifted() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(20, 60),
+                    discrete_target_value_interval: Interval::new(40, 80),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(40, 80)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(20, 127), &target, ()).unwrap(),
+                    abs_dis(40, 80)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(40, 127), &target, ()).unwrap(),
+                    abs_dis(60, 80)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(80, 80)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(100, 127), &target, ()).unwrap(),
+                    abs_dis(80, 80)
+                );
+            }
+
+            #[test]
+            fn reverse() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    reverse: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(63, 127), &target, ()).unwrap(),
+                    abs_dis(64, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+            }
+
+            #[test]
+            fn round() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    round_target_value: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(0.2),
+                    },
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.11), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(2, 127), &target, ()).unwrap(),
+                    abs_dis(2, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.2), &target, ()).unwrap(),
+                    abs_con(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+            }
+
+            #[test]
+            fn jump_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_jump_interval: Interval::new(0, 2),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(60, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_eq!(mode.control(abs_dis(0, 127), &target, ()), None);
+                assert_eq!(mode.control(abs_dis(57, 127), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(58, 127), &target, ()).unwrap(),
+                    abs_dis(58, 127)
+                );
+                assert_eq!(mode.control(abs_dis(60, 127), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(61, 127), &target, ()).unwrap(),
+                    abs_dis(61, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(62, 127), &target, ()).unwrap(),
+                    abs_dis(62, 127)
+                );
+                assert!(mode.control(abs_dis(63, 127), &target, ()).is_none());
+                assert!(mode.control(abs_dis(127, 127), &target, ()).is_none());
+            }
+
+            #[test]
+            fn jump_interval_min() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_jump_interval: Interval::new(10, 100),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(60, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(1, 127), &target, ()).unwrap(),
+                    abs_dis(1, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(50, 127), &target, ()).unwrap(),
+                    abs_dis(50, 127)
+                );
+                assert!(mode.control(abs_dis(55, 127), &target, ()).is_none());
+                assert!(mode.control(abs_dis(65, 127), &target, ()).is_none());
+                assert!(mode.control(abs_dis(69, 127), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(70, 127), &target, ()).unwrap(),
+                    abs_dis(70, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+            }
+
+            //     #[test]
+            //     fn jump_interval_approach() {
+            //         // Given
+            //         let mut mode: Mode<TestTransformation> = Mode {
+            //             jump_interval: create_unit_value_interval(0.0, 0.2),
+            //             takeover_mode: TakeoverMode::LongTimeNoSee,
+            //             ..Default::default()
+            //         };
+            //         let target = TestTarget {
+            //             current_value: Some(continuous_value(0.5)),
+            //             control_type: ControlType::AbsoluteContinuous,
+            //         };
+            //         // When
+            //         // Then
+            //         assert_abs_diff_eq!(
+            //             mode.control(abs_con(0.0), &target, ()).unwrap(),
+            //             abs_con(0.4)
+            //         );
+            //         assert_abs_diff_eq!(
+            //             mode.control(abs_con(0.1), &target, ()).unwrap(),
+            //             abs_con(0.42)
+            //         );
+            //         assert_abs_diff_eq!(
+            //             mode.control(abs_con(0.4), &target, ()).unwrap(),
+            //             abs_con(0.4)
+            //         );
+            //         assert_abs_diff_eq!(
+            //             mode.control(abs_con(0.6), &target, ()).unwrap(),
+            //             abs_con(0.6)
+            //         );
+            //         assert_abs_diff_eq!(
+            //             mode.control(abs_con(0.7), &target, ()).unwrap(),
+            //             abs_con(0.7)
+            //         );
+            //         assert_abs_diff_eq!(
+            //             mode.control(abs_con(0.8), &target, ()).unwrap(),
+            //             abs_con(0.56)
+            //         );
+            //         assert_abs_diff_eq!(
+            //             mode.control(abs_con(1.0), &target, ()).unwrap(),
+            //             abs_con(0.6)
+            //         );
+            //     }
+            //
+
+            #[test]
+            fn transformation_ok() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    control_transformation: Some(TestTransformation::new(|input| Ok(input + 20.0))),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(20, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(80, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(120, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+            }
+
+            #[test]
+            fn transformation_negative() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    control_transformation: Some(TestTransformation::new(|input| Ok(input - 20.0))),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(20, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(120, 127), &target, ()).unwrap(),
+                    abs_dis(100, 127)
+                );
+            }
+
+            #[test]
+            fn transformation_err() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(38, 127)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 127), &target, ()).unwrap(),
+                    abs_dis(0, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(60, 127), &target, ()).unwrap(),
+                    abs_dis(60, 127)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(127, 127), &target, ()).unwrap(),
+                    abs_dis(127, 127)
+                );
+            }
+
+            #[test]
+            fn feedback() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 10)).unwrap(), dis_val(0, 10));
+                assert_abs_diff_eq!(mode.feedback(dis_val(5, 10)).unwrap(), dis_val(5, 10));
+                assert_abs_diff_eq!(mode.feedback(dis_val(10, 10)).unwrap(), dis_val(10, 10));
+            }
+
+            #[test]
+            fn feedback_with_virtual_source() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    ..Default::default()
+                };
+                let options = ModeFeedbackOptions {
+                    source_is_virtual: true,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(dis_val(0, 10), options).unwrap(),
+                    dis_val(0, 10)
+                );
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(dis_val(5, 10), options).unwrap(),
+                    dis_val(5, 10)
+                );
+                assert_abs_diff_eq!(
+                    mode.feedback_with_options(dis_val(10, 10), options)
+                        .unwrap(),
+                    dis_val(10, 10)
+                );
+            }
+
+            #[test]
+            fn feedback_reverse() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    reverse: true,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 127)).unwrap(), dis_val(127, 127));
+                assert_abs_diff_eq!(mode.feedback(dis_val(5, 127)).unwrap(), dis_val(122, 127));
+                assert_abs_diff_eq!(mode.feedback(dis_val(10, 127)).unwrap(), dis_val(117, 127));
+            }
+
+            #[test]
+            fn feedback_target_interval() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(20, 100),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(20, 100)).unwrap(), dis_val(0, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(40, 100)).unwrap(), dis_val(20, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(60, 100)).unwrap(), dis_val(40, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(80, 100)).unwrap(), dis_val(60, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(80, 80));
+            }
+
+            #[test]
+            fn feedback_target_interval_reverse() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(20, 100),
+                    reverse: true,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(80, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(20, 100)).unwrap(), dis_val(80, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(40, 100)).unwrap(), dis_val(60, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(60, 100)).unwrap(), dis_val(40, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(80, 100)).unwrap(), dis_val(20, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(0, 80));
+            }
+
+            #[test]
+            fn feedback_source_and_target_interval() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_source_value_interval: Interval::new(20, 80),
+                    discrete_target_value_interval: Interval::new(40, 100),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(20, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(40, 100)).unwrap(), dis_val(20, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(70, 100)).unwrap(), dis_val(50, 80));
+                assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(80, 80));
+            }
+
+            #[test]
+            fn feedback_out_of_range_ignore() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(20, 80),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_eq!(mode.feedback(dis_val(0, 100)), None);
+                assert_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(30, 60));
+                assert_eq!(mode.feedback(dis_val(100, 100)), None);
+            }
+
+            #[test]
+            fn feedback_out_of_range_min() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(20, 80),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 60));
+                assert_abs_diff_eq!(mode.feedback(dis_val(10, 100)).unwrap(), dis_val(0, 60));
+                assert_abs_diff_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(30, 60));
+                assert_abs_diff_eq!(mode.feedback(dis_val(90, 100)).unwrap(), dis_val(0, 60));
+                assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(0, 60));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_max_okay() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(2, 2),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(1, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(2, 100)).unwrap(), dis_val(1, 1));
+                assert_abs_diff_eq!(mode.feedback(dis_val(3, 100)).unwrap(), dis_val(0, 0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_max_issue_263() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(3, 3),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(1, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(2, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(3, 100)).unwrap(), dis_val(1, 1));
+                assert_abs_diff_eq!(mode.feedback(dis_val(4, 100)).unwrap(), dis_val(0, 0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_target_one_value() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(50, 50),
+                    out_of_range_behavior: OutOfRangeBehavior::Min,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(10, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(1, 1));
+                assert_abs_diff_eq!(mode.feedback(dis_val(90, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(0, 0));
+            }
+
+            #[test]
+            fn feedback_out_of_range_min_max_target_one_value() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(50, 50),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(0, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(10, 100)).unwrap(), dis_val(0, 0));
+                assert_abs_diff_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(1, 1));
+                assert_abs_diff_eq!(mode.feedback(dis_val(90, 100)).unwrap(), dis_val(1, 1));
+                assert_abs_diff_eq!(mode.feedback(dis_val(100, 100)).unwrap(), dis_val(1, 1));
+            }
+
+            #[test]
+            fn feedback_out_of_range_ignore_target_one_value() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    discrete_target_value_interval: Interval::new(50, 50),
+                    out_of_range_behavior: OutOfRangeBehavior::Ignore,
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_eq!(mode.feedback(dis_val(0, 100)), None);
+                assert_eq!(mode.feedback(dis_val(10, 100)), None);
+                assert_eq!(mode.feedback(dis_val(50, 100)).unwrap(), dis_val(1, 1));
+                assert_eq!(mode.feedback(dis_val(90, 100)), None);
+                assert_eq!(mode.feedback(dis_val(100, 100)), None);
+            }
+
+            #[test]
+            fn feedback_transformation() {
+                // Given
+                let mode: Mode<TestTransformation> = Mode {
+                    use_discrete_processing: true,
+                    feedback_transformation: Some(TestTransformation::new(
+                        |input| Ok(input - 10.0),
+                    )),
+                    ..Default::default()
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.feedback(dis_val(00, 127)).unwrap(), dis_val(0, 127));
+                assert_abs_diff_eq!(mode.feedback(dis_val(50, 127)).unwrap(), dis_val(40, 127));
+                assert_abs_diff_eq!(mode.feedback(dis_val(100, 127)).unwrap(), dis_val(90, 127));
+            }
         }
     }
 
@@ -3678,416 +3764,1035 @@ mod tests {
                 assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
                 assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
             }
+
+            #[test]
+            fn make_absolute_1() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    convert_relative_to_absolute: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.0)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_eq!(mode.control(rel(-10), &target, ()), None);
+                assert_eq!(mode.control(rel(-2), &target, ()), None);
+                assert_eq!(mode.control(rel(-1), &target, ()), None);
+                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.01));
+                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.02));
+                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.03));
+                assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.02));
+            }
+
+            #[test]
+            fn make_absolute_2() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    convert_relative_to_absolute: true,
+                    step_size_interval: create_unit_value_interval(0.01, 0.05),
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(con_val(0.5)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                // TODO-high This behavior is debatable! Normal absolute control elements don't send
+                //  the same absolute value multiple times when hitting knob/fader boundary.
+                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.0));
+                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.0));
+                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.0));
+                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.01));
+                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.03));
+                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.08));
+                assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.03));
+            }
         }
 
         mod absolute_discrete_target {
             use super::*;
 
-            #[test]
-            fn default_1() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                assert!(mode.control(rel(-2), &target, ()).is_none());
-                assert!(mode.control(rel(-1), &target, ()).is_none());
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.05));
+            mod continuous_processing {
+                use super::*;
+
+                #[test]
+                fn default_1() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-2), &target, ()).is_none());
+                    assert!(mode.control(rel(-1), &target, ()).is_none());
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.05));
+                }
+
+                #[test]
+                fn default_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(20, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.95)
+                    );
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.95));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
+                    assert!(mode.control(rel(1), &target, ()).is_none());
+                    assert!(mode.control(rel(2), &target, ()).is_none());
+                    assert!(mode.control(rel(10), &target, ()).is_none());
+                }
+
+                #[test]
+                fn min_step_count_1() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-2), &target, ()).is_none());
+                    assert!(mode.control(rel(-1), &target, ()).is_none());
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.20));
+                    // 4x
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
+                    // 5x
+                    assert_abs_diff_eq!(mode.control(rel(4), &target, ()).unwrap(), abs_con(0.35));
+                    // 7x
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.65));
+                    // 13x
+                    assert_abs_diff_eq!(
+                        mode.control(rel(100), &target, ()).unwrap(),
+                        abs_con(1.00)
+                    );
+                    // 100x
+                }
+
+                #[test]
+                fn min_step_count_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(20, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.35)
+                    );
+                    // 13x
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
+                    // 5x
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8)); // 4x
+                    assert!(mode.control(rel(1), &target, ()).is_none());
+                    assert!(mode.control(rel(2), &target, ()).is_none());
+                    assert!(mode.control(rel(10), &target, ()).is_none());
+                }
+
+                #[test]
+                fn max_step_count_1() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        step_count_interval: create_discrete_increment_interval(1, 2),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-2), &target, ()).is_none());
+                    assert!(mode.control(rel(-1), &target, ()).is_none());
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.10));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.10));
+                }
+
+                #[test]
+                fn max_step_count_throttle() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        step_count_interval: create_discrete_increment_interval(-2, -2),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    // No effect because already min
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    // Every 2nd time
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                    assert!(mode.control(rel(1), &target, ()).is_none());
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                    assert!(mode.control(rel(2), &target, ()).is_none());
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
+                }
+
+                #[test]
+                fn max_step_count_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        step_count_interval: create_discrete_increment_interval(1, 2),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(20, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.90)
+                    );
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.90));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
+                    assert!(mode.control(rel(1), &target, ()).is_none());
+                    assert!(mode.control(rel(2), &target, ()).is_none());
+                    assert!(mode.control(rel(10), &target, ()).is_none());
+                }
+
+                #[test]
+                fn reverse() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        reverse: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.05)
+                    );
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.05));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.05));
+                    assert!(mode.control(rel(1), &target, ()).is_none());
+                    assert!(mode.control(rel(2), &target, ()).is_none());
+                    assert!(mode.control(rel(10), &target, ()).is_none());
+                }
+
+                #[test]
+                fn rotate_1() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        rotate: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(1.0));
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(1.0));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(1.0));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.05));
+                }
+
+                #[test]
+                fn rotate_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        rotate: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(20, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.95)
+                    );
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.95));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.0));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.0));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.0));
+                }
+
+                #[test]
+                fn target_interval_min() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        target_value_interval: create_unit_value_interval(0.2, 0.8),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(4, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-2), &target, ()).is_none());
+                    assert!(mode.control(rel(-1), &target, ()).is_none());
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.25));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.25));
+                }
+
+                #[test]
+                fn target_interval_max() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        target_value_interval: create_unit_value_interval(0.2, 0.8),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(16, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.75)
+                    );
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.75));
+                    assert!(mode.control(rel(1), &target, ()).is_none());
+                    assert!(mode.control(rel(2), &target, ()).is_none());
+                    assert!(mode.control(rel(10), &target, ()).is_none());
+                }
+
+                #[test]
+                fn target_interval_current_target_value_out_of_range() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        target_value_interval: create_unit_value_interval(0.2, 0.8),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                }
+
+                #[test]
+                fn target_interval_step_interval_current_target_value_out_of_range() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        step_count_interval: create_discrete_increment_interval(1, 100),
+                        target_value_interval: create_unit_value_interval(0.2, 0.8),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                }
+
+                #[test]
+                fn target_interval_min_rotate() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        target_value_interval: create_unit_value_interval(0.2, 0.8),
+                        rotate: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(4, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.8));
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.8));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.25));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.25));
+                }
+
+                #[test]
+                fn target_interval_max_rotate() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        target_value_interval: create_unit_value_interval(0.2, 0.8),
+                        rotate: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(16, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.75)
+                    );
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.75));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                }
+
+                #[test]
+                fn target_interval_rotate_current_target_value_out_of_range() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        target_value_interval: create_unit_value_interval(0.2, 0.8),
+                        rotate: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.8));
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.8));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                }
+
+                #[test]
+                fn make_absolute_1() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        convert_relative_to_absolute: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_eq!(mode.control(rel(-10), &target, ()), None);
+                    assert_eq!(mode.control(rel(-2), &target, ()), None);
+                    assert_eq!(mode.control(rel(-1), &target, ()), None);
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.01));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.02));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.03));
+                    assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.02));
+                }
+
+                #[test]
+                fn make_absolute_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        convert_relative_to_absolute: true,
+                        step_size_interval: create_unit_value_interval(0.01, 0.05),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(10, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.0));
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.0));
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.0));
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.01));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.03));
+                    assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.08));
+                    assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.03));
+                }
             }
 
-            #[test]
-            fn default_2() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(1.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.95));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.95));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
-                assert!(mode.control(rel(1), &target, ()).is_none());
-                assert!(mode.control(rel(2), &target, ()).is_none());
-                assert!(mode.control(rel(10), &target, ()).is_none());
-            }
+            mod discrete_processing {
+                use super::*;
 
-            #[test]
-            fn min_step_count_1() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    step_count_interval: create_discrete_increment_interval(4, 100),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                assert!(mode.control(rel(-2), &target, ()).is_none());
-                assert!(mode.control(rel(-1), &target, ()).is_none());
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.20));
-                // 4x
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
-                // 5x
-                assert_abs_diff_eq!(mode.control(rel(4), &target, ()).unwrap(), abs_con(0.35));
-                // 7x
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.65));
-                // 13x
-                assert_abs_diff_eq!(mode.control(rel(100), &target, ()).unwrap(), abs_con(1.00));
-                // 100x
-            }
+                #[test]
+                fn default_1() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        use_discrete_processing: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_eq!(mode.control(rel(-10), &target, ()), None);
+                    assert_eq!(mode.control(rel(-2), &target, ()), None);
+                    assert_eq!(mode.control(rel(-1), &target, ()), None);
+                    assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_dis(1, 20));
+                    assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_dis(1, 20));
+                    assert_abs_diff_eq!(
+                        mode.control(rel(10), &target, ()).unwrap(),
+                        abs_dis(1, 20)
+                    );
+                }
 
-            #[test]
-            fn min_step_count_2() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    step_count_interval: create_discrete_increment_interval(4, 100),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(1.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.35));
-                // 13x
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
-                // 5x
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8)); // 4x
-                assert!(mode.control(rel(1), &target, ()).is_none());
-                assert!(mode.control(rel(2), &target, ()).is_none());
-                assert!(mode.control(rel(10), &target, ()).is_none());
-            }
+                #[test]
+                fn default_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        use_discrete_processing: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(20, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_dis(19, 20)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-2), &target, ()).unwrap(),
+                        abs_dis(19, 20)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-1), &target, ()).unwrap(),
+                        abs_dis(19, 20)
+                    );
+                    assert_eq!(mode.control(rel(1), &target, ()), None);
+                    assert_eq!(mode.control(rel(2), &target, ()), None);
+                    assert_eq!(mode.control(rel(10), &target, ()), None);
+                }
 
-            #[test]
-            fn max_step_count_1() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    step_count_interval: create_discrete_increment_interval(1, 2),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                assert!(mode.control(rel(-2), &target, ()).is_none());
-                assert!(mode.control(rel(-1), &target, ()).is_none());
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.10));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.10));
-            }
+                // #[test]
+                // fn min_step_count_1() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         step_count_interval: create_discrete_increment_interval(4, 100),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert!(mode.control(rel(-10), &target, ()).is_none());
+                //     assert!(mode.control(rel(-2), &target, ()).is_none());
+                //     assert!(mode.control(rel(-1), &target, ()).is_none());
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.20));
+                //     // 4x
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
+                //     // 5x
+                //     assert_abs_diff_eq!(mode.control(rel(4), &target, ()).unwrap(), abs_con(0.35));
+                //     // 7x
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.65));
+                //     // 13x
+                //     assert_abs_diff_eq!(
+                //         mode.control(rel(100), &target, ()).unwrap(),
+                //         abs_con(1.00)
+                //     );
+                //     // 100x
+                // }
+                //
+                // #[test]
+                // fn min_step_count_2() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         step_count_interval: create_discrete_increment_interval(4, 100),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(20, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(
+                //         mode.control(rel(-10), &target, ()).unwrap(),
+                //         abs_con(0.35)
+                //     );
+                //     // 13x
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
+                //     // 5x
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8)); // 4x
+                //     assert!(mode.control(rel(1), &target, ()).is_none());
+                //     assert!(mode.control(rel(2), &target, ()).is_none());
+                //     assert!(mode.control(rel(10), &target, ()).is_none());
+                // }
+                //
+                // #[test]
+                // fn max_step_count_1() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         step_count_interval: create_discrete_increment_interval(1, 2),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert!(mode.control(rel(-10), &target, ()).is_none());
+                //     assert!(mode.control(rel(-2), &target, ()).is_none());
+                //     assert!(mode.control(rel(-1), &target, ()).is_none());
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.10));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.10));
+                // }
+                //
+                // #[test]
+                // fn max_step_count_throttle() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         step_count_interval: create_discrete_increment_interval(-2, -2),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     // No effect because already min
+                //     assert!(mode.control(rel(-10), &target, ()).is_none());
+                //     assert!(mode.control(rel(-10), &target, ()).is_none());
+                //     assert!(mode.control(rel(-10), &target, ()).is_none());
+                //     assert!(mode.control(rel(-10), &target, ()).is_none());
+                //     // Every 2nd time
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                //     assert!(mode.control(rel(1), &target, ()).is_none());
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                //     assert!(mode.control(rel(2), &target, ()).is_none());
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
+                // }
+                //
+                // #[test]
+                // fn max_step_count_2() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         step_count_interval: create_discrete_increment_interval(1, 2),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(20, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(
+                //         mode.control(rel(-10), &target, ()).unwrap(),
+                //         abs_con(0.90)
+                //     );
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.90));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
+                //     assert!(mode.control(rel(1), &target, ()).is_none());
+                //     assert!(mode.control(rel(2), &target, ()).is_none());
+                //     assert!(mode.control(rel(10), &target, ()).is_none());
+                // }
+                //
+                // #[test]
+                // fn reverse() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         reverse: true,
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(
+                //         mode.control(rel(-10), &target, ()).unwrap(),
+                //         abs_con(0.05)
+                //     );
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.05));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.05));
+                //     assert!(mode.control(rel(1), &target, ()).is_none());
+                //     assert!(mode.control(rel(2), &target, ()).is_none());
+                //     assert!(mode.control(rel(10), &target, ()).is_none());
+                // }
+                //
+                // #[test]
+                // fn rotate_1() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         rotate: true,
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(1.0));
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(1.0));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(1.0));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.05));
+                // }
+                //
+                // #[test]
+                // fn rotate_2() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         rotate: true,
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(20, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(
+                //         mode.control(rel(-10), &target, ()).unwrap(),
+                //         abs_con(0.95)
+                //     );
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.95));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.0));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.0));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.0));
+                // }
+                //
+                // #[test]
+                // fn target_interval_min() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         target_value_interval: create_unit_value_interval(0.2, 0.8),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(4, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert!(mode.control(rel(-10), &target, ()).is_none());
+                //     assert!(mode.control(rel(-2), &target, ()).is_none());
+                //     assert!(mode.control(rel(-1), &target, ()).is_none());
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.25));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.25));
+                // }
+                //
+                // #[test]
+                // fn target_interval_max() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         target_value_interval: create_unit_value_interval(0.2, 0.8),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(16, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(
+                //         mode.control(rel(-10), &target, ()).unwrap(),
+                //         abs_con(0.75)
+                //     );
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.75));
+                //     assert!(mode.control(rel(1), &target, ()).is_none());
+                //     assert!(mode.control(rel(2), &target, ()).is_none());
+                //     assert!(mode.control(rel(10), &target, ()).is_none());
+                // }
+                //
+                // #[test]
+                // fn target_interval_current_target_value_out_of_range() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         target_value_interval: create_unit_value_interval(0.2, 0.8),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                // }
+                //
+                // #[test]
+                // fn target_interval_step_interval_current_target_value_out_of_range() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         step_count_interval: create_discrete_increment_interval(1, 100),
+                //         target_value_interval: create_unit_value_interval(0.2, 0.8),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                // }
+                //
+                // #[test]
+                // fn target_interval_min_rotate() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         target_value_interval: create_unit_value_interval(0.2, 0.8),
+                //         rotate: true,
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(4, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.8));
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.8));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.25));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.25));
+                // }
+                //
+                // #[test]
+                // fn target_interval_max_rotate() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         target_value_interval: create_unit_value_interval(0.2, 0.8),
+                //         rotate: true,
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(16, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(
+                //         mode.control(rel(-10), &target, ()).unwrap(),
+                //         abs_con(0.75)
+                //     );
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.75));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                // }
+                //
+                // #[test]
+                // fn target_interval_rotate_current_target_value_out_of_range() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         target_value_interval: create_unit_value_interval(0.2, 0.8),
+                //         rotate: true,
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.8));
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.8));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                // }
 
-            #[test]
-            fn max_step_count_throttle() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    step_count_interval: create_discrete_increment_interval(-2, -2),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                // No effect because already min
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                // Every 2nd time
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
-                assert!(mode.control(rel(1), &target, ()).is_none());
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
-                assert!(mode.control(rel(2), &target, ()).is_none());
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
-            }
-
-            #[test]
-            fn max_step_count_2() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    step_count_interval: create_discrete_increment_interval(1, 2),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(1.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.90));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.90));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
-                assert!(mode.control(rel(1), &target, ()).is_none());
-                assert!(mode.control(rel(2), &target, ()).is_none());
-                assert!(mode.control(rel(10), &target, ()).is_none());
-            }
-
-            #[test]
-            fn reverse() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    reverse: true,
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.05));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.05));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.05));
-                assert!(mode.control(rel(1), &target, ()).is_none());
-                assert!(mode.control(rel(2), &target, ()).is_none());
-                assert!(mode.control(rel(10), &target, ()).is_none());
-            }
-
-            #[test]
-            fn rotate_1() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    rotate: true,
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(1.0));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(1.0));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(1.0));
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.05));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.05));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.05));
-            }
-
-            #[test]
-            fn rotate_2() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    rotate: true,
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(1.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.95));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.95));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.95));
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.0));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.0));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.0));
-            }
-
-            #[test]
-            fn target_interval_min() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.2)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert!(mode.control(rel(-10), &target, ()).is_none());
-                assert!(mode.control(rel(-2), &target, ()).is_none());
-                assert!(mode.control(rel(-1), &target, ()).is_none());
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.25));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.25));
-            }
-
-            #[test]
-            fn target_interval_max() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.8)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.75));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.75));
-                assert!(mode.control(rel(1), &target, ()).is_none());
-                assert!(mode.control(rel(2), &target, ()).is_none());
-                assert!(mode.control(rel(10), &target, ()).is_none());
-            }
-
-            #[test]
-            fn target_interval_current_target_value_out_of_range() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
-            }
-
-            #[test]
-            fn target_interval_step_interval_current_target_value_out_of_range() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    step_count_interval: create_discrete_increment_interval(1, 100),
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
-            }
-
-            #[test]
-            fn target_interval_min_rotate() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
-                    rotate: true,
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.2)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.8));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.8));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8));
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.25));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.25));
-            }
-
-            #[test]
-            fn target_interval_max_rotate() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
-                    rotate: true,
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.8)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.75));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.75));
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
-            }
-
-            #[test]
-            fn target_interval_rotate_current_target_value_out_of_range() {
-                // Given
-                let mut mode: Mode<TestTransformation> = Mode {
-                    target_value_interval: create_unit_value_interval(0.2, 0.8),
-                    rotate: true,
-                    ..Default::default()
-                };
-                let target = TestTarget {
-                    current_value: Some(con_val(0.0)),
-                    control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.05),
-                    },
-                };
-                // When
-                // Then
-                assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.8));
-                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.8));
-                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8));
-                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
-                assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+                // #[test]
+                // fn make_absolute_1() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         convert_relative_to_absolute: true,
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(0, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_eq!(mode.control(rel(-10), &target, ()), None);
+                //     assert_eq!(mode.control(rel(-2), &target, ()), None);
+                //     assert_eq!(mode.control(rel(-1), &target, ()), None);
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.01));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.02));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.03));
+                //     assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.02));
+                // }
+                //
+                // #[test]
+                // fn make_absolute_2() {
+                //     // Given
+                //     let mut mode: Mode<TestTransformation> = Mode {
+                //         convert_relative_to_absolute: true,
+                //         step_size_interval: create_unit_value_interval(0.01, 0.05),
+                //         ..Default::default()
+                //     };
+                //     let target = TestTarget {
+                //         current_value: Some(dis_val(10, 20)),
+                //         control_type: ControlType::AbsoluteDiscrete {
+                //             atomic_step_size: UnitValue::new(0.05),
+                //         },
+                //     };
+                //     // When
+                //     // Then
+                //     assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.0));
+                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.0));
+                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.0));
+                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.01));
+                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.03));
+                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.08));
+                //     assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.03));
+                // }
             }
         }
 

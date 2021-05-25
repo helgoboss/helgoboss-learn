@@ -1,4 +1,4 @@
-use crate::{Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
+use crate::{DiscreteIncrement, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Fraction {
@@ -113,6 +113,56 @@ impl Fraction {
         let unrooted_max = interval.min_val() + min_span;
         // fraction
         Fraction::new(unrooted_actual, unrooted_max)
+    }
+
+    /// Adds the given increment. If the result doesn't fit into the given interval anymore, it just
+    /// snaps to the opposite bound of that interval. If this fraction is not within the given
+    /// interval in the first place, it returns an appropriate interval bound instead of doing the
+    /// addition.
+    pub fn add_rotating(&self, increment: DiscreteIncrement, interval: &Interval<u32>) -> Fraction {
+        let (min, max) = (interval.min_val(), interval.max_val());
+        use IntervalMatchResult::*;
+        let new_actual = match interval.value_matches(self.actual) {
+            Lower | Greater => {
+                if increment.is_positive() {
+                    min
+                } else {
+                    max
+                }
+            }
+            Between | Min | Max | MinAndMax => {
+                let sum = self.actual as i32 + increment.get();
+                let raw_interval: Interval<i32> = (*interval).into();
+                match raw_interval.value_matches(sum) {
+                    Between => sum as _,
+                    Min | Greater => min,
+                    Max | Lower | MinAndMax => max,
+                }
+            }
+        };
+        Fraction::new(new_actual, max)
+    }
+
+    /// Adds the given increment. If the result doesn't fit into the given interval anymore, it just
+    /// snaps to the bound of that interval. If this fraction is not within the given interval in
+    /// the first place, it returns the closest interval bound instead of doing the addition.
+    pub fn add_clamping(&self, increment: DiscreteIncrement, interval: &Interval<u32>) -> Fraction {
+        let (min, max) = (interval.min_val(), interval.max_val());
+        use IntervalMatchResult::*;
+        let new_actual = match interval.value_matches(self.actual) {
+            Lower => min,
+            Greater => max,
+            Between | Min | Max | MinAndMax => {
+                let sum = self.actual as i32 + increment.get();
+                let raw_interval: Interval<i32> = (*interval).into();
+                match raw_interval.value_matches(sum) {
+                    Between => sum as _,
+                    Min | Lower => min,
+                    Max | Greater | MinAndMax => max,
+                }
+            }
+        };
+        Fraction::new(new_actual, max)
     }
 }
 

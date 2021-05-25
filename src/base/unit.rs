@@ -74,6 +74,12 @@ impl From<f64> for SoftSymmetricUnitValue {
     }
 }
 
+impl From<UnitValue> for f64 {
+    fn from(v: UnitValue) -> Self {
+        v.get()
+    }
+}
+
 impl std::str::FromStr for SoftSymmetricUnitValue {
     type Err = &'static str;
 
@@ -327,14 +333,11 @@ impl UnitValue {
             }
             Between | Min | Max | MinAndMax => {
                 let sum = self.0 + increment.get();
-                match interval.to_raw().value_matches_tolerant(sum, epsilon) {
+                let raw_interval: Interval<f64> = (*interval).into();
+                match raw_interval.value_matches_tolerant(sum, epsilon) {
                     Between => UnitValue::new_clamped(sum),
-                    Min => min,
-                    Max => max,
-                    Lower => max,
-                    Greater => min,
-                    // Rotation makes no sense for this one.
-                    MinAndMax => max,
+                    Min | Greater => min,
+                    Max | Lower | MinAndMax => max,
                 }
             }
         }
@@ -409,6 +412,12 @@ impl Sub for UnitValue {
     }
 }
 
+impl From<Interval<UnitValue>> for Interval<f64> {
+    fn from(source: Interval<UnitValue>) -> Self {
+        Interval::new(source.min_val().get(), source.max_val().get())
+    }
+}
+
 impl TryFrom<f64> for UnitValue {
     type Error = &'static str;
 
@@ -446,10 +455,6 @@ impl Interval<UnitValue> {
     /// Inverts the interval.
     pub fn inverse(&self) -> Interval<UnitValue> {
         Interval::new(self.max_val().inverse(), self.min_val().inverse())
-    }
-
-    pub fn to_raw(&self) -> Interval<f64> {
-        Interval::new(self.min_val().get(), self.max_val().get())
     }
 }
 
