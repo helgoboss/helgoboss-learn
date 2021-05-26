@@ -60,7 +60,11 @@ pub(crate) fn feedback<T: Transformation>(
     );
     // 3. Apply reverse
     v = if reverse {
-        v.inverse(discrete_target_value_interval.span())
+        let fixed_max_discrete_source_value = options.max_discrete_source_value.map(|m| {
+            let difference = m as i32 - discrete_source_value_interval.min_val() as i32;
+            std::cmp::max(difference, 0) as u32
+        });
+        v.inverse(fixed_max_discrete_source_value)
     } else {
         v
     };
@@ -75,6 +79,7 @@ pub(crate) fn feedback<T: Transformation>(
         source_value_interval,
         discrete_source_value_interval,
         is_discrete_mode,
+        options.max_discrete_source_value,
     );
     //
     v = if is_discrete_mode || options.source_is_virtual {

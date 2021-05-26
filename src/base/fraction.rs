@@ -22,7 +22,7 @@ impl Fraction {
         Self::new(max, max)
     }
 
-    pub fn actual(&self) -> u32 {
+    pub const fn actual(&self) -> u32 {
         self.actual
     }
 
@@ -30,7 +30,7 @@ impl Fraction {
         std::cmp::min(self.actual, self.max)
     }
 
-    pub fn max_val(&self) -> u32 {
+    pub const fn max_val(&self) -> u32 {
         self.max
     }
 
@@ -102,17 +102,11 @@ impl Fraction {
     }
 
     /// This value is supposed to be normalized (0-rooted).
-    pub fn denormalize(&self, interval: &Interval<u32>) -> Self {
-        let rooted_actual = self.actual;
-        let rooted_max = self.max;
-        // actual
-        let unrooted_actual = interval.min_val() + rooted_actual;
-        let unrooted_actual = std::cmp::min(unrooted_actual, interval.max_val());
-        // max
-        let min_span = std::cmp::min(rooted_max, interval.span());
-        let unrooted_max = interval.min_val() + min_span;
-        // fraction
-        Fraction::new(unrooted_actual, unrooted_max)
+    pub fn denormalize(&self, interval: &Interval<u32>, discrete_max: Option<u32>) -> Self {
+        let new_max = discrete_max.unwrap_or(self.max);
+        let clamped_interval_max = std::cmp::min(interval.max_val(), new_max);
+        let denorm_actual = std::cmp::min(interval.min_val() + self.actual, clamped_interval_max);
+        Fraction::new(denorm_actual, new_max)
     }
 
     /// Adds the given increment. If the result doesn't fit into the given interval anymore, it just
@@ -237,20 +231,40 @@ mod tests {
         // When
         // Then
         assert_eq!(
-            Fraction::new(5, 127).denormalize(&source_interval),
-            Fraction::new(105, 120)
+            Fraction::new(5, 127).denormalize(&source_interval, Some(130)),
+            Fraction::new(105, 130)
         );
         assert_eq!(
-            Fraction::new(0, 127).denormalize(&source_interval),
-            Fraction::new(100, 120)
+            Fraction::new(0, 127).denormalize(&source_interval, Some(130)),
+            Fraction::new(100, 130)
         );
         assert_eq!(
-            Fraction::new(20, 127).denormalize(&source_interval),
-            Fraction::new(120, 120)
+            Fraction::new(20, 127).denormalize(&source_interval, Some(130)),
+            Fraction::new(120, 130)
         );
         assert_eq!(
-            Fraction::new(30, 127).denormalize(&source_interval),
-            Fraction::new(120, 120)
+            Fraction::new(30, 127).denormalize(&source_interval, Some(130)),
+            Fraction::new(120, 130)
+        );
+        assert_eq!(
+            Fraction::new(5, 127).denormalize(&source_interval, Some(110)),
+            Fraction::new(105, 110)
+        );
+        assert_eq!(
+            Fraction::new(0, 127).denormalize(&source_interval, Some(110)),
+            Fraction::new(100, 110)
+        );
+        assert_eq!(
+            Fraction::new(20, 127).denormalize(&source_interval, Some(110)),
+            Fraction::new(110, 110)
+        );
+        assert_eq!(
+            Fraction::new(30, 127).denormalize(&source_interval, Some(110)),
+            Fraction::new(110, 110)
+        );
+        assert_eq!(
+            Fraction::new(30, 127).denormalize(&source_interval, None),
+            Fraction::new(120, 127)
         );
     }
 
@@ -261,20 +275,40 @@ mod tests {
         // When
         // Then
         assert_eq!(
-            Fraction::new(0, 20).denormalize(&source_interval),
-            Fraction::new(10, 30)
+            Fraction::new(0, 20).denormalize(&source_interval, Some(40)),
+            Fraction::new(10, 40)
         );
         assert_eq!(
-            Fraction::new(5, 20).denormalize(&source_interval),
-            Fraction::new(15, 30)
+            Fraction::new(5, 20).denormalize(&source_interval, Some(40)),
+            Fraction::new(15, 40)
         );
         assert_eq!(
-            Fraction::new(10, 20).denormalize(&source_interval),
-            Fraction::new(20, 30)
+            Fraction::new(10, 20).denormalize(&source_interval, Some(40)),
+            Fraction::new(20, 40)
         );
         assert_eq!(
-            Fraction::new(15, 20).denormalize(&source_interval),
-            Fraction::new(25, 30)
+            Fraction::new(15, 20).denormalize(&source_interval, Some(40)),
+            Fraction::new(25, 40)
+        );
+        assert_eq!(
+            Fraction::new(0, 20).denormalize(&source_interval, Some(17)),
+            Fraction::new(10, 17)
+        );
+        assert_eq!(
+            Fraction::new(5, 20).denormalize(&source_interval, Some(17)),
+            Fraction::new(15, 17)
+        );
+        assert_eq!(
+            Fraction::new(10, 20).denormalize(&source_interval, Some(17)),
+            Fraction::new(17, 17)
+        );
+        assert_eq!(
+            Fraction::new(15, 20).denormalize(&source_interval, Some(17)),
+            Fraction::new(17, 17)
+        );
+        assert_eq!(
+            Fraction::new(15, 20).denormalize(&source_interval, None),
+            Fraction::new(20, 20)
         );
     }
 }

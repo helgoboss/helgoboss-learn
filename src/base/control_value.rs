@@ -196,6 +196,7 @@ impl AbsoluteValue {
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
         is_discrete_mode: bool,
+        discrete_max: Option<u32>,
     ) -> Self {
         use AbsoluteValue::*;
         match self {
@@ -206,7 +207,7 @@ impl AbsoluteValue {
             Discrete(v) => {
                 if is_discrete_mode {
                     // Denormalize without scaling.
-                    let unrooted = v.denormalize(discrete_interval);
+                    let unrooted = v.denormalize(discrete_interval, discrete_max);
                     Discrete(unrooted)
                 } else if continuous_interval.is_full() {
                     // Retain discreteness of value even in non-discrete mode if this is a no-op!
@@ -268,11 +269,13 @@ impl AbsoluteValue {
         }
     }
 
-    pub fn inverse(self, discrete_max: u32) -> Self {
+    pub fn inverse(self, discrete_max: Option<u32>) -> Self {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => Self::Continuous(v.inverse()),
-            Discrete(f) => Self::Discrete(f.with_max(discrete_max).inverse()),
+            Discrete(f) => {
+                Self::Discrete(f.with_max(discrete_max.unwrap_or(f.max_val())).inverse())
+            }
         }
     }
 
@@ -390,9 +393,9 @@ mod tests {
         let discrete_interval = Interval::new(100, 500);
         // When
         let continuous_normalized =
-            continuous.denormalize(&continuous_interval, &discrete_interval, true);
+            continuous.denormalize(&continuous_interval, &discrete_interval, true, Some(500));
         let discrete_normalized =
-            discrete.denormalize(&continuous_interval, &discrete_interval, true);
+            discrete.denormalize(&continuous_interval, &discrete_interval, true, Some(500));
         // Then
         assert_abs_diff_eq!(
             continuous_normalized.to_unit_value().get(),
@@ -401,7 +404,7 @@ mod tests {
         );
         assert_eq!(
             discrete_normalized,
-            AbsoluteValue::Discrete(Fraction::new(205, 227))
+            AbsoluteValue::Discrete(Fraction::new(205, 500))
         );
     }
 }
