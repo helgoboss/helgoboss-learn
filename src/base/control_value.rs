@@ -43,7 +43,7 @@ impl ControlValue {
     }
 
     /// Extracts the unit value if this is an absolute control value.
-    pub fn as_unit_value(self) -> Result<UnitValue, &'static str> {
+    pub fn to_unit_value(self) -> Result<UnitValue, &'static str> {
         match self {
             ControlValue::AbsoluteContinuous(v) => Ok(v),
             ControlValue::AbsoluteDiscrete(f) => Ok(f.to_unit_value()),

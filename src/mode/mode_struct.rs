@@ -577,13 +577,10 @@ impl<T: Transformation> Mode<T> {
             // We must normalize the target value value and use it in the inversion operation.
             // As an alternative, we could BEFORE doing all that stuff homogenize the source and
             // target intervals to have the same (minimum) size?
-            // TODO-high This is duplicated in feedback_util
-            let fixed_max_discrete_target_value = control_type.discrete_max().map(|m| {
-                let m = std::cmp::min(m, self.discrete_target_value_interval.max_val());
-                let difference = m as i32 - self.discrete_target_value_interval.min_val() as i32;
-                std::cmp::max(difference, 0) as u32
-            });
-            v = v.inverse(fixed_max_discrete_target_value);
+            let normalized_max_discrete_target_value = control_type
+                .discrete_max()
+                .map(|m| self.discrete_target_value_interval.normalize_to_min(m));
+            v = v.inverse(normalized_max_discrete_target_value);
         };
         // 4. Apply target interval
         v = v.denormalize(

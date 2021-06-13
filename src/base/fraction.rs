@@ -172,6 +172,14 @@ impl Fraction {
     }
 }
 
+impl Interval<u32> {
+    pub fn normalize_to_min(&self, value: u32) -> u32 {
+        let value = std::cmp::min(value, self.max_val());
+        let difference = value as i32 - self.min_val() as i32;
+        std::cmp::max(difference, 0) as u32
+    }
+}
+
 pub fn full_discrete_interval() -> Interval<u32> {
     Interval::new(0, u32::MAX)
 }

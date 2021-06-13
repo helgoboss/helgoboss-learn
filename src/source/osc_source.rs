@@ -236,7 +236,7 @@ impl OscSource {
     }
 
     pub fn format_control_value(&self, value: ControlValue) -> Result<String, &'static str> {
-        let v = value.as_unit_value()?.get();
+        let v = value.to_unit_value()?.get();
         Ok(format_percentage_without_unit(v))
     }
 

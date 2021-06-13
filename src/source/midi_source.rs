@@ -1,7 +1,7 @@
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, Bpm, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, Fraction, MidiSourceScript, MidiSourceValue,
-    RawMidiPattern, UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
+    ControlValue, DetailedSourceCharacter, DiscreteIncrement, Fraction, MidiSourceScript,
+    MidiSourceValue, RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -571,7 +571,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
     /// supported by this source.
     pub fn feedback<M: ShortMessage + ShortMessageFactory>(
         &self,
-        feedback_value: UnitValue,
+        feedback_value: AbsoluteValue,
     ) -> Option<MidiSourceValue<M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
@@ -688,15 +688,15 @@ impl<S: MidiSourceScript> MidiSource<S> {
         use MidiSource::*;
         let result = match self {
             ClockTempo => {
-                let bpm = Bpm::from_unit_value(value.as_unit_value()?);
+                let bpm = Bpm::from_unit_value(value.to_unit_value()?);
                 format!("{:.2}", bpm.get())
             }
             ClockTransport { .. } => {
                 return Err("clock transport sources have just one possible control value");
             }
-            Script { .. } => format_percentage_without_unit(value.as_unit_value()?.get()),
+            Script { .. } => format_percentage_without_unit(value.to_unit_value()?.get()),
             _ => self
-                .convert_control_value_to_midi_value(value.as_unit_value()?)?
+                .convert_control_value_to_midi_value(value.to_unit_value()?)?
                 .to_string(),
         };
         Ok(result)
@@ -749,7 +749,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
     ///
     /// Returns an error if it doesn't make sense for this source type (e.g. MIDI clock and sources
     /// which emit increments).
-    fn convert_control_value_to_midi_value(&self, value: UnitValue) -> Result<i32, &'static str> {
+    fn convert_control_value_to_midi_value(&self, v: UnitValue) -> Result<i32, &'static str> {
+        let value = AbsoluteValue::Continuous(v);
         use MidiSource::*;
         let midi_value: i32 = match self {
             NoteVelocity { .. }
@@ -770,7 +771,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     }
                 }
             },
-            Raw { pattern, .. } => value.to_discrete(pattern.max_discrete_value()) as _,
+            Raw { pattern, .. } => v.to_discrete(pattern.max_discrete_value()) as _,
             ClockTempo | ClockTransport { .. } | Script { .. } => {
                 return Err("not supported");
             }
@@ -933,12 +934,22 @@ fn normalize_14_bit_centered(value: U14) -> Fraction {
     Fraction::new(value.into(), U14::MAX.get() as u32 + 1)
 }
 
-fn denormalize_7_bit<T: From<U7>>(value: UnitValue) -> T {
-    unsafe { U7::new_unchecked((value.get() * U7::MAX.get() as f64).round() as u8) }.into()
+fn denormalize_7_bit<T: From<U7>>(value: AbsoluteValue) -> T {
+    match value {
+        AbsoluteValue::Continuous(v) => {
+            unsafe { U7::new_unchecked((v.get() * U7::MAX.get() as f64).round() as u8) }.into()
+        }
+        AbsoluteValue::Discrete(f) => U7::try_from(f.actual()).unwrap_or(U7::MAX).into(),
+    }
 }
 
-fn denormalize_14_bit<T: From<U14>>(value: UnitValue) -> T {
-    unsafe { U14::new_unchecked((value.get() * U14::MAX.get() as f64).round() as u16) }.into()
+fn denormalize_14_bit<T: From<U14>>(value: AbsoluteValue) -> T {
+    match value {
+        AbsoluteValue::Continuous(v) => {
+            unsafe { U14::new_unchecked((v.get() * U14::MAX.get() as f64).round() as u16) }.into()
+        }
+        AbsoluteValue::Discrete(f) => U14::try_from(f.actual()).unwrap_or(U14::MAX).into(),
+    }
 }
 
 /// When doing the mapping, this doesn't consider 16383 as maximum value but 16384. However, the
@@ -956,9 +967,14 @@ fn denormalize_14_bit<T: From<U14>>(value: UnitValue) -> T {
 ///   Official center is 8192.
 /// - Signed view: Possible pitch bend values go from -8192 to 8191. Exact center would be -0.5.
 ///   Official center is 0.
-fn denormalize_14_bit_centered<T: From<U14>>(value: UnitValue) -> T {
-    let spread = (value.get() * (U14::MAX.get() + 1) as f64).round() as u16;
-    unsafe { U14::new_unchecked(spread.min(16383)) }.into()
+fn denormalize_14_bit_centered<T: From<U14>>(value: AbsoluteValue) -> T {
+    match value {
+        AbsoluteValue::Continuous(v) => {
+            let spread = (v.get() * (U14::MAX.get() + 1) as f64).round() as u16;
+            unsafe { U14::new_unchecked(spread.min(16383)) }.into()
+        }
+        AbsoluteValue::Discrete(f) => U14::try_from(f.actual()).unwrap_or(U14::MAX).into(),
+    }
 }
 
 const fn abs(value: Fraction) -> ControlValue {
@@ -2232,8 +2248,8 @@ mod tests {
         MidiSourceValue::ControlChange14Bit(msg)
     }
 
-    fn uv(value: f64) -> UnitValue {
-        UnitValue::new(value)
+    fn uv(value: f64) -> AbsoluteValue {
+        AbsoluteValue::Continuous(UnitValue::new(value))
     }
 
     fn tempo(bpm: f64) -> MidiSourceValue<RawShortMessage> {
