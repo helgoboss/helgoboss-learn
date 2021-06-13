@@ -820,6 +820,53 @@ impl<S: MidiSourceScript> MidiSource<S> {
         };
         Ok(unit_value.to_unit_value())
     }
+
+    pub fn max_discrete_value(&self) -> Option<u32> {
+        use MidiSource::*;
+        match self {
+            NoteVelocity { .. }
+            | PolyphonicKeyPressureAmount { .. }
+            | ProgramChangeNumber { .. }
+            | ChannelPressureAmount { .. }
+            | NoteKeyNumber { .. } => Some(127),
+            ControlChange14BitValue { .. } | PitchBendChangeValue { .. } => Some(16383),
+            ControlChangeValue {
+                custom_character, ..
+            } => {
+                if custom_character.emits_increments() {
+                    None
+                } else {
+                    Some(127)
+                }
+            }
+            ParameterNumberValue {
+                custom_character,
+                is_14_bit,
+                ..
+            } => {
+                if custom_character.emits_increments() {
+                    None
+                } else {
+                    if *is_14_bit == Some(true) {
+                        Some(16383)
+                    } else {
+                        Some(127)
+                    }
+                }
+            }
+            ClockTempo | ClockTransport { .. } | Script { .. } => None,
+            Raw {
+                custom_character,
+                pattern,
+            } => {
+                if custom_character.emits_increments() {
+                    None
+                } else {
+                    Some(pattern.max_discrete_value() as _)
+                }
+            }
+        }
+    }
 }
 
 fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> bool {

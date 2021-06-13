@@ -51,6 +51,15 @@ impl ControlValue {
         }
     }
 
+    /// Extracts an absolute value if this is an absolute control value.
+    pub fn to_absolute_value(self) -> Result<AbsoluteValue, &'static str> {
+        match self {
+            ControlValue::AbsoluteContinuous(v) => Ok(AbsoluteValue::Continuous(v)),
+            ControlValue::AbsoluteDiscrete(f) => Ok(AbsoluteValue::Discrete(f)),
+            _ => Err("control value is not absolute"),
+        }
+    }
+
     /// Extracts the discrete increment if this is a relative control value.
     pub fn as_discrete_increment(self) -> Result<DiscreteIncrement, &'static str> {
         match self {
