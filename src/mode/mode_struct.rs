@@ -884,6 +884,9 @@ impl<T: Transformation> Mode<T> {
         } else {
             v.add_clamping(increment, &self.discrete_target_value_interval)
         };
+        if let Some(target_max) = control_type.discrete_max() {
+            v = v.with_max_clamped(target_max);
+        }
         if v.actual() == current_target_value.actual() {
             return Some(ModeControlResult::LeaveTargetUntouched(
                 ControlValue::AbsoluteDiscrete(v),
@@ -5201,98 +5204,106 @@ mod tests {
                     );
                 }
 
-                // #[test]
-                // fn default_2() {
-                //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode {
-                //         use_discrete_processing: true,
-                //         ..Default::default()
-                //     };
-                //     let target = TestTarget {
-                //         current_value: Some(dis_val(20, 20)),
-                //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
-                //         },
-                //     };
-                //     // When
-                //     // Then
-                //     assert_abs_diff_eq!(
-                //         mode.control(rel(-10), &target, ()).unwrap(),
-                //         abs_dis(19, 20)
-                //     );
-                //     assert_abs_diff_eq!(
-                //         mode.control(rel(-2), &target, ()).unwrap(),
-                //         abs_dis(19, 20)
-                //     );
-                //     assert_abs_diff_eq!(
-                //         mode.control(rel(-1), &target, ()).unwrap(),
-                //         abs_dis(19, 20)
-                //     );
-                //     assert_eq!(mode.control(rel(1), &target, ()), None);
-                //     assert_eq!(mode.control(rel(2), &target, ()), None);
-                //     assert_eq!(mode.control(rel(10), &target, ()), None);
-                // }
+                #[test]
+                fn default_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        use_discrete_processing: true,
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(20, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(1.0 / 21.0),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_dis(19, 20)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-2), &target, ()).unwrap(),
+                        abs_dis(19, 20)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-1), &target, ()).unwrap(),
+                        abs_dis(19, 20)
+                    );
+                    assert_eq!(mode.control(rel(1), &target, ()), None);
+                    assert_eq!(mode.control(rel(2), &target, ()), None);
+                    assert_eq!(mode.control(rel(10), &target, ()), None);
+                }
 
-                // #[test]
-                // fn min_step_count_1() {
-                //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode {
-                //         step_count_interval: create_discrete_increment_interval(4, 100),
-                //         ..Default::default()
-                //     };
-                //     let target = TestTarget {
-                //         current_value: Some(dis_val(0, 20)),
-                //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
-                //         },
-                //     };
-                //     // When
-                //     // Then
-                //     assert!(mode.control(rel(-10), &target, ()).is_none());
-                //     assert!(mode.control(rel(-2), &target, ()).is_none());
-                //     assert!(mode.control(rel(-1), &target, ()).is_none());
-                //     assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.20));
-                //     // 4x
-                //     assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.25));
-                //     // 5x
-                //     assert_abs_diff_eq!(mode.control(rel(4), &target, ()).unwrap(), abs_con(0.35));
-                //     // 7x
-                //     assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.65));
-                //     // 13x
-                //     assert_abs_diff_eq!(
-                //         mode.control(rel(100), &target, ()).unwrap(),
-                //         abs_con(1.00)
-                //     );
-                //     // 100x
-                // }
-                //
-                // #[test]
-                // fn min_step_count_2() {
-                //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode {
-                //         step_count_interval: create_discrete_increment_interval(4, 100),
-                //         ..Default::default()
-                //     };
-                //     let target = TestTarget {
-                //         current_value: Some(dis_val(20, 20)),
-                //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
-                //         },
-                //     };
-                //     // When
-                //     // Then
-                //     assert_abs_diff_eq!(
-                //         mode.control(rel(-10), &target, ()).unwrap(),
-                //         abs_con(0.35)
-                //     );
-                //     // 13x
-                //     assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
-                //     // 5x
-                //     assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8)); // 4x
-                //     assert!(mode.control(rel(1), &target, ()).is_none());
-                //     assert!(mode.control(rel(2), &target, ()).is_none());
-                //     assert!(mode.control(rel(10), &target, ()).is_none());
-                // }
+                #[test]
+                fn min_step_count_1() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        use_discrete_processing: true,
+                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 200)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert!(mode.control(rel(-10), &target, ()).is_none());
+                    assert!(mode.control(rel(-2), &target, ()).is_none());
+                    assert!(mode.control(rel(-1), &target, ()).is_none());
+                    assert_abs_diff_eq!(
+                        mode.control(rel(1), &target, ()).unwrap(),
+                        abs_dis(4, 200)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(2), &target, ()).unwrap(),
+                        abs_dis(5, 200)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(4), &target, ()).unwrap(),
+                        abs_dis(7, 200)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(10), &target, ()).unwrap(),
+                        abs_dis(13, 200)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel(100), &target, ()).unwrap(),
+                        abs_dis(100, 200)
+                    );
+                }
+
+                #[test]
+                fn min_step_count_2() {
+                    // Given
+                    let mut mode: Mode<TestTransformation> = Mode {
+                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        ..Default::default()
+                    };
+                    let target = TestTarget {
+                        current_value: Some(dis_val(20, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(1.0 / 21.0),
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel(-10), &target, ()).unwrap(),
+                        abs_con(0.35)
+                    );
+                    // 13x
+                    assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.75));
+                    // 5x
+                    assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.8)); // 4x
+                    assert!(mode.control(rel(1), &target, ()).is_none());
+                    assert!(mode.control(rel(2), &target, ()).is_none());
+                    assert!(mode.control(rel(10), &target, ()).is_none());
+                }
                 //
                 // #[test]
                 // fn max_step_count_1() {
@@ -5304,7 +5315,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5327,7 +5338,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5355,7 +5366,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(20, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5381,7 +5392,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5407,7 +5418,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5430,7 +5441,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(20, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5456,7 +5467,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(4, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5479,7 +5490,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(16, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5505,7 +5516,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5529,7 +5540,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5553,7 +5564,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(4, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5577,7 +5588,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(16, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5604,7 +5615,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5627,7 +5638,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(0, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
@@ -5652,7 +5663,7 @@ mod tests {
                 //     let target = TestTarget {
                 //         current_value: Some(dis_val(10, 20)),
                 //         control_type: ControlType::AbsoluteDiscrete {
-                //             atomic_step_size: UnitValue::new(0.05),
+                //             atomic_step_size: UnitValue::new(1.0 / 21.0),
                 //         },
                 //     };
                 //     // When
