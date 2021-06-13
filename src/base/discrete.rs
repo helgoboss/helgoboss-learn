@@ -234,9 +234,3 @@ impl Sub for DiscreteIncrement {
 pub fn create_discrete_increment_interval(min: i32, max: i32) -> Interval<DiscreteIncrement> {
     Interval::new(DiscreteIncrement::new(min), DiscreteIncrement::new(max))
 }
-
-impl From<Interval<u32>> for Interval<i32> {
-    fn from(source: Interval<u32>) -> Self {
-        Interval::new(source.min_val() as _, source.max_val() as _)
-    }
-}

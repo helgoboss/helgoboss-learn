@@ -24,7 +24,8 @@ pub(crate) fn feedback<T: Transformation>(
     is_discrete_mode: bool,
     options: ModeFeedbackOptions,
 ) -> Option<AbsoluteValue> {
-    // Filter
+    let mut v = target_value;
+    // 4. Filter and Apply target interval (normalize)
     let interval_match_result = target_value.matches_tolerant(
         target_value_interval,
         discrete_target_value_interval,
@@ -42,7 +43,7 @@ pub(crate) fn feedback<T: Transformation>(
             discrete_target_value_interval,
         )?
     };
-    // 4. Apply target interval
+    v = target_bound_value;
     // Tolerant interval bounds test because of https://github.com/helgoboss/realearn/issues/263.
     // TODO-medium The most elaborate solution to deal with discrete values would be to actually
     //  know which interval of floating point values represents a specific discrete target value.
@@ -51,7 +52,7 @@ pub(crate) fn feedback<T: Transformation>(
     //  rounds them or uses more a ceil/floor approach ... I don't think this is standardized for
     //  VST parameters. We could solve it for our own parameters in future. Until then, having a
     //  fixed epsilon deals at least with most issues I guess.
-    let mut v = target_bound_value.normalize(
+    v = target_bound_value.normalize(
         target_value_interval,
         discrete_target_value_interval,
         min_is_max_behavior,
@@ -59,14 +60,13 @@ pub(crate) fn feedback<T: Transformation>(
         FEEDBACK_EPSILON,
     );
     // 3. Apply reverse
-    v = if reverse {
+    if reverse {
         let fixed_max_discrete_source_value = options.max_discrete_source_value.map(|m| {
+            let m = std::cmp::min(m, discrete_source_value_interval.max_val());
             let difference = m as i32 - discrete_source_value_interval.min_val() as i32;
             std::cmp::max(difference, 0) as u32
         });
-        v.inverse(fixed_max_discrete_source_value)
-    } else {
-        v
+        v = v.inverse(fixed_max_discrete_source_value);
     };
     // 2. Apply transformation
     if let Some(transformation) = transformation.as_ref() {
@@ -81,15 +81,13 @@ pub(crate) fn feedback<T: Transformation>(
         is_discrete_mode,
         options.max_discrete_source_value,
     );
-    //
-    v = if is_discrete_mode || options.source_is_virtual {
-        v
-    } else {
+    // Result
+    if !is_discrete_mode && !options.source_is_virtual {
         // If discrete processing is not explicitly enabled, we must NOT send discrete values to
         // a real (non-virtual) source! This is not just for backward compatibility. It would change
         // how discrete sources react in a surprising way (discrete behavior without having
         // discrete processing enabled).
-        AbsoluteValue::Continuous(v.to_unit_value())
+        v = AbsoluteValue::Continuous(v.to_unit_value());
     };
     Some(v)
 }

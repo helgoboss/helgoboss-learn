@@ -42,6 +42,10 @@ impl Fraction {
         Self::new(self.actual, max)
     }
 
+    pub fn with_max_clamped(&self, max: u32) -> Self {
+        Self::new(std::cmp::min(self.actual, max), max)
+    }
+
     pub fn inverse(&self) -> Self {
         Self {
             actual: self.max - self.actual_clamped(),
@@ -126,11 +130,15 @@ impl Fraction {
             }
             Between | Min | Max | MinAndMax => {
                 let sum = self.actual as i32 + increment.get();
-                let raw_interval: Interval<i32> = (*interval).into();
-                match raw_interval.value_matches(sum) {
-                    Between => sum as _,
-                    Min | Greater => min,
-                    Max | Lower | MinAndMax => max,
+                if sum < 0 {
+                    max
+                } else {
+                    let sum = sum as u32;
+                    match interval.value_matches(sum) {
+                        Between => sum,
+                        Min | Greater => min,
+                        Max | Lower | MinAndMax => max,
+                    }
                 }
             }
         };
@@ -148,11 +156,15 @@ impl Fraction {
             Greater => max,
             Between | Min | Max | MinAndMax => {
                 let sum = self.actual as i32 + increment.get();
-                let raw_interval: Interval<i32> = (*interval).into();
-                match raw_interval.value_matches(sum) {
-                    Between => sum as _,
-                    Min | Lower => min,
-                    Max | Greater | MinAndMax => max,
+                if sum < 0 {
+                    min
+                } else {
+                    let sum = sum as u32;
+                    match interval.value_matches(sum) {
+                        Between => sum,
+                        Min | Lower => min,
+                        Max | Greater | MinAndMax => max,
+                    }
                 }
             }
         };

@@ -269,12 +269,23 @@ impl AbsoluteValue {
         }
     }
 
-    pub fn inverse(self, discrete_max: Option<u32>) -> Self {
+    pub fn inverse(self, new_discrete_max: Option<u32>) -> Self {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => Self::Continuous(v.inverse()),
+            /// 100/100 (max 150) =>   0/150
+            ///   0/100 (max 150) => 100/150
+            /// 100/100 (max 50) =>    0/50
+            ///   0/100 (max 50) =>   50/50   
             Discrete(f) => {
-                Self::Discrete(f.with_max(discrete_max.unwrap_or(f.max_val())).inverse())
+                let res = if let Some(new_max) = new_discrete_max {
+                    let min_max = std::cmp::min(new_max, f.max_val());
+                    let inversed_with_min_max = f.with_max_clamped(min_max).inverse();
+                    inversed_with_min_max.with_max(new_max)
+                } else {
+                    f.inverse()
+                };
+                Self::Discrete(res)
             }
         }
     }
