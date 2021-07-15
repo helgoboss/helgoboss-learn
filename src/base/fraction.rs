@@ -57,7 +57,7 @@ impl Fraction {
         self.actual == 0
     }
 
-    pub fn to_unit_value(&self) -> UnitValue {
+    pub fn to_unit_value(self) -> UnitValue {
         if self.max == 0 {
             return UnitValue::MIN;
         }

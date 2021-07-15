@@ -1,15 +1,24 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    mode::feedback_util, negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue,
-    DiscreteIncrement, DiscreteValue, EncoderUsage, Fraction, Interval, MinIsMaxBehavior,
-    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, Transformation,
-    UnitIncrement, UnitValue, BASE_EPSILON,
+    negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
+    DiscreteValue, EncoderUsage, Fraction, Interval, MinIsMaxBehavior, OutOfRangeBehavior,
+    PressDurationProcessor, TakeoverMode, Target, Transformation, UnitIncrement, UnitValue,
+    BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
+
+/// When interpreting target value, make only 4 fractional digits matter.
+///
+/// If we don't do this and target min == target max, even the slightest imprecision of the actual
+/// target value (which in practice often occurs with FX parameters not taking exactly the desired
+/// value) could result in a totally different feedback value. Maybe it would be better to determine
+/// the epsilon dependent on the source precision (e.g. 1.0/128.0 in case of short MIDI messages)
+/// but right now this should suffice to solve the immediate problem.  
+pub const FEEDBACK_EPSILON: f64 = BASE_EPSILON;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct ModeControlOptions {
@@ -139,7 +148,8 @@ impl<T: Transformation> Mode<T> {
     /// Processes the given control value and maybe returns an appropriate target control value.
     ///
     /// `None` either means ignored or target value already has desired value.
-    pub(crate) fn control<'a, C: Copy>(
+    #[cfg(test)]
+    fn control<'a, C: Copy>(
         &mut self,
         control_value: ControlValue,
         target: &impl Target<'a, Context = C>,
@@ -176,7 +186,8 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
-    pub(crate) fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
+    #[cfg(test)]
+    fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
         self.feedback_with_options(target_value, ModeFeedbackOptions::default())
     }
 
@@ -187,18 +198,69 @@ impl<T: Transformation> Mode<T> {
         target_value: AbsoluteValue,
         options: ModeFeedbackOptions,
     ) -> Option<AbsoluteValue> {
-        feedback_util::feedback(
-            target_value,
-            self.reverse,
-            &self.feedback_transformation,
-            &self.source_value_interval,
-            &self.discrete_source_value_interval,
+        let v = target_value;
+        // 4. Filter and Apply target interval (normalize)
+        let interval_match_result = v.matches_tolerant(
             &self.target_value_interval,
             &self.discrete_target_value_interval,
-            self.out_of_range_behavior,
+            FEEDBACK_EPSILON,
+        );
+        let (mut v, min_is_max_behavior) = if interval_match_result.matches() {
+            // Target value is within target value interval
+            (v, MinIsMaxBehavior::PreferOne)
+        } else {
+            // Target value is outside target value interval
+            self.out_of_range_behavior.process(
+                v,
+                interval_match_result,
+                &self.target_value_interval,
+                &self.discrete_target_value_interval,
+            )?
+        };
+        // Tolerant interval bounds test because of https://github.com/helgoboss/realearn/issues/263.
+        // TODO-medium The most elaborate solution to deal with discrete values would be to actually
+        //  know which interval of floating point values represents a specific discrete target value.
+        //  However, is there a generic way to know that? Taking the target step size as epsilon in this
+        //  case sounds good but we still don't know if the target respects approximate values, if it
+        //  rounds them or uses more a ceil/floor approach ... I don't think this is standardized for
+        //  VST parameters. We could solve it for our own parameters in future. Until then, having a
+        //  fixed epsilon deals at least with most issues I guess.
+        v = v.normalize(
+            &self.target_value_interval,
+            &self.discrete_target_value_interval,
+            min_is_max_behavior,
             self.use_discrete_processing,
-            options,
-        )
+            FEEDBACK_EPSILON,
+        );
+        // 3. Apply reverse
+        if self.reverse {
+            let normalized_max_discrete_source_value = options
+                .max_discrete_source_value
+                .map(|m| self.discrete_source_value_interval.normalize_to_min(m));
+            v = v.inverse(normalized_max_discrete_source_value);
+        };
+        // 2. Apply transformation
+        if let Some(transformation) = self.feedback_transformation.as_ref() {
+            if let Ok(res) = v.transform(transformation, Some(v), self.use_discrete_processing) {
+                v = res;
+            }
+        };
+        // 1. Apply source interval
+        v = v.denormalize(
+            &self.source_value_interval,
+            &self.discrete_source_value_interval,
+            self.use_discrete_processing,
+            options.max_discrete_source_value,
+        );
+        // Result
+        if !self.use_discrete_processing && !options.source_is_virtual {
+            // If discrete processing is not explicitly enabled, we must NOT send discrete values to
+            // a real (non-virtual) source! This is not just for backward compatibility. It would change
+            // how discrete sources react in a surprising way (discrete behavior without having
+            // discrete processing enabled).
+            v = AbsoluteValue::Continuous(v.to_unit_value());
+        };
+        Some(v)
     }
 
     /// If this returns `true`, the `poll` method should be called, on a regular basis.
@@ -338,7 +400,7 @@ impl<T: Transformation> Mode<T> {
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
-        // TODO-high In discrete processing, don't interpret current target value as percentage!
+        // TODO-high-discrete In discrete processing, don't interpret current target value as percentage!
         if control_value.is_zero()
             || !self
                 .source_value_interval
@@ -425,7 +487,8 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = C>,
         context: C,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
-        // TODO-high In discrete processing, don't interpret current target value as percentage!
+        // TODO-high-discrete In discrete processing, don't interpret current target value as
+        //  percentage!
         if control_value.is_zero() {
             return None;
         }
@@ -631,8 +694,8 @@ impl<T: Transformation> Mode<T> {
                     None
                 }
                 Parallel => {
-                    // TODO-high Implement advanced takeover modes for discrete values, too!
-                    // TODO-high Add tests for advanced takeover modes!
+                    // TODO-high-discrete Implement advanced takeover modes for discrete values, too
+                    // TODO-medium Add tests for advanced takeover modes!
                     if let Some(prev) = previous_control_value {
                         let relative_increment =
                             control_value.to_unit_value() - prev.to_unit_value();
@@ -795,7 +858,7 @@ impl<T: Transformation> Mode<T> {
         if self.use_discrete_processing {
             // Discrete processing for discrete target. Good!
             match current_value()? {
-                AbsoluteValue::Continuous(v) => {
+                AbsoluteValue::Continuous(_) => {
                     // But target reports continuous value!? Shouldn't happen. Whatever, fall back
                     // to continuous processing.
                     self.hit_target_absolutely_with_unit_increment(
@@ -2059,7 +2122,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(48, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2116,7 +2179,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2173,7 +2236,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(48, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2231,7 +2294,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2289,7 +2352,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2352,7 +2415,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(248, 350)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 351.0),
+                        atomic_step_size: UnitValue::new(1.0 / 350.0),
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -2430,7 +2493,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 150)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 151.0),
+                        atomic_step_size: UnitValue::new(1.0 / 150.0),
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -2487,7 +2550,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 150)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 151.0),
+                        atomic_step_size: UnitValue::new(1.0 / 150.0),
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -2544,7 +2607,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(48, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2597,7 +2660,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2650,7 +2713,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(48, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2704,7 +2767,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 201.0),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -2758,7 +2821,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(248, 350)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 351.0),
+                        atomic_step_size: UnitValue::new(1.0 / 350.0),
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -2832,7 +2895,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 150)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 151.0),
+                        atomic_step_size: UnitValue::new(1.0 / 150.0),
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -2890,7 +2953,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(98, 150)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(1.0 / 151.0),
+                        atomic_step_size: UnitValue::new(1.0 / 150.0),
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -3014,7 +3077,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(48, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -3023,15 +3086,15 @@ mod tests {
                 assert!(mode.control(abs_dis(19, 127), &target, ()).is_none());
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(40, 127), &target, ()).unwrap(),
-                    abs_dis(20, 199)
+                    abs_dis(20, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                    abs_dis(40, 199)
+                    abs_dis(40, 200)
                 );
                 assert!(mode.control(abs_dis(70, 127), &target, ()).is_none());
                 assert!(mode.control(abs_dis(100, 127), &target, ()).is_none());
@@ -3049,38 +3112,38 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(1, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(40, 127), &target, ()).unwrap(),
-                    abs_dis(20, 199)
+                    abs_dis(20, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                    abs_dis(40, 199)
+                    abs_dis(40, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(90, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
             }
 
@@ -3096,18 +3159,18 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert!(mode.control(abs_dis(0, 127), &target, ()).is_none());
                 assert!(mode.control(abs_dis(59, 127), &target, ()).is_none());
-                // TODO-high Not sure if this abs_dis(1, 1) is serving the actual use case here
-                //  and in following tests...
+                // TODO-high-discrete Not sure if this abs_dis(1, 1) is serving the actual use case
+                //  here and in following tests...
                 assert_eq!(
                     mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                    abs_dis(1, 199)
+                    abs_dis(1, 200)
                 );
                 assert!(mode.control(abs_dis(61, 127), &target, ()).is_none());
                 assert!(mode.control(abs_dis(127, 127), &target, ()).is_none());
@@ -3125,30 +3188,30 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(59, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                    abs_dis(1, 199)
+                    abs_dis(1, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
             }
 
@@ -3164,37 +3227,37 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(59, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                    abs_dis(1, 199)
+                    abs_dis(1, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                    abs_dis(1, 199)
+                    abs_dis(1, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                    abs_dis(1, 199)
+                    abs_dis(1, 200)
                 );
             }
 
             #[test]
             fn target_interval_reverse() {
-                // TODO-high Add other reverse tests with source and target interval and also
-                //  intervals with max values! First for continuous!
+                // TODO-high-discrete Add other reverse tests with source and target interval and
+                //  also intervals with max values! First for continuous!
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode {
                     use_discrete_processing: true,
@@ -3205,30 +3268,30 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(100, 199)
+                    abs_dis(100, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(1, 127), &target, ()).unwrap(),
-                    abs_dis(99, 199)
+                    abs_dis(99, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(15, 127), &target, ()).unwrap(),
-                    abs_dis(85, 199)
+                    abs_dis(85, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(30, 100), &target, ()).unwrap(),
-                    abs_dis(70, 199)
+                    abs_dis(70, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(40, 100), &target, ()).unwrap(),
-                    abs_dis(70, 199)
+                    abs_dis(70, 200)
                 );
             }
 
@@ -3243,22 +3306,22 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(127, 199)
+                    abs_dis(127, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(63, 127), &target, ()).unwrap(),
-                    abs_dis(127 - 63, 199)
+                    abs_dis(127 - 63, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                    abs_dis(127 - 127, 199)
+                    abs_dis(127 - 127, 200)
                 );
             }
 
@@ -3280,16 +3343,16 @@ mod tests {
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(0, 4)
+                    abs_dis(0, 5)
                 );
                 assert_eq!(mode.control(abs_dis(2, 127), &target, ()), None);
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(3, 127), &target, ()).unwrap(),
-                    abs_dis(3, 4)
+                    abs_dis(3, 5)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                    abs_dis(4, 4)
+                    abs_dis(5, 5)
                 );
             }
 
@@ -3304,7 +3367,7 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(60, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
@@ -3313,19 +3376,19 @@ mod tests {
                 assert_eq!(mode.control(abs_dis(57, 127), &target, ()), None);
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(58, 127), &target, ()).unwrap(),
-                    abs_dis(58, 199)
+                    abs_dis(58, 200)
                 );
                 assert_eq!(mode.control(abs_dis(60, 127), &target, ()), None);
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(61, 127), &target, ()).unwrap(),
-                    abs_dis(61, 199)
+                    abs_dis(61, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(62, 127), &target, ()).unwrap(),
-                    abs_dis(62, 199)
+                    abs_dis(62, 200)
                 );
-                assert!(mode.control(abs_dis(63, 199), &target, ()).is_none());
-                assert!(mode.control(abs_dis(127, 199), &target, ()).is_none());
+                assert!(mode.control(abs_dis(63, 200), &target, ()).is_none());
+                assert!(mode.control(abs_dis(127, 200), &target, ()).is_none());
             }
 
             #[test]
@@ -3339,29 +3402,29 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(60, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(1, 127), &target, ()).unwrap(),
-                    abs_dis(1, 199)
+                    abs_dis(1, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(50, 127), &target, ()).unwrap(),
-                    abs_dis(50, 199)
+                    abs_dis(50, 200)
                 );
                 assert!(mode.control(abs_dis(55, 127), &target, ()).is_none());
                 assert!(mode.control(abs_dis(65, 127), &target, ()).is_none());
                 assert!(mode.control(abs_dis(69, 127), &target, ()).is_none());
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(70, 127), &target, ()).unwrap(),
-                    abs_dis(70, 199)
+                    abs_dis(70, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                    abs_dis(127, 199)
+                    abs_dis(127, 200)
                 );
             }
 
@@ -3420,22 +3483,22 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(20, 199)
+                    abs_dis(20, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                    abs_dis(80, 199)
+                    abs_dis(80, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(120, 127), &target, ()).unwrap(),
-                    abs_dis(140, 199)
+                    abs_dis(140, 200)
                 );
             }
 
@@ -3450,22 +3513,22 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(20, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(120, 127), &target, ()).unwrap(),
-                    abs_dis(100, 199)
+                    abs_dis(100, 200)
                 );
             }
 
@@ -3480,22 +3543,22 @@ mod tests {
                 let target = TestTarget {
                     current_value: Some(dis_val(38, 200)),
                     control_type: ControlType::AbsoluteDiscrete {
-                        atomic_step_size: UnitValue::new(0.005),
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
                     },
                 };
                 // When
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(0, 127), &target, ()).unwrap(),
-                    abs_dis(0, 199)
+                    abs_dis(0, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(60, 127), &target, ()).unwrap(),
-                    abs_dis(60, 199)
+                    abs_dis(60, 200)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                    abs_dis(127, 199)
+                    abs_dis(127, 200)
                 );
             }
 
@@ -3775,9 +3838,10 @@ mod tests {
                         .unwrap(),
                     dis_val(0, 100)
                 );
-                // TODO-high Would make more sense to use SOURCE MAX instead of 1. So this (1, 1)
-                //  thing is not that useful! We should have a way to express MAX - which is u32:MAX.
-                //  It should then be clamped to min(source_interval_max, discrete_source_max).
+                // TODO-high-discrete Would make more sense to use SOURCE MAX instead of 1. So this
+                //  (1, 1) thing is not that useful! We should have a way to express MAX - which is
+                //  u32:MAX. It should then be clamped to
+                //  min(source_interval_max, discrete_source_max).
                 assert_eq!(
                     mode.feedback_with_options(dis_val(2, 100), FB_OPTS)
                         .unwrap(),
@@ -4673,8 +4737,8 @@ mod tests {
                 };
                 // When
                 // Then
-                // TODO-high This behavior is debatable! Normal absolute control elements don't send
-                //  the same absolute value multiple times when hitting knob/fader boundary.
+                // TODO-medium This behavior is debatable! Normal absolute control elements don't
+                //  send the same absolute value multiple times when hitting knob/fader boundary.
                 assert_abs_diff_eq!(mode.control(rel(-10), &target, ()).unwrap(), abs_con(0.0));
                 assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.0));
                 assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.0));
@@ -5185,7 +5249,7 @@ mod tests {
                     let target = TestTarget {
                         current_value: Some(dis_val(0, 20)),
                         control_type: ControlType::AbsoluteDiscrete {
-                            atomic_step_size: UnitValue::new(1.0 / 21.0),
+                            atomic_step_size: UnitValue::new(1.0 / 20.0),
                         },
                     };
                     // When
@@ -5211,7 +5275,7 @@ mod tests {
                     let target = TestTarget {
                         current_value: Some(dis_val(20, 20)),
                         control_type: ControlType::AbsoluteDiscrete {
-                            atomic_step_size: UnitValue::new(1.0 / 21.0),
+                            atomic_step_size: UnitValue::new(1.0 / 20.0),
                         },
                     };
                     // When
@@ -5244,7 +5308,7 @@ mod tests {
                     let target = TestTarget {
                         current_value: Some(dis_val(0, 200)),
                         control_type: ControlType::AbsoluteDiscrete {
-                            atomic_step_size: UnitValue::new(1.0 / 201.0),
+                            atomic_step_size: UnitValue::new(1.0 / 200.0),
                         },
                     };
                     // When
@@ -5284,7 +5348,7 @@ mod tests {
                     let target = TestTarget {
                         current_value: Some(dis_val(20, 20)),
                         control_type: ControlType::AbsoluteDiscrete {
-                            atomic_step_size: UnitValue::new(1.0 / 21.0),
+                            atomic_step_size: UnitValue::new(1.0 / 20.0),
                         },
                     };
                     // When

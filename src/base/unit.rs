@@ -175,7 +175,7 @@ impl UnitValue {
         self.0
     }
 
-    pub fn to_symmetric(&self) -> SoftSymmetricUnitValue {
+    pub fn to_symmetric(self) -> SoftSymmetricUnitValue {
         SoftSymmetricUnitValue::new(self.0)
     }
 
@@ -256,7 +256,7 @@ impl UnitValue {
 
     /// Converts this unit value to a unit increment, either negative or positive depending
     /// on the given signum. Returns `None` if this value is zero.
-    pub fn to_increment(&self, signum: i32) -> Option<UnitIncrement> {
+    pub fn to_increment(self, signum: i32) -> Option<UnitIncrement> {
         if self.is_zero() {
             return None;
         }
@@ -374,7 +374,7 @@ impl UnitValue {
         }
     }
 
-    pub fn to_discrete<T: TryFrom<u64> + Into<u64>>(&self, max_value: T) -> T
+    pub fn to_discrete<T: TryFrom<u64> + Into<u64>>(self, max_value: T) -> T
     where
         <T as TryFrom<u64>>::Error: Debug,
     {
@@ -515,7 +515,7 @@ impl UnitIncrement {
     }
 
     /// Converts this unit increment into a unit value thereby "losing" its direction.
-    pub fn to_value(&self) -> UnitValue {
+    pub fn to_value(self) -> UnitValue {
         unsafe { UnitValue::new_unchecked(self.0.abs()) }
     }
 

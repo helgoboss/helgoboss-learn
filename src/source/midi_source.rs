@@ -847,12 +847,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => {
                 if custom_character.emits_increments() {
                     None
+                } else if *is_14_bit == Some(true) {
+                    Some(16383)
                 } else {
-                    if *is_14_bit == Some(true) {
-                        Some(16383)
-                    } else {
-                        Some(127)
-                    }
+                    Some(127)
                 }
             }
             ClockTempo | ClockTransport { .. } | Script { .. } => None,

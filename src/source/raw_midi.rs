@@ -103,7 +103,7 @@ impl BitPattern {
             .unwrap()
     }
 
-    fn to_byte(&self, discrete_value: u16) -> u8 {
+    fn to_byte(self, discrete_value: u16) -> u8 {
         let mut final_byte: u8 = 0;
         for i in 0..8 {
             use BitPatternEntry::*;
@@ -152,10 +152,10 @@ impl RawMidiPatternEntry {
         }
     }
 
-    fn to_byte(&self, discrete_value: u16) -> u8 {
+    fn to_byte(self, discrete_value: u16) -> u8 {
         use RawMidiPatternEntry::*;
         match self {
-            FixedByte(byte) => *byte,
+            FixedByte(byte) => byte,
             VariableByte(bit_pattern) => bit_pattern.to_byte(discrete_value),
         }
     }

@@ -63,7 +63,7 @@ impl OscArgDescriptor {
         Some(desc)
     }
 
-    pub fn to_concrete_args(&self, value: UnitValue) -> Option<Vec<OscType>> {
+    pub fn to_concrete_args(self, value: UnitValue) -> Option<Vec<OscType>> {
         self.type_tag.to_concrete_args(self.index, value)
     }
 
@@ -154,7 +154,7 @@ impl OscTypeTag {
         }
     }
 
-    pub fn to_concrete_args(&self, index: u32, value: UnitValue) -> Option<Vec<OscType>> {
+    pub fn to_concrete_args(self, index: u32, value: UnitValue) -> Option<Vec<OscType>> {
         let v = value.get();
         use OscTypeTag::*;
         let value = match self {

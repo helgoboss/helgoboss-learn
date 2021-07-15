@@ -2,7 +2,6 @@ use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
     Transformation, UnitValue,
 };
-use std::cmp::Ordering;
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -282,10 +281,10 @@ impl AbsoluteValue {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => Self::Continuous(v.inverse()),
-            /// 100/100 (max 150) =>   0/150
-            ///   0/100 (max 150) => 100/150
-            /// 100/100 (max 50) =>    0/50
-            ///   0/100 (max 50) =>   50/50   
+            // 100/100 (max 150) =>   0/150
+            //   0/100 (max 150) => 100/150
+            // 100/100 (max 50) =>    0/50
+            //   0/100 (max 50) =>   50/50
             Discrete(f) => {
                 let res = if let Some(new_max) = new_discrete_max {
                     let min_max = std::cmp::min(new_max, f.max_val());

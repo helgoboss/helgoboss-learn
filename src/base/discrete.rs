@@ -21,7 +21,7 @@ impl DiscreteValue {
 
     /// Converts this discrete value to a discrete increment, either negative or positive depending
     /// on the given signum. Returns `None` if this value is zero.
-    pub fn to_increment(&self, signum: i32) -> Option<DiscreteIncrement> {
+    pub fn to_increment(self, signum: i32) -> Option<DiscreteIncrement> {
         if self.is_zero() {
             return None;
         }
@@ -178,7 +178,7 @@ impl DiscreteIncrement {
     }
 
     /// Converts this discrete increment into a discrete value thereby "losing" its direction.
-    pub fn to_value(&self) -> DiscreteValue {
+    pub fn to_value(self) -> DiscreteValue {
         DiscreteValue::new(self.0.abs() as u32)
     }
 
@@ -215,7 +215,7 @@ impl DiscreteIncrement {
     /// Returns a unit increment or None in case of 0.0. The unit increment is built by creating a
     /// multiple of the given atomic unit value (= minimum step size) and clamping the result if it
     /// exceeds the unit interval.
-    pub fn to_unit_increment(&self, atomic_unit_value: UnitValue) -> Option<UnitIncrement> {
+    pub fn to_unit_increment(self, atomic_unit_value: UnitValue) -> Option<UnitIncrement> {
         let positive_large = self.to_value().get() as f64 * atomic_unit_value.get();
         let unit_value = UnitValue::new(num::clamp(positive_large, 0.0, 1.0));
         unit_value.to_increment(self.signum())

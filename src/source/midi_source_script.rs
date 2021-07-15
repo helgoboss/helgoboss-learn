@@ -1,4 +1,4 @@
-use crate::{AbsoluteValue, RawMidiEvent, UnitValue};
+use crate::{AbsoluteValue, RawMidiEvent};
 
 pub trait MidiSourceScript {
     /// Returns raw MIDI bytes.

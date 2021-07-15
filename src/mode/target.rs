@@ -40,19 +40,15 @@ impl ControlType {
     }
 
     pub fn discrete_count(&self) -> Option<u32> {
+        Some(self.discrete_max()? + 1)
+    }
+
+    pub fn discrete_max(&self) -> Option<u32> {
         let step_size = self.step_size()?;
         if step_size.is_zero() {
             return None;
         }
         Some((1.0 / step_size.get()).round() as u32)
-    }
-
-    pub fn discrete_max(&self) -> Option<u32> {
-        let count = self.discrete_count()?;
-        if count == 0 {
-            return None;
-        }
-        Some(count - 1)
     }
 
     pub fn is_virtual(&self) -> bool {
