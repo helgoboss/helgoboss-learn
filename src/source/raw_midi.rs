@@ -1,4 +1,4 @@
-use crate::{RawMidiEvent, UnitValue};
+use crate::{AbsoluteValue, RawMidiEvent, UnitValue};
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::{Display, Formatter, Write};
@@ -51,19 +51,24 @@ impl RawMidiPattern {
         }
     }
 
-    pub fn to_bytes(&self, variable_value: UnitValue) -> Vec<u8> {
+    pub fn to_bytes(&self, variable_value: AbsoluteValue) -> Vec<u8> {
         self.byte_iter(variable_value).collect()
     }
 
     pub fn byte_iter(
         &self,
-        variable_value: UnitValue,
+        variable_value: AbsoluteValue,
     ) -> impl Iterator<Item = u8> + ExactSizeIterator + '_ {
-        let discrete_value = variable_value.to_discrete(self.max_discrete_value());
+        let discrete_value = match variable_value {
+            AbsoluteValue::Continuous(v) => v.to_discrete(self.max_discrete_value()),
+            AbsoluteValue::Discrete(f) => {
+                std::cmp::min(f.actual(), self.max_discrete_value() as u32) as u16
+            }
+        };
         self.entries.iter().map(move |e| e.to_byte(discrete_value))
     }
 
-    pub fn to_concrete_midi_event(&self, variable_value: UnitValue) -> RawMidiEvent {
+    pub fn to_concrete_midi_event(&self, variable_value: AbsoluteValue) -> RawMidiEvent {
         let mut array = [0; RawMidiEvent::MAX_LENGTH];
         let mut i = 0u32;
         for byte in self
@@ -260,10 +265,16 @@ mod tests {
         let pattern: RawMidiPattern = "F0 [0000 dcba] F7".parse().unwrap();
         // When
         // Then
-        assert_eq!(pattern.to_bytes(UnitValue::MAX), vec![0xf0, 0x0f, 0xf7]);
-        assert_eq!(pattern.to_bytes(UnitValue::MIN), vec![0xf0, 0x00, 0xf7]);
         assert_eq!(
-            pattern.to_bytes(UnitValue::new(0.5)),
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MAX)),
+            vec![0xf0, 0x0f, 0xf7]
+        );
+        assert_eq!(
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MIN)),
+            vec![0xf0, 0x00, 0xf7]
+        );
+        assert_eq!(
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::new(0.5))),
             vec![0xf0, 0x08, 0xf7]
         );
         assert_eq!(&pattern.to_string(), "F0 [0000 dcba] F7");
@@ -275,10 +286,16 @@ mod tests {
         let pattern: RawMidiPattern = "F0[0000dcba]F7".parse().unwrap();
         // When
         // Then
-        assert_eq!(pattern.to_bytes(UnitValue::MAX), vec![0xf0, 0x0f, 0xf7]);
-        assert_eq!(pattern.to_bytes(UnitValue::MIN), vec![0xf0, 0x00, 0xf7]);
         assert_eq!(
-            pattern.to_bytes(UnitValue::new(0.5)),
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MAX)),
+            vec![0xf0, 0x0f, 0xf7]
+        );
+        assert_eq!(
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MIN)),
+            vec![0xf0, 0x00, 0xf7]
+        );
+        assert_eq!(
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::new(0.5))),
             vec![0xf0, 0x08, 0xf7]
         );
         assert_eq!(&pattern.to_string(), "F0 [0000 dcba] F7");
@@ -290,10 +307,16 @@ mod tests {
         let pattern: RawMidiPattern = "F0[1111dcba]F7".parse().unwrap();
         // When
         // Then
-        assert_eq!(pattern.to_bytes(UnitValue::MAX), vec![0xf0, 0xff, 0xf7]);
-        assert_eq!(pattern.to_bytes(UnitValue::MIN), vec![0xf0, 0xf0, 0xf7]);
         assert_eq!(
-            pattern.to_bytes(UnitValue::new(0.5)),
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MAX)),
+            vec![0xf0, 0xff, 0xf7]
+        );
+        assert_eq!(
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MIN)),
+            vec![0xf0, 0xf0, 0xf7]
+        );
+        assert_eq!(
+            pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::new(0.5))),
             vec![0xf0, 0xf8, 0xf7]
         );
         assert_eq!(&pattern.to_string(), "F0 [1111 dcba] F7");

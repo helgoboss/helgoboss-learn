@@ -1,5 +1,6 @@
 use crate::{
-    Interval, IntervalMatchResult, OutOfRangeBehavior, Transformation, UnitValue, BASE_EPSILON,
+    AbsoluteValue, Interval, MinIsMaxBehavior, ModeFeedbackOptions, OutOfRangeBehavior,
+    Transformation, UnitValue, BASE_EPSILON,
 };
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -12,15 +13,37 @@ use crate::{
 pub const FEEDBACK_EPSILON: f64 = BASE_EPSILON;
 
 pub(crate) fn feedback<T: Transformation>(
-    target_value: UnitValue,
+    target_value: AbsoluteValue,
     reverse: bool,
     transformation: &Option<T>,
     source_value_interval: &Interval<UnitValue>,
+    discrete_source_value_interval: &Interval<u32>,
     target_value_interval: &Interval<UnitValue>,
+    discrete_target_value_interval: &Interval<u32>,
     out_of_range_behavior: OutOfRangeBehavior,
-) -> Option<UnitValue> {
+    is_discrete_mode: bool,
+    options: ModeFeedbackOptions,
+) -> Option<AbsoluteValue> {
     let mut v = target_value;
-    // 4. Apply target interval
+    // 4. Filter and Apply target interval (normalize)
+    let interval_match_result = target_value.matches_tolerant(
+        target_value_interval,
+        discrete_target_value_interval,
+        FEEDBACK_EPSILON,
+    );
+    let (target_bound_value, min_is_max_behavior) = if interval_match_result.matches() {
+        // Target value is within target value interval
+        (target_value, MinIsMaxBehavior::PreferOne)
+    } else {
+        // Target value is outside target value interval
+        out_of_range_behavior.process(
+            target_value,
+            interval_match_result,
+            target_value_interval,
+            discrete_target_value_interval,
+        )?
+    };
+    v = target_bound_value;
     // Tolerant interval bounds test because of https://github.com/helgoboss/realearn/issues/263.
     // TODO-medium The most elaborate solution to deal with discrete values would be to actually
     //  know which interval of floating point values represents a specific discrete target value.
@@ -29,33 +52,40 @@ pub(crate) fn feedback<T: Transformation>(
     //  rounds them or uses more a ceil/floor approach ... I don't think this is standardized for
     //  VST parameters. We could solve it for our own parameters in future. Until then, having a
     //  fixed epsilon deals at least with most issues I guess.
-    v = {
-        use IntervalMatchResult::*;
-        match target_value_interval.value_matches_tolerant(v, FEEDBACK_EPSILON) {
-            Between => UnitValue::new_clamped(
-                (v - target_value_interval.min_val()) / target_value_interval.span(),
-            ),
-            MinAndMax => UnitValue::MAX,
-            Min => UnitValue::MIN,
-            Max => UnitValue::MAX,
-            Lower => match out_of_range_behavior {
-                OutOfRangeBehavior::MinOrMax | OutOfRangeBehavior::Min => UnitValue::MIN,
-                OutOfRangeBehavior::Ignore => return None,
-            },
-            Greater => match out_of_range_behavior {
-                OutOfRangeBehavior::MinOrMax => UnitValue::MAX,
-                OutOfRangeBehavior::Min => UnitValue::MIN,
-                OutOfRangeBehavior::Ignore => return None,
-            },
+    v = target_bound_value.normalize(
+        target_value_interval,
+        discrete_target_value_interval,
+        min_is_max_behavior,
+        is_discrete_mode,
+        FEEDBACK_EPSILON,
+    );
+    // 3. Apply reverse
+    if reverse {
+        let normalized_max_discrete_source_value = options
+            .max_discrete_source_value
+            .map(|m| discrete_source_value_interval.normalize_to_min(m));
+        v = v.inverse(normalized_max_discrete_source_value);
+    };
+    // 2. Apply transformation
+    if let Some(transformation) = transformation.as_ref() {
+        if let Ok(res) = v.transform(transformation, Some(v), is_discrete_mode) {
+            v = res;
         }
     };
-    // 3. Apply reverse
-    v = if reverse { v.inverse() } else { v };
-    // 2. Apply transformation
-    v = transformation
-        .as_ref()
-        .and_then(|t| t.transform(v, v).ok())
-        .unwrap_or(v);
     // 1. Apply source interval
-    Some(v.map_from_unit_interval_to(source_value_interval))
+    v = v.denormalize(
+        source_value_interval,
+        discrete_source_value_interval,
+        is_discrete_mode,
+        options.max_discrete_source_value,
+    );
+    // Result
+    if !is_discrete_mode && !options.source_is_virtual {
+        // If discrete processing is not explicitly enabled, we must NOT send discrete values to
+        // a real (non-virtual) source! This is not just for backward compatibility. It would change
+        // how discrete sources react in a surprising way (discrete behavior without having
+        // discrete processing enabled).
+        v = AbsoluteValue::Continuous(v.to_unit_value());
+    };
+    Some(v)
 }

@@ -1,4 +1,4 @@
-use crate::{FireMode, Interval, UnitValue};
+use crate::{AbsoluteValue, FireMode, Interval};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
@@ -15,14 +15,14 @@ pub struct PressDurationProcessor {
 #[derive(Clone, Debug)]
 struct ButtonPress {
     time: Instant,
-    value: UnitValue,
+    value: AbsoluteValue,
     time_of_last_turbo_fire: Option<Instant>,
     count: u32,
     released: bool,
 }
 
 impl ButtonPress {
-    pub fn new(value: UnitValue) -> Self {
+    pub fn new(value: AbsoluteValue) -> Self {
         Self {
             time: Instant::now(),
             value,
@@ -72,7 +72,10 @@ impl PressDurationProcessor {
         }
     }
 
-    pub fn process_press_or_release(&mut self, control_value: UnitValue) -> Option<UnitValue> {
+    pub fn process_press_or_release(
+        &mut self,
+        control_value: AbsoluteValue,
+    ) -> Option<AbsoluteValue> {
         let min = self.interval.min_val();
         let max = self.interval.max_val();
         match self.fire_mode {
@@ -84,7 +87,7 @@ impl PressDurationProcessor {
                     // press duration if user chooses max very high)!
                     return Some(control_value);
                 }
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // This is a button press.
                     // Don't fire now because we don't know yet how long it will be pressed.
                     self.last_button_press = Some(ButtonPress::new(control_value));
@@ -113,7 +116,7 @@ impl PressDurationProcessor {
                     // No-op case: Fire immediately.
                     return Some(control_value);
                 }
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // Button press
                     self.last_button_press = Some(ButtonPress::new(control_value));
                     None
@@ -124,7 +127,7 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::AfterTimeoutKeepFiring => {
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // Button press
                     let mut button_press = ButtonPress::new(control_value);
                     let result = if min == ZERO_DURATION {
@@ -144,7 +147,7 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::OnSinglePress => {
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     // Button press
                     if let Some(press) = self.last_button_press.as_mut() {
                         // Must be more than single press already.
@@ -180,7 +183,7 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::OnDoublePress => {
-                if control_value.get() > 0.0 {
+                if control_value.is_on() {
                     if let Some(press) = &self.last_button_press {
                         // Button was pressed before
                         let (result, next_press) = if press.time.elapsed() <= self.multi_press_span
@@ -208,7 +211,7 @@ impl PressDurationProcessor {
 
     /// Should be called regularly if `wants_to_be_polled()` returned `true` at initialization
     /// time.
-    pub fn poll(&mut self) -> Option<UnitValue> {
+    pub fn poll(&mut self) -> Option<AbsoluteValue> {
         match self.fire_mode {
             FireMode::WhenButtonReleased | FireMode::OnDoublePress => None,
             FireMode::AfterTimeout => {

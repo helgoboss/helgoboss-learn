@@ -33,6 +33,7 @@ impl DetailedSourceCharacter {
 #[derive(Copy, Clone, Debug)]
 pub struct ModeApplicabilityCheckInput {
     pub target_is_virtual: bool,
+    pub target_supports_discrete_values: bool,
     pub is_feedback: bool,
     pub make_absolute: bool,
     pub source_character: DetailedSourceCharacter,
@@ -48,6 +49,8 @@ impl ModeApplicabilityCheckInput {
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Display)]
 pub enum ModeParameter {
+    #[display(fmt = "Use discrete processing (prevents scaling)")]
+    UseDiscreteProcessing,
     #[display(fmt = "Source min/max")]
     SourceMinMax,
     #[display(fmt = "Reverse")]
@@ -134,6 +137,13 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
     use ModeApplicability::*;
     use ModeParameter::*;
     match input.mode_parameter {
+        UseDiscreteProcessing => {
+            if input.target_supports_discrete_values {
+                MakesSense("By default, ReaLearn uses continuous processing logic. That means it considers all values as percentages and scales (stretches/squeezes) them as needed. If your target is discrete, you can enable discrete processing, which will prevent scaling and deliver your control value to the target as discrete integer (and vice versa in the feedback direction).")
+            } else {
+                MakesNoSenseUseDefault
+            }
+        }
         SourceMinMax => {
             if input.is_feedback {
                 if input.source_is_button() {

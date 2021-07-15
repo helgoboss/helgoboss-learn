@@ -1,7 +1,7 @@
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, Bpm, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, MidiSourceScript, MidiSourceValue, RawMidiPattern,
-    UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
+    ControlValue, DetailedSourceCharacter, DiscreteIncrement, Fraction, MidiSourceScript,
+    MidiSourceValue, RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -389,7 +389,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         key_number: kn,
                         ..
                     } if matches(ch, *channel) && matches(kn, *key_number) => {
-                        Some(abs(UnitValue::MIN))
+                        Some(abs(MIN_U7_FRACTION))
                     }
                     _ => None,
                 },
@@ -509,11 +509,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 _ => None,
             },
             S::ClockTransport { message } => match value {
-                Plain(msg) if msg.r#type() == (*message).into() => Some(abs(UnitValue::MAX)),
+                Plain(msg) if msg.r#type() == (*message).into() => Some(abs(Fraction::new_max(1))),
                 _ => None,
             },
             S::ClockTempo => match value {
-                Tempo(bpm) => Some(abs(bpm.to_unit_value())),
+                Tempo(bpm) => Some(ControlValue::AbsoluteContinuous(bpm.to_unit_value())),
                 _ => None,
             },
             // TODO-low Support control for raw/sys-ex. Not difficult because we have the pattern
@@ -571,7 +571,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
     /// supported by this source.
     pub fn feedback<M: ShortMessage + ShortMessageFactory>(
         &self,
-        feedback_value: UnitValue,
+        feedback_value: AbsoluteValue,
     ) -> Option<MidiSourceValue<M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
@@ -688,15 +688,15 @@ impl<S: MidiSourceScript> MidiSource<S> {
         use MidiSource::*;
         let result = match self {
             ClockTempo => {
-                let bpm = Bpm::from_unit_value(value.as_absolute()?);
+                let bpm = Bpm::from_unit_value(value.to_unit_value()?);
                 format!("{:.2}", bpm.get())
             }
             ClockTransport { .. } => {
                 return Err("clock transport sources have just one possible control value");
             }
-            Script { .. } => format_percentage_without_unit(value.as_absolute()?.get()),
+            Script { .. } => format_percentage_without_unit(value.to_unit_value()?.get()),
             _ => self
-                .convert_control_value_to_midi_value(value.as_absolute()?)?
+                .convert_control_value_to_midi_value(value.to_unit_value()?)?
                 .to_string(),
         };
         Ok(result)
@@ -749,7 +749,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
     ///
     /// Returns an error if it doesn't make sense for this source type (e.g. MIDI clock and sources
     /// which emit increments).
-    fn convert_control_value_to_midi_value(&self, value: UnitValue) -> Result<i32, &'static str> {
+    fn convert_control_value_to_midi_value(&self, v: UnitValue) -> Result<i32, &'static str> {
+        let value = AbsoluteValue::Continuous(v);
         use MidiSource::*;
         let midi_value: i32 = match self {
             NoteVelocity { .. }
@@ -770,7 +771,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     }
                 }
             },
-            Raw { pattern, .. } => value.to_discrete(pattern.max_discrete_value()) as _,
+            Raw { pattern, .. } => v.to_discrete(pattern.max_discrete_value()) as _,
             ClockTempo | ClockTransport { .. } | Script { .. } => {
                 return Err("not supported");
             }
@@ -812,13 +813,60 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 if value < 0 {
                     return Err("negative values not supported");
                 }
-                UnitValue::try_from_discrete(value as u16, pattern.max_discrete_value())?
+                Fraction::new(value as _, pattern.max_discrete_value() as _)
             }
             ClockTempo | ClockTransport { .. } | Script { .. } => {
                 return Err("not supported");
             }
         };
-        Ok(unit_value)
+        Ok(unit_value.to_unit_value())
+    }
+
+    pub fn max_discrete_value(&self) -> Option<u32> {
+        use MidiSource::*;
+        match self {
+            NoteVelocity { .. }
+            | PolyphonicKeyPressureAmount { .. }
+            | ProgramChangeNumber { .. }
+            | ChannelPressureAmount { .. }
+            | NoteKeyNumber { .. } => Some(127),
+            ControlChange14BitValue { .. } | PitchBendChangeValue { .. } => Some(16383),
+            ControlChangeValue {
+                custom_character, ..
+            } => {
+                if custom_character.emits_increments() {
+                    None
+                } else {
+                    Some(127)
+                }
+            }
+            ParameterNumberValue {
+                custom_character,
+                is_14_bit,
+                ..
+            } => {
+                if custom_character.emits_increments() {
+                    None
+                } else {
+                    if *is_14_bit == Some(true) {
+                        Some(16383)
+                    } else {
+                        Some(127)
+                    }
+                }
+            }
+            ClockTempo | ClockTransport { .. } | Script { .. } => None,
+            Raw {
+                custom_character,
+                pattern,
+            } => {
+                if custom_character.emits_increments() {
+                    None
+                } else {
+                    Some(pattern.max_discrete_value() as _)
+                }
+            }
+        }
     }
 }
 
@@ -839,7 +887,7 @@ fn calc_control_value_from_7_bit_cc(
         Encoder1 => rel(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),
         Encoder2 => rel(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
         Encoder3 => rel(DiscreteIncrement::from_encoder_3_value(cc_control_value)?),
-        ToggleButton => abs(UnitValue::MAX),
+        ToggleButton => abs(MAX_U7_FRACTION),
     };
     Ok(result)
 }
@@ -861,33 +909,47 @@ fn calc_control_value_from_14_bit_cc(
             };
             rel(increment)
         }
-        ToggleButton => abs(UnitValue::MAX),
+        ToggleButton => abs(MAX_U14_FRACTION),
     };
     Ok(result)
 }
 
-fn normalize_7_bit<T: Into<u8>>(value: T) -> UnitValue {
-    UnitValue::new(value.into() as f64 / U7::MAX.get() as f64)
+const MIN_U7_FRACTION: Fraction = Fraction::new_min(U7::MAX.get() as _);
+const MAX_U7_FRACTION: Fraction = Fraction::new_max(U7::MAX.get() as _);
+const MAX_U14_FRACTION: Fraction = Fraction::new_max(U14::MAX.get() as _);
+
+fn normalize_7_bit<T: Into<u32>>(value: T) -> Fraction {
+    Fraction::new(value.into(), U7::MAX.into())
 }
 
-fn normalize_14_bit(value: U14) -> UnitValue {
-    UnitValue::new(value.get() as f64 / U14::MAX.get() as f64)
+fn normalize_14_bit(value: U14) -> Fraction {
+    Fraction::new(value.into(), U14::MAX.into())
 }
 
 /// See denormalize_14_bit_centered for an explanation
-fn normalize_14_bit_centered(value: U14) -> UnitValue {
+fn normalize_14_bit_centered(value: U14) -> Fraction {
     if value == U14::MAX {
-        return UnitValue::MAX;
+        return Fraction::new_max(U14::MAX.into());
     }
-    UnitValue::new(value.get() as f64 / (U14::MAX.get() + 1) as f64)
+    Fraction::new(value.into(), U14::MAX.get() as u32 + 1)
 }
 
-fn denormalize_7_bit<T: From<U7>>(value: UnitValue) -> T {
-    unsafe { U7::new_unchecked((value.get() * U7::MAX.get() as f64).round() as u8) }.into()
+fn denormalize_7_bit<T: From<U7>>(value: AbsoluteValue) -> T {
+    match value {
+        AbsoluteValue::Continuous(v) => {
+            unsafe { U7::new_unchecked((v.get() * U7::MAX.get() as f64).round() as u8) }.into()
+        }
+        AbsoluteValue::Discrete(f) => U7::try_from(f.actual()).unwrap_or(U7::MAX).into(),
+    }
 }
 
-fn denormalize_14_bit<T: From<U14>>(value: UnitValue) -> T {
-    unsafe { U14::new_unchecked((value.get() * U14::MAX.get() as f64).round() as u16) }.into()
+fn denormalize_14_bit<T: From<U14>>(value: AbsoluteValue) -> T {
+    match value {
+        AbsoluteValue::Continuous(v) => {
+            unsafe { U14::new_unchecked((v.get() * U14::MAX.get() as f64).round() as u16) }.into()
+        }
+        AbsoluteValue::Discrete(f) => U14::try_from(f.actual()).unwrap_or(U14::MAX).into(),
+    }
 }
 
 /// When doing the mapping, this doesn't consider 16383 as maximum value but 16384. However, the
@@ -905,16 +967,21 @@ fn denormalize_14_bit<T: From<U14>>(value: UnitValue) -> T {
 ///   Official center is 8192.
 /// - Signed view: Possible pitch bend values go from -8192 to 8191. Exact center would be -0.5.
 ///   Official center is 0.
-fn denormalize_14_bit_centered<T: From<U14>>(value: UnitValue) -> T {
-    let spread = (value.get() * (U14::MAX.get() + 1) as f64).round() as u16;
-    unsafe { U14::new_unchecked(spread.min(16383)) }.into()
+fn denormalize_14_bit_centered<T: From<U14>>(value: AbsoluteValue) -> T {
+    match value {
+        AbsoluteValue::Continuous(v) => {
+            let spread = (v.get() * (U14::MAX.get() + 1) as f64).round() as u16;
+            unsafe { U14::new_unchecked(spread.min(16383)) }.into()
+        }
+        AbsoluteValue::Discrete(f) => U14::try_from(f.actual()).unwrap_or(U14::MAX).into(),
+    }
 }
 
-fn abs(value: UnitValue) -> ControlValue {
-    ControlValue::Absolute(value)
+const fn abs(value: Fraction) -> ControlValue {
+    ControlValue::AbsoluteDiscrete(value)
 }
 
-fn rel(increment: DiscreteIncrement) -> ControlValue {
+const fn rel(increment: DiscreteIncrement) -> ControlValue {
     ControlValue::Relative(increment)
 }
 
@@ -938,16 +1005,40 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(0, 64, 127,))).unwrap(),
+            source
+                .control(&plain(note_on(0, 64, 127,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(1.0)
         );
-        assert_abs_diff_eq!(
-            source.control(&plain(note_on(0, 20, 0,))).unwrap(),
-            abs(0.0)
+        assert_eq!(
+            source.control(&plain(note_on(0, 64, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(note_off(0, 20, 100,))).unwrap(),
+            source
+                .control(&plain(note_on(0, 20, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(note_on(0, 20, 0,))).unwrap(),
+            frac(0, 127)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&plain(note_off(0, 20, 100,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(note_off(0, 20, 100,))).unwrap(),
+            frac(0, 127)
         );
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
@@ -991,8 +1082,16 @@ mod tests {
         // Then
         assert_eq!(source.control(&plain(note_on(0, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(4, 20, 0,))).unwrap(),
+            source
+                .control(&plain(note_on(4, 20, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(note_on(4, 20, 0,))).unwrap(),
+            frac(0, 127)
         );
         assert_eq!(source.control(&plain(note_off(15, 20, 100,))), None);
         assert_eq!(
@@ -1008,12 +1107,28 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(0, 127, 55,))).unwrap(),
+            source
+                .control(&plain(note_on(0, 127, 55,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(1.0)
         );
+        assert_eq!(
+            source.control(&plain(note_on(0, 127, 55,))).unwrap(),
+            frac(127, 127)
+        );
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            source
+                .control(&plain(note_on(1, 0, 64,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            frac(0, 127)
         );
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
@@ -1057,8 +1172,16 @@ mod tests {
         // Then
         assert_eq!(source.control(&plain(note_on(0, 127, 55,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            source
+                .control(&plain(note_on(1, 0, 64,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(note_on(1, 0, 64,))).unwrap(),
+            frac(0, 127)
         );
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
@@ -1086,14 +1209,30 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&plain(polyphonic_key_pressure(1, 14, 127,)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 14, 127,)))
+                .unwrap(),
+            frac(127, 127)
         );
         assert_abs_diff_eq!(
             source
                 .control(&plain(polyphonic_key_pressure(1, 16, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 16, 0,)))
+                .unwrap(),
+            frac(0, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(3, 14, 127))),
@@ -1135,8 +1274,16 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&plain(polyphonic_key_pressure(1, 53, 127,)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&plain(polyphonic_key_pressure(1, 53, 127,)))
+                .unwrap(),
+            frac(127, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 16, 0,))),
@@ -1165,8 +1312,16 @@ mod tests {
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(control_change(1, 64, 127,))).unwrap(),
+            source
+                .control(&plain(control_change(1, 64, 127,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(control_change(1, 64, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(source.control(&plain(program_change(5, 64,))), None);
         assert_eq!(
@@ -1256,12 +1411,28 @@ mod tests {
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(program_change(5, 0,))).unwrap(),
+            source
+                .control(&plain(program_change(5, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(program_change(5, 0,))).unwrap(),
+            frac(0, 127)
+        );
         assert_abs_diff_eq!(
-            source.control(&plain(program_change(6, 127,))).unwrap(),
+            source
+                .control(&plain(program_change(6, 127,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(program_change(6, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1304,8 +1475,16 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(program_change(10, 0,))).unwrap(),
+            source
+                .control(&plain(program_change(10, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(program_change(10, 0,))).unwrap(),
+            frac(0, 127)
         );
         assert_eq!(source.control(&plain(program_change(6, 127,))), None);
         assert_eq!(
@@ -1327,12 +1506,28 @@ mod tests {
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(channel_pressure(5, 0,))).unwrap(),
+            source
+                .control(&plain(channel_pressure(5, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
         );
+        assert_eq!(
+            source.control(&plain(channel_pressure(5, 0,))).unwrap(),
+            frac(0, 127)
+        );
         assert_abs_diff_eq!(
-            source.control(&plain(channel_pressure(6, 127,))).unwrap(),
+            source
+                .control(&plain(channel_pressure(6, 127,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(channel_pressure(6, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1376,8 +1571,16 @@ mod tests {
         // Then
         assert_eq!(source.control(&plain(channel_pressure(5, 0,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(channel_pressure(15, 127,))).unwrap(),
+            source
+                .control(&plain(channel_pressure(15, 127,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source.control(&plain(channel_pressure(15, 127,))).unwrap(),
+            frac(127, 127)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1406,28 +1609,68 @@ mod tests {
         assert_eq!(source.control(&plain(control_change(3, 64, 127,))), None);
         assert_eq!(source.control(&plain(control_change(1, 64, 127,))), None);
         assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(5, 0,))).unwrap(),
+            source
+                .control(&plain(pitch_bend_change(5, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
         );
-        assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(6, 4096,))).unwrap(),
-            abs(0.25)
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(5, 0,))).unwrap(),
+            frac(0, 16384)
         );
         assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(6, 8192,))).unwrap(),
+            source
+                .control(&plain(pitch_bend_change(6, 4096,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(0.25)
+        );
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(6, 4096,))).unwrap(),
+            frac(4096, 16384)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&plain(pitch_bend_change(6, 8192,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.5)
+        );
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(6, 8192,))).unwrap(),
+            frac(8192, 16384)
         );
         assert_abs_diff_eq!(
             source
                 .control(&plain(pitch_bend_change(6, 12288,)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.75)
+        );
+        assert_eq!(
+            source
+                .control(&plain(pitch_bend_change(6, 12288,)))
+                .unwrap(),
+            frac(12288, 16384)
         );
         assert_abs_diff_eq!(
             source
                 .control(&plain(pitch_bend_change(6, 16383,)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&plain(pitch_bend_change(6, 16383,)))
+                .unwrap(),
+            frac(16383, 16383)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1470,8 +1713,16 @@ mod tests {
         // When
         // Then
         assert_abs_diff_eq!(
-            source.control(&plain(pitch_bend_change(3, 0,))).unwrap(),
+            source
+                .control(&plain(pitch_bend_change(3, 0,)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.0)
+        );
+        assert_eq!(
+            source.control(&plain(pitch_bend_change(3, 0,))).unwrap(),
+            frac(0, 16384)
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(
@@ -1515,14 +1766,30 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&cc(control_change_14_bit(1, 10, 4096)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(0.2500152597204419)
+        );
+        assert_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 10, 4096)))
+                .unwrap(),
+            frac(4096, 16383)
         );
         assert_abs_diff_eq!(
             source
                 .control(&cc(control_change_14_bit(1, 10, 16383)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 10, 16383)))
+                .unwrap(),
+            frac(16383, 16383)
         );
         assert_eq!(
             source.control(&plain(polyphonic_key_pressure(1, 53, 127,))),
@@ -1572,8 +1839,16 @@ mod tests {
         assert_abs_diff_eq!(
             source
                 .control(&cc(control_change_14_bit(1, 7, 16383)))
+                .unwrap()
+                .to_absolute_continuous()
                 .unwrap(),
             abs(1.0)
+        );
+        assert_eq!(
+            source
+                .control(&cc(control_change_14_bit(1, 7, 16383)))
+                .unwrap(),
+            frac(16383, 16383)
         );
         assert_eq!(
             source.feedback::<RawShortMessage>(uv(0.0)),
@@ -1641,15 +1916,50 @@ mod tests {
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
         assert_abs_diff_eq!(
-            source.control(&pn(rpn_14_bit(1, 520, 2048))).unwrap(),
+            source
+                .control(&pn(rpn_14_bit(1, 520, 2048)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(0.12500762986022096)
         );
+        assert_eq!(
+            source.control(&pn(rpn_14_bit(1, 520, 2048))).unwrap(),
+            frac(2048, 16383)
+        );
         assert_abs_diff_eq!(
-            source.control(&pn(nrpn_14_bit(1, 520, 16383))).unwrap(),
+            source
+                .control(&pn(nrpn_14_bit(1, 520, 16383)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
             abs(1.0)
         );
-        assert_abs_diff_eq!(source.control(&pn(rpn(1, 342, 0))).unwrap(), abs(0.0));
-        assert_abs_diff_eq!(source.control(&pn(nrpn(1, 520, 127))).unwrap(), abs(1.0));
+        assert_eq!(
+            source.control(&pn(nrpn_14_bit(1, 520, 16383))).unwrap(),
+            frac(16383, 16383)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(1, 342, 0)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&pn(rpn(1, 342, 0))).unwrap(), frac(0, 127));
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(nrpn(1, 520, 127)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&pn(nrpn(1, 520, 127))).unwrap(),
+            frac(127, 127)
+        );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
         assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
@@ -1679,7 +1989,15 @@ mod tests {
             None
         );
         assert_eq!(source.control(&pn(rpn_14_bit(7, 3000, 11253))), None);
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), abs(0.0));
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 0)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(0.0)
+        );
+        assert_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), frac(0, 127));
         assert_eq!(source.control(&pn(nrpn_14_bit(7, 3000, 45))), None);
         assert_eq!(source.control(&pn(nrpn(7, 3000, 24))), None);
         assert_eq!(
@@ -1721,9 +2039,42 @@ mod tests {
         };
         // When
         // Then
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 0))).unwrap(), abs(1.0));
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 50))).unwrap(), abs(1.0));
-        assert_abs_diff_eq!(source.control(&pn(rpn(7, 3000, 127))).unwrap(), abs(1.0));
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 0)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&pn(rpn(7, 3000, 0))).unwrap(),
+            frac(127, 127)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 50)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&pn(rpn(7, 3000, 50))).unwrap(),
+            frac(127, 127)
+        );
+        assert_abs_diff_eq!(
+            source
+                .control(&pn(rpn(7, 3000, 127)))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(
+            source.control(&pn(rpn(7, 3000, 127))).unwrap(),
+            frac(127, 127)
+        );
     }
 
     #[test]
@@ -1851,7 +2202,15 @@ mod tests {
         assert_eq!(source.control(&plain(channel_pressure(3, 2,))), None);
         assert_eq!(source.control(&plain(timing_clock())), None);
         assert_eq!(source.control(&plain(start())), None);
-        assert_eq!(source.control(&plain(r#continue())), Some(abs(1.0)));
+        assert_eq!(
+            source
+                .control(&plain(r#continue()))
+                .unwrap()
+                .to_absolute_continuous()
+                .unwrap(),
+            abs(1.0)
+        );
+        assert_eq!(source.control(&plain(r#continue())).unwrap(), frac(1, 1));
         assert_eq!(source.control(&plain(stop())), None);
         assert_eq!(source.control(&plain(active_sensing())), None);
         assert_eq!(source.control(&plain(system_reset())), None);
@@ -1866,7 +2225,11 @@ mod tests {
     }
 
     fn abs(value: f64) -> ControlValue {
-        ControlValue::absolute(value)
+        ControlValue::absolute_continuous(value)
+    }
+
+    fn frac(actual: u32, max: u32) -> ControlValue {
+        ControlValue::absolute_discrete(actual, max)
     }
 
     fn rel(increment: i32) -> ControlValue {
@@ -1885,8 +2248,8 @@ mod tests {
         MidiSourceValue::ControlChange14Bit(msg)
     }
 
-    fn uv(value: f64) -> UnitValue {
-        UnitValue::new(value)
+    fn uv(value: f64) -> AbsoluteValue {
+        AbsoluteValue::Continuous(UnitValue::new(value))
     }
 
     fn tempo(bpm: f64) -> MidiSourceValue<RawShortMessage> {

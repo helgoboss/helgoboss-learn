@@ -1,4 +1,4 @@
-use crate::UnitValue;
+use crate::{AbsoluteValue, UnitValue};
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ControlType {
@@ -38,6 +38,27 @@ impl ControlType {
             _ => None,
         }
     }
+
+    pub fn discrete_count(&self) -> Option<u32> {
+        let step_size = self.step_size()?;
+        if step_size.is_zero() {
+            return None;
+        }
+        Some((1.0 / step_size.get()).round() as u32)
+    }
+
+    pub fn discrete_max(&self) -> Option<u32> {
+        let count = self.discrete_count()?;
+        if count == 0 {
+            return None;
+        }
+        Some(count - 1)
+    }
+
+    pub fn is_virtual(&self) -> bool {
+        use ControlType::*;
+        matches!(self, VirtualMulti | VirtualButton)
+    }
 }
 
 pub trait Target<'a> {
@@ -50,7 +71,7 @@ pub trait Target<'a> {
     /// In such cases, `None` should be returned so that the mode can handle this situation
     /// gracefully. Of course, some mode features won't work without knowing the current value,
     /// but others will still work.
-    fn current_value(&self, context: Self::Context) -> Option<UnitValue>;
+    fn current_value(&self, context: Self::Context) -> Option<AbsoluteValue>;
 
     fn control_type(&self) -> ControlType;
 }

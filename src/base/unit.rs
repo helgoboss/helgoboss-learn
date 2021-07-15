@@ -74,6 +74,12 @@ impl From<f64> for SoftSymmetricUnitValue {
     }
 }
 
+impl From<UnitValue> for f64 {
+    fn from(v: UnitValue) -> Self {
+        v.get()
+    }
+}
+
 impl std::str::FromStr for SoftSymmetricUnitValue {
     type Err = &'static str;
 
@@ -181,19 +187,6 @@ impl UnitValue {
         interval.contains(*self)
     }
 
-    /// Tests if this value is within the given interval.
-    pub fn is_within_interval_tolerant(
-        &self,
-        interval: &Interval<UnitValue>,
-        epsilon: f64,
-    ) -> bool {
-        use IntervalMatchResult::*;
-        match interval.value_matches_tolerant(*self, epsilon) {
-            Between | Min | Max | MinAndMax => true,
-            Lower | Greater => false,
-        }
-    }
-
     /// Calculates the distance between this and another unit value.
     pub fn calc_distance_from(&self, rhs: Self) -> UnitValue {
         unsafe { UnitValue::new_unchecked((self.0 - rhs.0).abs()) }
@@ -201,10 +194,7 @@ impl UnitValue {
 
     /// Maps this value to the given destination interval assuming that this value currently
     /// exhausts the complete unit interval.
-    pub fn map_from_unit_interval_to(
-        &self,
-        destination_interval: &Interval<UnitValue>,
-    ) -> UnitValue {
+    pub fn denormalize(&self, destination_interval: &Interval<UnitValue>) -> UnitValue {
         let min = destination_interval.min_val().get();
         let span = destination_interval.span();
         unsafe { UnitValue::new_unchecked(min + self.get() * span) }
@@ -213,7 +203,7 @@ impl UnitValue {
     /// Maps this value to the unit interval assuming that this value currently exhausts the given
     /// current interval. If this value is outside the current interval, this method returns either
     /// 0.0 or 1.0. If value == min == max, it returns 0.0 or 1.0 depending on the given behavior.
-    pub fn map_to_unit_interval_from(
+    pub fn normalize(
         &self,
         current_interval: &Interval<UnitValue>,
         min_is_max_behavior: MinIsMaxBehavior,
@@ -238,7 +228,7 @@ impl UnitValue {
 
     /// Like `map_from_unit_interval_to` but mapping to a discrete range (with additional rounding).
     /// round() is used here instead of floor() in order to not give advantage to any direction.
-    pub fn map_from_unit_interval_to_discrete(
+    pub fn denormalize_discrete(
         &self,
         destination_interval: &Interval<DiscreteValue>,
     ) -> DiscreteValue {
@@ -247,7 +237,7 @@ impl UnitValue {
         DiscreteValue::new(min + (self.get() * span as f64).round() as u32)
     }
 
-    pub fn map_from_unit_interval_to_discrete_increment(
+    pub fn denormalize_discrete_increment(
         &self,
         destination_interval: &Interval<DiscreteIncrement>,
     ) -> DiscreteIncrement {
@@ -343,14 +333,11 @@ impl UnitValue {
             }
             Between | Min | Max | MinAndMax => {
                 let sum = self.0 + increment.get();
-                match interval.to_raw().value_matches_tolerant(sum, epsilon) {
+                let raw_interval: Interval<f64> = (*interval).into();
+                match raw_interval.value_matches_tolerant(sum, epsilon) {
                     Between => UnitValue::new_clamped(sum),
-                    Min => min,
-                    Max => max,
-                    Lower => max,
-                    Greater => min,
-                    // Rotation makes no sense for this one.
-                    MinAndMax => max,
+                    Min | Greater => min,
+                    Max | Lower | MinAndMax => max,
                 }
             }
         }
@@ -425,6 +412,12 @@ impl Sub for UnitValue {
     }
 }
 
+impl From<Interval<UnitValue>> for Interval<f64> {
+    fn from(source: Interval<UnitValue>) -> Self {
+        Interval::new(source.min_val().get(), source.max_val().get())
+    }
+}
+
 impl TryFrom<f64> for UnitValue {
     type Error = &'static str;
 
@@ -462,10 +455,6 @@ impl Interval<UnitValue> {
     /// Inverts the interval.
     pub fn inverse(&self) -> Interval<UnitValue> {
         Interval::new(self.max_val().inverse(), self.min_val().inverse())
-    }
-
-    pub fn to_raw(&self) -> Interval<f64> {
-        Interval::new(self.min_val().get(), self.max_val().get())
     }
 }
 
@@ -549,15 +538,15 @@ mod tests {
         // When
         // Then
         assert_eq!(
-            UnitValue::new(0.0).map_from_unit_interval_to_discrete_increment(&interval),
+            UnitValue::new(0.0).denormalize_discrete_increment(&interval),
             DiscreteIncrement::new(-3)
         );
         assert_eq!(
-            UnitValue::new(0.5).map_from_unit_interval_to_discrete_increment(&interval),
+            UnitValue::new(0.5).denormalize_discrete_increment(&interval),
             DiscreteIncrement::new(1)
         );
         assert_eq!(
-            UnitValue::new(1.0).map_from_unit_interval_to_discrete_increment(&interval),
+            UnitValue::new(1.0).denormalize_discrete_increment(&interval),
             DiscreteIncrement::new(4)
         );
     }
