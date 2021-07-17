@@ -104,6 +104,10 @@ impl AbsoluteValue {
         }
     }
 
+    pub fn to_continuous_value(self) -> AbsoluteValue {
+        AbsoluteValue::Continuous(self.to_unit_value())
+    }
+
     pub fn is_zero(&self) -> bool {
         match self {
             AbsoluteValue::Continuous(v) => v.is_zero(),

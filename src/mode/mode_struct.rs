@@ -258,7 +258,7 @@ impl<T: Transformation> Mode<T> {
             // a real (non-virtual) source! This is not just for backward compatibility. It would change
             // how discrete sources react in a surprising way (discrete behavior without having
             // discrete processing enabled).
-            v = AbsoluteValue::Continuous(v.to_unit_value());
+            v = v.to_continuous_value();
         };
         Some(v)
     }
@@ -643,6 +643,13 @@ impl<T: Transformation> Mode<T> {
             let normalized_max_discrete_target_value = control_type
                 .discrete_max()
                 .map(|m| self.discrete_target_value_interval.normalize_to_min(m));
+            // If this is a discrete target (which reports a discrete maximum) and discrete
+            // processing is disabled, the reverse operation must use a "scaling reverse", not a
+            // "subtraction reverse". Therefore we must turn a discrete control value into a
+            // continuous value in this case before applying the reverse operation.
+            if normalized_max_discrete_target_value.is_some() && !self.use_discrete_processing {
+                v = v.to_continuous_value();
+            }
             v = v.inverse(normalized_max_discrete_target_value);
         };
         // 4. Apply target interval
@@ -1596,6 +1603,37 @@ mod tests {
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.0)
+                );
+            }
+
+            #[test]
+            fn reverse_discrete_target() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode {
+                    reverse: true,
+                    ..Default::default()
+                };
+                let target = TestTarget {
+                    current_value: Some(dis_val(55, 200)),
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(1.0 / 200.0),
+                    },
+                };
+                // When
+                // Then
+                // Check that we use a "scaling reverse" instead of a "subtracting" reverse even
+                // though control value and target is discrete. Discrete processing is disabled!
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(0, 10), &target, ()).unwrap(),
+                    abs_con(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(5, 10), &target, ()).unwrap(),
+                    abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis(10, 10), &target, ()).unwrap(),
                     abs_con(0.0)
                 );
             }
