@@ -10,6 +10,8 @@ mod transformation;
 pub use transformation::*;
 mod press_duration_processor;
 pub use press_duration_processor::*;
+mod value_sequence;
+pub use value_sequence::*;
 
 #[cfg(test)]
 mod test_util;

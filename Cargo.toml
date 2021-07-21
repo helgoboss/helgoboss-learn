@@ -24,3 +24,4 @@ reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "mas
 # For tokenizing sys-ex patterns
 logos = "0.12.0"
 partial-min-max = "0.4.0"
+nom = "6.2.1"

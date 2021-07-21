@@ -218,6 +218,7 @@ impl FromStr for RawMidiPattern {
         Ok(p)
     }
 }
+
 #[derive(Logos, Debug, PartialEq)]
 enum RawMidiPatternToken {
     #[regex(r"\[[01abcdefghijklmnop ]*\]", parse_as_bit_pattern)]
