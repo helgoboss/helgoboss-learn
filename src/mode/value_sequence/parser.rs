@@ -1,25 +1,37 @@
 use nom::branch::alt;
+use nom::bytes::complete::tag;
+use nom::character::complete::space0;
 use nom::combinator::opt;
 use nom::multi::separated_list0;
-use nom::sequence::{pair, separated_pair};
+use nom::sequence::separated_pair;
 use nom::{
     bytes::complete::is_not, character::complete::char, sequence::delimited, sequence::tuple,
     IResult,
 };
 
-fn parse_step_size(input: &str) -> IResult<&str, &str> {
-    delimited(char('('), is_not(")"), char(')'))(input)
-}
-
-fn parse_single_value(input: &str) -> IResult<&str, &str> {
-    let mut parser = is_not("-(),");
+fn parse_value(input: &str) -> IResult<&str, &str> {
+    let mut parser = is_not("-(), ");
     parser(input)
 }
 
+fn parse_step_size(input: &str) -> IResult<&str, &str> {
+    delimited(
+        tuple((char('('), space0)),
+        parse_value,
+        tuple((space0, char(')'))),
+    )(input)
+}
+
 fn parse_simple_range(input: &str) -> IResult<&str, RawSimpleRange> {
-    let mut parser = separated_pair(parse_single_value, char('-'), parse_single_value);
+    let mut parser = separated_pair(parse_value, tuple((space0, char('-'), space0)), parse_value);
     let (remainder, (min, max)) = parser(input)?;
     Ok((remainder, RawSimpleRange { min, max }))
+}
+
+fn parse_full_range(input: &str) -> IResult<&str, RawFullRange> {
+    let mut parser = tuple((parse_simple_range, space0, opt(parse_step_size)));
+    let (remainder, (simple_range, _, step_size)) = parser(input)?;
+    Ok((remainder, RawFullRange::new(simple_range, step_size)))
 }
 
 fn parse_range_entry(input: &str) -> IResult<&str, RawEntry> {
@@ -28,14 +40,8 @@ fn parse_range_entry(input: &str) -> IResult<&str, RawEntry> {
 }
 
 fn parse_single_value_entry(input: &str) -> IResult<&str, RawEntry> {
-    let (remainder, single_value) = parse_single_value(input)?;
+    let (remainder, single_value) = parse_value(input)?;
     Ok((remainder, RawEntry::SingleValue(single_value)))
-}
-
-fn parse_full_range(input: &str) -> IResult<&str, RawFullRange> {
-    let mut parser = pair(parse_simple_range, opt(parse_step_size));
-    let (remainder, (simple_range, step_size)) = parser(input)?;
-    Ok((remainder, RawFullRange::new(simple_range, step_size)))
 }
 
 fn parse_entry(input: &str) -> IResult<&str, RawEntry> {
@@ -43,21 +49,39 @@ fn parse_entry(input: &str) -> IResult<&str, RawEntry> {
     parser(input)
 }
 
-fn parse_value_sequence(input: &str) -> IResult<&str, Vec<RawEntry>> {
-    let mut parser = separated_list0(char(','), parse_entry);
+fn parse_entries(input: &str) -> IResult<&str, Vec<RawEntry>> {
+    let mut parser = separated_list0(tuple((space0, char(','), space0)), parse_entry);
     parser(input)
 }
 
+pub fn parse_value_sequence(input: &str) -> IResult<&str, ValueSequence> {
+    let mut parser = tuple((parse_entries, space0, opt(tag("%"))));
+    let (remainder, (entries, _, percent)) = parser(input)?;
+    Ok((
+        remainder,
+        ValueSequence {
+            entries,
+            use_percentages: percent.is_some(),
+        },
+    ))
+}
+
 #[derive(PartialEq, Debug)]
-enum RawEntry<'a> {
+pub struct ValueSequence<'a> {
+    pub entries: Vec<RawEntry<'a>>,
+    pub use_percentages: bool,
+}
+
+#[derive(PartialEq, Debug)]
+pub enum RawEntry<'a> {
     SingleValue(&'a str),
     Range(RawFullRange<'a>),
 }
 
 #[derive(PartialEq, Debug)]
-struct RawFullRange<'a> {
-    simple_range: RawSimpleRange<'a>,
-    step_size: Option<&'a str>,
+pub struct RawFullRange<'a> {
+    pub simple_range: RawSimpleRange<'a>,
+    pub step_size: Option<&'a str>,
 }
 
 impl<'a> RawFullRange<'a> {
@@ -70,9 +94,9 @@ impl<'a> RawFullRange<'a> {
 }
 
 #[derive(PartialEq, Debug)]
-struct RawSimpleRange<'a> {
-    min: &'a str,
-    max: &'a str,
+pub struct RawSimpleRange<'a> {
+    pub min: &'a str,
+    pub max: &'a str,
 }
 
 impl<'a> RawSimpleRange<'a> {
@@ -89,7 +113,7 @@ mod tests {
     fn step_size() {
         assert_eq!(parse_step_size("(0.5)"), Ok(("", "0.5")));
         assert_eq!(parse_step_size("(8)"), Ok(("", "8")));
-        assert_eq!(parse_step_size("( abc )"), Ok(("", " abc ")));
+        assert_eq!(parse_step_size("( abc )"), Ok(("", "abc")));
     }
 
     #[test]
@@ -100,7 +124,7 @@ mod tests {
         );
         assert_eq!(
             parse_simple_range("5.0 - 10.0"),
-            Ok(("", RawSimpleRange::new("5.0 ", " 10.0")))
+            Ok(("", RawSimpleRange::new("5.0", "10.0")))
         );
         assert_eq!(
             parse_simple_range("a-f"),
@@ -118,7 +142,7 @@ mod tests {
             parse_full_range("5-10 (0.1)"),
             Ok((
                 "",
-                RawFullRange::new(RawSimpleRange::new("5", "10 "), Some("0.1"))
+                RawFullRange::new(RawSimpleRange::new("5", "10"), Some("0.1"))
             ))
         );
     }
@@ -130,7 +154,7 @@ mod tests {
             Ok((
                 "",
                 RawEntry::Range(RawFullRange::new(
-                    RawSimpleRange::new("5", "10 "),
+                    RawSimpleRange::new("5", "10"),
                     Some("0.1")
                 ))
             ))
@@ -139,19 +163,40 @@ mod tests {
     }
 
     #[test]
-    fn value_sequence() {
+    fn entries() {
         assert_eq!(
-            parse_value_sequence("5-10 (0.1), 12.5, 15 - 20"),
+            parse_entries("5-10 (0.1), 12.5, 15 - 20"),
             Ok((
                 "",
                 vec![
                     RawEntry::Range(RawFullRange::new(
-                        RawSimpleRange::new("5", "10 "),
+                        RawSimpleRange::new("5", "10"),
                         Some("0.1")
                     )),
-                    RawEntry::SingleValue(" 12.5"),
-                    RawEntry::Range(RawFullRange::new(RawSimpleRange::new(" 15 ", " 20"), None))
+                    RawEntry::SingleValue("12.5"),
+                    RawEntry::Range(RawFullRange::new(RawSimpleRange::new("15", "20"), None))
                 ]
+            ))
+        );
+    }
+
+    #[test]
+    fn value_sequence() {
+        assert_eq!(
+            parse_value_sequence("5-10 (0.1), 12.5, 15 - 20 %"),
+            Ok((
+                "",
+                ValueSequence {
+                    entries: vec![
+                        RawEntry::Range(RawFullRange::new(
+                            RawSimpleRange::new("5", "10"),
+                            Some("0.1")
+                        )),
+                        RawEntry::SingleValue("12.5"),
+                        RawEntry::Range(RawFullRange::new(RawSimpleRange::new("15", "20"), None))
+                    ],
+                    use_percentages: true
+                }
             ))
         );
     }
