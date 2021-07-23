@@ -486,6 +486,15 @@ impl<T: Transformation> Mode<T> {
         {
             return None;
         }
+        if !self.state.unpacked_target_value_set.is_empty() {
+            let discrete_increment = self.convert_to_discrete_increment(control_value)?;
+            return self.control_relative_target_value_set(
+                discrete_increment,
+                target,
+                context,
+                options,
+            );
+        }
         use ControlType::*;
         let control_type = target.control_type();
         match control_type {
@@ -626,7 +635,15 @@ impl<T: Transformation> Mode<T> {
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
-        // TODO-high Implement value sequences
+        if !self.state.unpacked_target_value_set.is_empty() {
+            let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
+            return self.control_relative_target_value_set(
+                pepped_up_increment,
+                target,
+                context,
+                options,
+            );
+        }
         use ControlType::*;
         let control_type = target.control_type();
         match control_type {
@@ -689,6 +706,60 @@ impl<T: Transformation> Mode<T> {
                 None
             }
         }
+    }
+
+    /// Takes care of:
+    ///
+    /// - Target value set
+    /// - Wrap (rotate)
+    fn control_relative_target_value_set<'a, C: Copy>(
+        &mut self,
+        discrete_increment: DiscreteIncrement,
+        target: &impl Target<'a, Context = C>,
+        context: C,
+        options: ModeControlOptions,
+    ) -> Option<ModeControlResult<ControlValue>> {
+        // Determine next value in target value set
+        let current = target.current_value(context)?.to_unit_value();
+        let target_value_set = &self.state.unpacked_target_value_set;
+        use std::ops::Bound::*;
+        let mut v = current;
+        for _ in 0..discrete_increment.get().abs() {
+            let next_value_in_direction = if discrete_increment.is_positive() {
+                target_value_set
+                    .range((
+                        Excluded(UnitValue::new_clamped(v.get() + BASE_EPSILON)),
+                        Unbounded,
+                    ))
+                    .next()
+                    .copied()
+            } else {
+                target_value_set
+                    .range((
+                        Unbounded,
+                        Excluded(UnitValue::new_clamped(v.get() - BASE_EPSILON)),
+                    ))
+                    .last()
+                    .copied()
+            };
+            v = if let Some(v) = next_value_in_direction {
+                v
+            } else if options.enforce_rotate || self.settings.rotate {
+                if discrete_increment.is_positive() {
+                    *target_value_set.iter().next().unwrap()
+                } else {
+                    *target_value_set.iter().rev().next().unwrap()
+                }
+            } else {
+                break;
+            };
+        }
+        if v == current {
+            return None;
+        }
+        Some(ModeControlResult::HitTarget(
+            ControlValue::AbsoluteContinuous(v),
+        ))
     }
 
     fn pep_up_control_value(
@@ -953,6 +1024,10 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
+    /// Takes care of:
+    ///
+    /// - Applying increment
+    /// - Wrap (rotate)
     fn hit_discrete_target_absolutely(
         &self,
         discrete_increment: DiscreteIncrement,
@@ -994,6 +1069,9 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
+    /// Takes care of:
+    /// - Applying increment
+    /// - Wrap (rotate)
     fn hit_target_absolutely_with_unit_increment(
         &self,
         increment: UnitIncrement,
@@ -1067,7 +1145,8 @@ impl<T: Transformation> Mode<T> {
         )))
     }
 
-    /// Processes:
+    /// Takes care of:
+    ///
     /// - Speed (step count)
     /// - Reverse
     fn pep_up_discrete_increment(
@@ -1111,6 +1190,11 @@ impl<T: Transformation> Mode<T> {
         (false, self.state.increment_counter + direction_signum)
     }
 
+    /// Takes care of:
+    ///
+    /// - Source interval normalization
+    /// - Speed (step count)
+    /// - Reverse
     fn convert_to_discrete_increment(
         &mut self,
         control_value: UnitValue,
@@ -5023,6 +5107,60 @@ mod tests {
                 assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.2));
                 assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.2));
                 assert_abs_diff_eq!(mode.control(rel(10), &target, ()).unwrap(), abs_con(0.2));
+            }
+
+            // TODO-medium-discrete Add tests for discrete processing
+            #[test]
+            fn target_value_sequence() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
+                    target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
+                    step_count_interval: create_discrete_increment_interval(1, 5),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.6)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                mode.update_from_target(&target);
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.9));
+                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.9));
+                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.5));
+                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.4));
+                assert_abs_diff_eq!(mode.control(rel(-3), &target, ()).unwrap(), abs_con(0.2));
+                assert_abs_diff_eq!(mode.control(rel(-4), &target, ()).unwrap(), abs_con(0.0));
+                assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.0));
+            }
+
+            // TODO-medium-discrete Add tests for discrete processing
+            #[test]
+            fn target_value_sequence_rotate() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
+                    target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
+                    step_count_interval: create_discrete_increment_interval(1, 5),
+                    rotate: true,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.6)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                mode.update_from_target(&target);
+                // When
+                // Then
+                assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.9));
+                assert_abs_diff_eq!(mode.control(rel(2), &target, ()).unwrap(), abs_con(0.0));
+                assert_abs_diff_eq!(mode.control(rel(3), &target, ()).unwrap(), abs_con(0.2));
+                assert_abs_diff_eq!(mode.control(rel(-1), &target, ()).unwrap(), abs_con(0.5));
+                assert_abs_diff_eq!(mode.control(rel(-2), &target, ()).unwrap(), abs_con(0.4));
+                assert_abs_diff_eq!(mode.control(rel(-3), &target, ()).unwrap(), abs_con(0.2));
+                assert_abs_diff_eq!(mode.control(rel(-4), &target, ()).unwrap(), abs_con(0.0));
+                assert_abs_diff_eq!(mode.control(rel(-5), &target, ()).unwrap(), abs_con(0.9));
             }
 
             #[test]
