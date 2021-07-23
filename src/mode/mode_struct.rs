@@ -486,6 +486,29 @@ impl<T: Transformation> Mode<T> {
         {
             return None;
         }
+        if self.settings.convert_relative_to_absolute {
+            let discrete_increment = self.convert_to_discrete_increment(control_value)?;
+            Some(
+                self.control_relative_to_absolute(discrete_increment, target, context, options)?
+                    .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
+            )
+        } else {
+            self.control_absolute_incremental_buttons_normal(
+                control_value,
+                target,
+                context,
+                options,
+            )
+        }
+    }
+
+    fn control_absolute_incremental_buttons_normal<'a, C: Copy>(
+        &mut self,
+        control_value: UnitValue,
+        target: &impl Target<'a, Context = C>,
+        context: C,
+        options: ModeControlOptions,
+    ) -> Option<ModeControlResult<ControlValue>> {
         if !self.state.unpacked_target_value_set.is_empty() {
             let discrete_increment = self.convert_to_discrete_increment(control_value)?;
             return self.control_relative_target_value_set(
@@ -597,7 +620,13 @@ impl<T: Transformation> Mode<T> {
         Some(ModeControlResult::HitTarget(final_absolute_value))
     }
 
-    // Relative-to-absolute conversion mode.
+    /// Relative-to-absolute conversion mode.
+    ///
+    /// Takes care of:
+    ///
+    /// - Conversion to absolute value
+    /// - Step size interval
+    /// - Wrap (rotate)
     fn control_relative_to_absolute<'a, C: Copy>(
         &mut self,
         discrete_increment: DiscreteIncrement,
@@ -6950,6 +6979,62 @@ mod tests {
                 assert_abs_diff_eq!(
                     mode.control(abs_con(1.0), &target, ()).unwrap(),
                     abs_con(0.8)
+                );
+            }
+
+            #[test]
+            fn make_absolute_1() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    convert_relative_to_absolute: true,
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.0)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.01)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.02)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.03)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.04)
+                );
+            }
+
+            // TODO-medium-discrete Add tests for discrete processing
+            #[test]
+            fn target_value_sequence() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
+                    target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
+                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.6)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                mode.update_from_target(&target);
+                // When
+                // Then
+                assert_eq!(mode.control(abs_con(0.0), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.9)
                 );
             }
         }

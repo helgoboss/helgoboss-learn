@@ -603,12 +603,18 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             }
         }
         MakeAbsolute => {
-            if input.is_feedback || input.source_character != DetailedSourceCharacter::Relative {
+            if input.is_feedback {
                 HasNoEffect
             } else {
-                MakesSense(
-                    "Converts relative increments/decrements into an absolute value. This allows you to use control transformation but comes with the disadvantage of parameter jumps (which can be mitigated using the jump settings).",
-                )
+                if input.source_character == DetailedSourceCharacter::Relative
+                    || input.absolute_mode == crate::AbsoluteMode::IncrementalButtons
+                {
+                    MakesSense(
+                        "Converts relative increments/decrements into an absolute value. This allows you to use control transformation and discontinuous target value sequences but comes with the disadvantage of parameter jumps (which can be mitigated using the jump settings).",
+                    )
+                } else {
+                    HasNoEffect
+                }
             }
         }
         RoundTargetValue => {
