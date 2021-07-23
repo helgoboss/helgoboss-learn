@@ -1,6 +1,6 @@
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::character::complete::space0;
+use nom::character::complete::{space0, space1};
 use nom::combinator::opt;
 use nom::multi::separated_list0;
 use nom::sequence::separated_pair;
@@ -10,7 +10,7 @@ use nom::{
 };
 
 fn parse_value(input: &str) -> IResult<&str, &str> {
-    let mut parser = is_not("-(), ");
+    let parser = is_not("(), ");
     parser(input)
 }
 
@@ -23,9 +23,9 @@ fn parse_step_size(input: &str) -> IResult<&str, &str> {
 }
 
 fn parse_simple_range(input: &str) -> IResult<&str, RawSimpleRange> {
-    let mut parser = separated_pair(parse_value, tuple((space0, char('-'), space0)), parse_value);
-    let (remainder, (min, max)) = parser(input)?;
-    Ok((remainder, RawSimpleRange { min, max }))
+    let mut parser = separated_pair(parse_value, tuple((space1, char('-'), space1)), parse_value);
+    let (remainder, (from, to)) = parser(input)?;
+    Ok((remainder, RawSimpleRange { from, to }))
 }
 
 fn parse_full_range(input: &str) -> IResult<&str, RawFullRange> {
@@ -61,7 +61,7 @@ pub fn parse_value_sequence(input: &str) -> IResult<&str, ValueSequence> {
         remainder,
         ValueSequence {
             entries,
-            use_percentages: percent.is_some(),
+            percent: percent.is_some(),
         },
     ))
 }
@@ -69,7 +69,7 @@ pub fn parse_value_sequence(input: &str) -> IResult<&str, ValueSequence> {
 #[derive(PartialEq, Debug)]
 pub struct ValueSequence<'a> {
     pub entries: Vec<RawEntry<'a>>,
-    pub use_percentages: bool,
+    pub percent: bool,
 }
 
 #[derive(PartialEq, Debug)]
@@ -95,13 +95,14 @@ impl<'a> RawFullRange<'a> {
 
 #[derive(PartialEq, Debug)]
 pub struct RawSimpleRange<'a> {
-    pub min: &'a str,
-    pub max: &'a str,
+    pub from: &'a str,
+    pub to: &'a str,
 }
 
 impl<'a> RawSimpleRange<'a> {
-    fn new(min: &'a str, max: &'a str) -> Self {
-        Self { min, max }
+    #[cfg(test)]
+    fn new(from: &'a str, to: &'a str) -> Self {
+        Self { from, to }
     }
 }
 
@@ -195,7 +196,7 @@ mod tests {
                         RawEntry::SingleValue("12.5"),
                         RawEntry::Range(RawFullRange::new(RawSimpleRange::new("15", "20"), None))
                     ],
-                    use_percentages: true
+                    percent: true
                 }
             ))
         );

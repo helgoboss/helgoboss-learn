@@ -3,13 +3,14 @@ use crate::{
     negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
     DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
     OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, Transformation,
-    UnitIncrement, UnitValue, BASE_EPSILON,
+    UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -20,6 +21,9 @@ use std::time::Duration;
 /// the epsilon dependent on the source precision (e.g. 1.0/128.0 in case of short MIDI messages)
 /// but right now this should suffice to solve the immediate problem.  
 pub const FEEDBACK_EPSILON: f64 = BASE_EPSILON;
+
+/// 0.01 has been chosen as default minimum step size because it corresponds to 1%.
+pub const DEFAULT_STEP_SIZE: f64 = 0.01;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct ModeControlOptions {
@@ -59,7 +63,7 @@ pub struct ModeSettings<T: Transformation> {
     pub fire_mode: FireMode,
     pub press_duration_interval: Interval<Duration>,
     pub turbo_rate: Duration,
-    pub target_value_sequence: Vec<UnitValue>,
+    pub target_value_sequence: ValueSequence,
 }
 
 const ZERO_DURATION: Duration = Duration::from_millis(0);
@@ -90,7 +94,7 @@ impl<T: Transformation> Default for ModeSettings<T> {
             fire_mode: FireMode::WhenButtonReleased,
             press_duration_interval: Interval::new(ZERO_DURATION, ZERO_DURATION),
             turbo_rate: ZERO_DURATION,
-            target_value_sequence: vec![],
+            target_value_sequence: Default::default(),
         }
     }
 }
@@ -136,6 +140,10 @@ struct ModeState {
     /// For absolute-to-relative mode and value-scaling takeover mode.
     previous_absolute_control_value: Option<UnitValue>,
     discrete_previous_absolute_control_value: Option<u32>,
+    // For absolute control
+    unpacked_target_value_sequence: Vec<UnitValue>,
+    // For relative control
+    unpacked_target_value_set: BTreeSet<UnitValue>,
 }
 
 #[derive(
@@ -158,6 +166,14 @@ impl Default for AbsoluteMode {
     }
 }
 
+pub struct ModeGarbage<T> {
+    _control_transformation: Option<T>,
+    _feedback_transformation: Option<T>,
+    _target_value_sequence: ValueSequence,
+    _unpacked_target_value_sequence: Vec<UnitValue>,
+    _unpacked_target_value_set: BTreeSet<UnitValue>,
+}
+
 impl<T: Transformation> Mode<T> {
     pub fn new(settings: ModeSettings<T>) -> Self {
         Mode {
@@ -170,8 +186,15 @@ impl<T: Transformation> Mode<T> {
         &self.settings
     }
 
-    pub fn into_settings(self) -> ModeSettings<T> {
-        self.settings
+    /// For deferring deallocation to non-real-time thread.
+    pub fn recycle(self) -> ModeGarbage<T> {
+        ModeGarbage {
+            _control_transformation: self.settings.control_transformation,
+            _feedback_transformation: self.settings.feedback_transformation,
+            _target_value_sequence: self.settings.target_value_sequence,
+            _unpacked_target_value_sequence: self.state.unpacked_target_value_sequence,
+            _unpacked_target_value_set: self.state.unpacked_target_value_set,
+        }
     }
 
     /// Processes the given control value and maybe returns an appropriate target control value.
@@ -319,6 +342,21 @@ impl<T: Transformation> Mode<T> {
             false,
             ModeControlOptions::default(),
         )
+    }
+
+    /// Gives the mode the opportunity to update internal state when it's being connected to a
+    /// target (either initial target resolve or refreshing target resolve).  
+    pub fn update_from_target<'a, C: Copy>(&mut self, target: &impl Target<'a, Context = C>) {
+        let default_step_size = target
+            .control_type()
+            .step_size()
+            .unwrap_or_else(|| UnitValue::new(DEFAULT_STEP_SIZE));
+        let unpacked_sequence = self
+            .settings
+            .target_value_sequence
+            .unpack(default_step_size);
+        self.state.unpacked_target_value_set = unpacked_sequence.iter().copied().collect();
+        self.state.unpacked_target_value_sequence = unpacked_sequence;
     }
 
     fn control_relative<'a, C: Copy>(
@@ -588,6 +626,7 @@ impl<T: Transformation> Mode<T> {
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
+        // TODO-high Implement value sequences
         use ControlType::*;
         let control_type = target.control_type();
         match control_type {
@@ -699,7 +738,7 @@ impl<T: Transformation> Mode<T> {
             v = v.inverse(normalized_max_discrete_target_value);
         };
         // 4. Apply target interval and rounding OR target value sequence
-        if self.settings.target_value_sequence.is_empty() {
+        if self.state.unpacked_target_value_sequence.is_empty() {
             // We don't have a target value sequence. Apply target interval and rounding.
             v = v.denormalize(
                 &self.settings.target_value_interval,
@@ -711,13 +750,13 @@ impl<T: Transformation> Mode<T> {
                 v = v.round(control_type);
             };
         } else {
-            // We have a target value sequence. Apply them.
-            let max_index = self.settings.target_value_sequence.len() - 1;
-            let index = (v.to_unit_value().get() * max_index as f64).round() as usize;
+            // We have a target value sequence. Apply it.
+            let max_index = self.state.unpacked_target_value_sequence.len() - 1;
+            let seq_index = (v.to_unit_value().get() * max_index as f64).round() as usize;
             let unit_value = self
-                .settings
-                .target_value_sequence
-                .get(index)
+                .state
+                .unpacked_target_value_sequence
+                .get(seq_index)
                 .copied()
                 .unwrap_or_default();
             v = AbsoluteValue::Continuous(unit_value)
@@ -1028,10 +1067,14 @@ impl<T: Transformation> Mode<T> {
         )))
     }
 
+    /// Processes:
+    /// - Speed (step count)
+    /// - Reverse
     fn pep_up_discrete_increment(
         &mut self,
         increment: DiscreteIncrement,
     ) -> Option<DiscreteIncrement> {
+        // Process speed (step count)
         let factor = increment.clamp_to_interval(&self.settings.step_count_interval);
         let actual_increment = if factor.is_positive() {
             factor
@@ -1045,6 +1088,7 @@ impl<T: Transformation> Mode<T> {
             DiscreteIncrement::new(1)
         };
         let clamped_increment = actual_increment.with_direction(increment.signum());
+        // Process reverse
         let result = if self.settings.reverse {
             clamped_increment.inverse()
         } else {
@@ -1940,20 +1984,14 @@ mod tests {
             fn target_value_sequence_continuous_target() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    target_value_sequence: vec![
-                        uv(0.2),
-                        uv(0.4),
-                        uv(0.4),
-                        uv(0.5),
-                        uv(0.0),
-                        uv(0.9),
-                    ],
+                    target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                     ..Default::default()
                 });
                 let target = TestTarget {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
+                mode.update_from_target(&target);
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -2035,14 +2073,7 @@ mod tests {
             fn target_value_sequence_discrete_target() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    target_value_sequence: vec![
-                        uv(0.2),
-                        uv(0.4),
-                        uv(0.4),
-                        uv(0.5),
-                        uv(0.0),
-                        uv(0.9),
-                    ],
+                    target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -2051,6 +2082,7 @@ mod tests {
                         atomic_step_size: UnitValue::new(0.5),
                     },
                 };
+                mode.update_from_target(&target);
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -7594,10 +7626,6 @@ mod tests {
         AbsoluteValue::Continuous(UnitValue::new(v))
     }
 
-    fn uv(v: f64) -> UnitValue {
-        UnitValue::new(v)
-    }
-
     fn dis_val(actual: u32, max: u32) -> AbsoluteValue {
         AbsoluteValue::Discrete(Fraction::new(actual, max))
     }
@@ -7610,14 +7638,12 @@ mod tests {
 }
 
 pub fn default_step_size_interval() -> Interval<UnitValue> {
-    // 0.01 has been chosen as default minimum step size because it corresponds to 1%.
-    //
     // 0.01 has also been chosen as default maximum step size because most users probably
     // want to start easy, that is without using the "press harder = more increments"
     // respectively "dial harder = more increments" features. Activating them right from
     // the start by choosing a higher step size maximum could lead to surprising results
     // such as ugly parameters jumps, especially if the source is not suited for that.
-    create_unit_value_interval(0.01, 0.01)
+    create_unit_value_interval(DEFAULT_STEP_SIZE, DEFAULT_STEP_SIZE)
 }
 
 pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {

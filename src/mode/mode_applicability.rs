@@ -39,6 +39,7 @@ pub struct ModeApplicabilityCheckInput {
     pub source_character: DetailedSourceCharacter,
     pub absolute_mode: AbsoluteMode,
     pub mode_parameter: ModeParameter,
+    pub target_value_sequence_is_set: bool,
 }
 
 impl ModeApplicabilityCheckInput {
@@ -65,6 +66,8 @@ pub enum ModeParameter {
     TakeoverMode,
     #[display(fmt = "Control transformation")]
     ControlTransformation,
+    #[display(fmt = "Target values")]
+    TargetValueSequence,
     #[display(fmt = "Target min/max")]
     TargetMinMax,
     #[display(fmt = "Feedback transformation")]
@@ -93,6 +96,7 @@ pub enum ModeParameter {
     RoundTargetValue,
     #[display(fmt = "Absolute mode")]
     AbsoluteMode,
+    // TODO-high Enable and implement "Make absolute" also for incremental buttons!
     #[display(fmt = "Absolute mode \"{}\"", _0)]
     SpecificAbsoluteMode(AbsoluteMode),
     #[display(fmt = "Group interaction")]
@@ -371,8 +375,17 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 HasNoEffect
             } else if input.is_feedback {
                 MakesSense("Defines the relevant target value range.")
+            } else if input.target_value_sequence_is_set {
+                HasNoEffect
             } else {
                 MakesSense("Makes sure the target value will end up in the specified range.")
+            }
+        }
+        TargetValueSequence => {
+            if input.target_is_virtual || input.is_feedback {
+                HasNoEffect
+            } else {
+                MakesSense("Allows you to step through a sequence of comma-separated user-defined target values and value ranges. When using relative control, duplicate values and direction changes are ignored. Example: 25 - 50 (2), 75, 50, 100 %")
             }
         }
         FeedbackTransformation => {

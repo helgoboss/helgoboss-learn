@@ -1,34 +1,58 @@
 use crate::mode::value_sequence::parser::RawEntry;
 use crate::UnitValue;
+use crate::{format_percentage_without_unit, parse_percentage_without_unit};
+#[cfg(feature = "serde_with")]
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
 use std::fmt;
 use std::fmt::{Display, Formatter, Write};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
+#[cfg_attr(feature = "serde_with", derive(SerializeDisplay, DeserializeFromStr))]
 pub struct ValueSequence {
     entries: Vec<ValueSequenceEntry>,
-    use_percentages: bool,
+    percent: bool,
 }
 
 impl ValueSequence {
-    pub fn parse<C: ValueSequenceIo>(context: &C, input: &str) -> Result<Self, &'static str> {
+    pub fn parse<P: ValueParser>(
+        single_value_parser: &P,
+        input: &str,
+    ) -> Result<Self, &'static str> {
         let (_, raw_sequence) =
             super::parser::parse_value_sequence(input).map_err(|_| "couldn't parse sequence")?;
         let sequence = ValueSequence {
             entries: {
+                let parse_value = |input: &str| {
+                    if raw_sequence.percent {
+                        parse_percent(input)
+                    } else {
+                        single_value_parser.parse_value(input)
+                    }
+                };
+                let parse_step = |input: &str| {
+                    if raw_sequence.percent {
+                        parse_percent(input)
+                    } else {
+                        single_value_parser.parse_step(input)
+                    }
+                };
                 let result: Result<Vec<_>, &'static str> = raw_sequence
                     .entries
                     .iter()
                     .map(|e| match e {
                         RawEntry::SingleValue(e) => {
-                            let val = context.parse(raw_sequence.use_percentages, e)?;
-                            Ok(ValueSequenceEntry::SingleValue(val))
+                            Ok(ValueSequenceEntry::SingleValue(parse_value(e)?))
                         }
                         RawEntry::Range(e) => {
                             let entry = ValueSequenceRangeEntry {
-                                min: UnitValue::MIN,
-                                max: UnitValue::MIN,
-                                step_size: None,
+                                from: parse_value(e.simple_range.from)?,
+                                to: parse_value(e.simple_range.to)?,
+                                step_size: if let Some(s) = e.step_size {
+                                    Some(parse_step(s)?)
+                                } else {
+                                    None
+                                },
                             };
                             Ok(ValueSequenceEntry::Range(entry))
                         }
@@ -37,79 +61,106 @@ impl ValueSequence {
                 let result = result?;
                 result
             },
-            use_percentages: raw_sequence.use_percentages,
+            percent: raw_sequence.percent,
         };
         Ok(sequence)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     pub fn entries(&self) -> &[ValueSequenceEntry] {
         &self.entries
     }
 
-    pub fn use_percentages(&self) -> bool {
-        self.use_percentages
+    pub fn percent(&self) -> bool {
+        self.percent
     }
 
-    pub fn in_context<'a, C: ValueSequenceIo>(
-        &'a self,
-        context: &'a C,
-    ) -> WithContext<'a, Self, C> {
-        WithContext::new(self, self.use_percentages, context)
-    }
-}
-
-pub struct WithContext<'a, A, C> {
-    actual: &'a A,
-    use_percentages: bool,
-    context: &'a C,
-}
-
-impl<'a, A, C> WithContext<'a, A, C> {
-    fn new(actual: &'a A, use_percentages: bool, context: &'a C) -> Self {
-        WithContext {
-            actual,
-            use_percentages,
-            context,
+    pub fn displayable<'a>(&'a self, f: &'a impl ValueFormatter) -> impl Display + 'a {
+        DisplayableValueSequence {
+            value_sequence: self,
+            value_formatter: f,
         }
     }
-}
 
-impl<'a, C: DefaultStepSize> WithContext<'a, ValueSequence, C> {
-    pub fn unpack(&self) -> Vec<UnitValue> {
-        self.actual
-            .entries
+    pub fn unpack(&self, default_step_size: UnitValue) -> Vec<UnitValue> {
+        self.entries
             .iter()
-            .map(|e| WithContext::new(e, self.use_percentages, self.context))
+            .map(|e| WithDefaultStepSize::new(e, default_step_size))
             .flatten()
             .collect()
     }
 }
 
-impl<'a, C: ValueSequenceIo> Display for WithContext<'a, ValueSequence, C> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let snippets: Vec<_> = self
-            .actual
-            .entries
-            .iter()
-            .map(|e| WithContext::new(e, self.use_percentages, self.context).to_string())
-            .collect();
-        let csv = snippets.join(", ");
-        write!(f, "{} {}", csv, if self.use_percentages { "%" } else { "" })
+struct WithDefaultStepSize<'a, A> {
+    actual: &'a A,
+    default_step_size: UnitValue,
+}
+
+impl<'a, A> WithDefaultStepSize<'a, A> {
+    fn new(actual: &'a A, default_step_size: UnitValue) -> Self {
+        Self {
+            actual,
+            default_step_size,
+        }
     }
 }
 
-pub trait ValueSequenceIo {
-    fn format(
-        &self,
-        value: UnitValue,
-        use_percentages: bool,
-        f: &mut fmt::Formatter,
-    ) -> fmt::Result;
-    fn parse(&self, use_percentages: bool, text: &str) -> Result<UnitValue, &'static str>;
+struct WithFormatter<'a, A, F: ValueFormatter> {
+    actual: &'a A,
+    percent: bool,
+    value_formatter: &'a F,
 }
 
-pub trait DefaultStepSize {
-    fn default_step_size(&self) -> UnitValue;
+impl<'a, A, F: ValueFormatter> WithFormatter<'a, A, F> {
+    fn new(actual: &'a A, percent: bool, value_formatter: &'a F) -> Self {
+        WithFormatter {
+            actual,
+            percent,
+            value_formatter,
+        }
+    }
+}
+
+struct DisplayableValueSequence<'a, F> {
+    value_sequence: &'a ValueSequence,
+    value_formatter: &'a F,
+}
+
+impl<'a, F: ValueFormatter> Display for DisplayableValueSequence<'a, F> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let snippets: Vec<_> = self
+            .value_sequence
+            .entries
+            .iter()
+            .map(|e| {
+                WithFormatter::new(e, self.value_sequence.percent, self.value_formatter).to_string()
+            })
+            .collect();
+        let csv = snippets.join(", ");
+        write!(
+            f,
+            "{}{}",
+            csv,
+            if self.value_sequence.percent {
+                " %"
+            } else {
+                ""
+            }
+        )
+    }
+}
+
+pub trait ValueFormatter {
+    fn format_value(&self, value: UnitValue, f: &mut fmt::Formatter) -> fmt::Result;
+    fn format_step(&self, value: UnitValue, f: &mut fmt::Formatter) -> fmt::Result;
+}
+
+pub trait ValueParser {
+    fn parse_value(&self, text: &str) -> Result<UnitValue, &'static str>;
+    fn parse_step(&self, text: &str) -> Result<UnitValue, &'static str>;
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -118,17 +169,23 @@ pub enum ValueSequenceEntry {
     Range(ValueSequenceRangeEntry),
 }
 
-impl<'a, C: ValueSequenceIo> Display for WithContext<'a, ValueSequenceEntry, C> {
+impl<'a, F: ValueFormatter> Display for WithFormatter<'a, ValueSequenceEntry, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ValueSequenceEntry::*;
         match self.actual {
-            SingleValue(v) => self.context.format(*v, self.use_percentages, f),
-            Range(r) => WithContext::new(r, self.use_percentages, self.context).fmt(f),
+            SingleValue(v) => {
+                if self.percent {
+                    f.write_str(&format_percentage_without_unit(v.get()))
+                } else {
+                    self.value_formatter.format_value(*v, f)
+                }
+            }
+            Range(r) => WithFormatter::new(r, self.percent, self.value_formatter).fmt(f),
         }
     }
 }
 
-impl<'a, C: DefaultStepSize> IntoIterator for WithContext<'a, ValueSequenceEntry, C> {
+impl<'a> IntoIterator for WithDefaultStepSize<'a, ValueSequenceEntry> {
     type Item = UnitValue;
     type IntoIter = ValueSequenceRangeIterator;
 
@@ -137,61 +194,74 @@ impl<'a, C: DefaultStepSize> IntoIterator for WithContext<'a, ValueSequenceEntry
         match self.actual {
             SingleValue(uv) => {
                 let simple_range_entry = ValueSequenceRangeEntry {
-                    min: *uv,
-                    max: *uv,
+                    from: *uv,
+                    to: *uv,
                     step_size: Some(UnitValue::MAX),
                 };
-                WithContext::new(&simple_range_entry, self.use_percentages, self.context)
-                    .into_iter()
+                WithDefaultStepSize::new(&simple_range_entry, self.default_step_size).into_iter()
             }
-            Range(r) => WithContext::new(r, self.use_percentages, self.context).into_iter(),
+            Range(r) => WithDefaultStepSize::new(r, self.default_step_size).into_iter(),
         }
     }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct ValueSequenceRangeEntry {
-    min: UnitValue,
-    max: UnitValue,
+    from: UnitValue,
+    to: UnitValue,
     step_size: Option<UnitValue>,
 }
 
-impl<'a, C: ValueSequenceIo> Display for WithContext<'a, ValueSequenceRangeEntry, C> {
+impl<'a, F: ValueFormatter> Display for WithFormatter<'a, ValueSequenceRangeEntry, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.context
-            .format(self.actual.min, self.use_percentages, f)?;
-        f.write_char('-')?;
-        self.context
-            .format(self.actual.max, self.use_percentages, f)?;
+        let format_value = |v: UnitValue, f: &mut fmt::Formatter| {
+            if self.percent {
+                f.write_str(&format_percentage_without_unit(v.get()))
+            } else {
+                self.value_formatter.format_value(v, f)
+            }
+        };
+        let format_step = |v: UnitValue, f: &mut fmt::Formatter| {
+            if self.percent {
+                f.write_str(&format_percentage_without_unit(v.get()))
+            } else {
+                self.value_formatter.format_step(v, f)
+            }
+        };
+        format_value(self.actual.from, f)?;
+        f.write_str(" - ")?;
+        format_value(self.actual.to, f)?;
         if let Some(step_size) = self.actual.step_size {
             f.write_str(" (")?;
-            self.context.format(step_size, self.use_percentages, f)?;
+            format_step(step_size, f)?;
             f.write_char(')')?;
         }
         Ok(())
     }
 }
 
-impl<'a, C: DefaultStepSize> IntoIterator for WithContext<'a, ValueSequenceRangeEntry, C> {
+impl<'a> IntoIterator for WithDefaultStepSize<'a, ValueSequenceRangeEntry> {
     type Item = UnitValue;
     type IntoIter = ValueSequenceRangeIterator;
 
     fn into_iter(self) -> ValueSequenceRangeIterator {
         ValueSequenceRangeIterator {
-            val: self.actual.min.get(),
-            max: self.actual.max.get(),
+            i: self.actual.from.get(),
+            from: self.actual.from.get(),
+            to: self.actual.to.get(),
             step_size: self
                 .actual
                 .step_size
-                .unwrap_or_else(|| self.context.default_step_size())
+                .unwrap_or(self.default_step_size)
                 .get(),
         }
     }
 }
 
 pub struct ValueSequenceRangeIterator {
-    val: f64,
-    max: f64,
+    i: f64,
+    from: f64,
+    to: f64,
     step_size: f64,
 }
 
@@ -199,50 +269,130 @@ impl Iterator for ValueSequenceRangeIterator {
     type Item = UnitValue;
 
     fn next(&mut self) -> Option<UnitValue> {
-        let val = self.val;
-        if val > self.max {
+        if self.step_size == 0.0 {
             return None;
         }
-        self.val = val + self.step_size;
-        Some(val.try_into().ok()?)
+        let i = self.i;
+        self.i = if self.from <= self.to {
+            if i > self.to {
+                return None;
+            }
+            i + self.step_size
+        } else {
+            if i < self.to {
+                return None;
+            }
+            i - self.step_size
+        };
+        Some(i.try_into().ok()?)
+    }
+}
+
+fn parse_percent(input: &str) -> Result<UnitValue, &'static str> {
+    parse_percentage_without_unit(input)?.try_into()
+}
+
+impl Display for ValueSequence {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.displayable(&UnitValueIo).fmt(f)
+    }
+}
+
+impl std::str::FromStr for ValueSequence {
+    type Err = &'static str;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        ValueSequence::parse(&UnitValueIo, input)
+    }
+}
+
+pub struct UnitValueIo;
+
+impl ValueFormatter for UnitValueIo {
+    fn format_value(&self, value: UnitValue, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", value)
+    }
+
+    fn format_step(&self, value: UnitValue, f: &mut Formatter) -> fmt::Result {
+        self.format_value(value, f)
+    }
+}
+
+impl ValueParser for UnitValueIo {
+    fn parse_value(&self, text: &str) -> Result<UnitValue, &'static str> {
+        text.parse()
+    }
+
+    fn parse_step(&self, text: &str) -> Result<UnitValue, &'static str> {
+        self.parse_value(text)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{format_percentage_without_unit, parse_percentage_without_unit};
 
     struct TestValueContext;
 
-    impl ValueSequenceIo for TestValueContext {
-        fn format(
-            &self,
-            value: UnitValue,
-            use_percentages: bool,
-            f: &mut Formatter,
-        ) -> fmt::Result {
-            f.write_str(&format_percentage_without_unit(value.get()))
+    impl ValueFormatter for TestValueContext {
+        fn format_value(&self, value: UnitValue, f: &mut Formatter) -> fmt::Result {
+            write!(f, "{}", (value.get() * 1000.0) as u32)
         }
-
-        fn parse(&self, use_percentages: bool, text: &str) -> Result<UnitValue, &'static str> {
-            parse_percentage_without_unit(text)?.try_into()
+        fn format_step(&self, value: UnitValue, f: &mut Formatter) -> fmt::Result {
+            write!(f, "{}", value)
         }
     }
 
-    impl DefaultStepSize for TestValueContext {
-        fn default_step_size(&self) -> UnitValue {
-            UnitValue::new(0.01)
+    impl ValueParser for TestValueContext {
+        fn parse_value(&self, text: &str) -> Result<UnitValue, &'static str> {
+            let number: u32 = text.parse().map_err(|_| "")?;
+            (number as f64 / 1000.0).try_into()
         }
+
+        fn parse_step(&self, text: &str) -> Result<UnitValue, &'static str> {
+            text.parse()
+        }
+    }
+
+    fn default_test_step_size() -> UnitValue {
+        UnitValue::new(0.001)
     }
 
     #[test]
-    fn basic() {
+    fn simple_values_percent() {
         // Given
-        let sequence = ValueSequence::parse(&TestValueContext, "25, 50, 75, 50, 100 %").unwrap();
+        let sequence = ValueSequence::parse(&TestValueContext, "25, 50, 75, 50.5, 100 %").unwrap();
         // When
         // Then
-        assert!(sequence.use_percentages());
+        assert!(sequence.percent());
+        assert_eq!(
+            sequence.entries(),
+            &[
+                ValueSequenceEntry::SingleValue(uv(0.25)),
+                ValueSequenceEntry::SingleValue(uv(0.50)),
+                ValueSequenceEntry::SingleValue(uv(0.75)),
+                ValueSequenceEntry::SingleValue(uv(0.505)),
+                ValueSequenceEntry::SingleValue(uv(1.00)),
+            ]
+        );
+        assert_eq!(
+            sequence.unpack(default_test_step_size()),
+            vec![uv(0.25), uv(0.50), uv(0.75), uv(0.505), uv(1.00)]
+        );
+        assert_eq!(
+            &sequence.displayable(&TestValueContext).to_string(),
+            "25, 50, 75, 50.50, 100 %"
+        );
+        assert_eq!(&sequence.to_string(), "25, 50, 75, 50.50, 100 %")
+    }
+
+    #[test]
+    fn simple_values_native() {
+        // Given
+        let sequence = ValueSequence::parse(&TestValueContext, "250, 500, 750, 500, 1000").unwrap();
+        // When
+        // Then
+        assert!(!sequence.percent());
         assert_eq!(
             sequence.entries(),
             &[
@@ -254,13 +404,93 @@ mod tests {
             ]
         );
         assert_eq!(
-            sequence.in_context(&TestValueContext).unpack(),
+            sequence.unpack(default_test_step_size()),
             vec![uv(0.25), uv(0.50), uv(0.75), uv(0.50), uv(1.00)]
         );
         assert_eq!(
-            &sequence.in_context(&TestValueContext).to_string(),
-            "25, 50, 75, 50, 100 %"
+            &sequence.displayable(&TestValueContext).to_string(),
+            "250, 500, 750, 500, 1000"
         );
+        assert_eq!(&sequence.to_string(), "0.25, 0.5, 0.75, 0.5, 1")
+    }
+
+    #[test]
+    fn ranges_native() {
+        // Given
+        let sequence = ValueSequence::parse(
+            &TestValueContext,
+            "250 - 255, 500 - 501, 750 - 755 (0.002), 520 - 500(0.01), 999",
+        )
+        .unwrap();
+        // When
+        // Then
+        assert!(!sequence.percent());
+        assert_eq!(
+            sequence.entries(),
+            &[
+                ValueSequenceEntry::Range(ValueSequenceRangeEntry {
+                    from: uv(0.250),
+                    to: uv(0.255),
+                    step_size: None
+                }),
+                ValueSequenceEntry::Range(ValueSequenceRangeEntry {
+                    from: uv(0.500),
+                    to: uv(0.501),
+                    step_size: None
+                }),
+                ValueSequenceEntry::Range(ValueSequenceRangeEntry {
+                    from: uv(0.750),
+                    to: uv(0.755),
+                    step_size: Some(uv(0.002))
+                }),
+                ValueSequenceEntry::Range(ValueSequenceRangeEntry {
+                    from: uv(0.520),
+                    to: uv(0.500),
+                    step_size: Some(uv(0.010))
+                }),
+                ValueSequenceEntry::SingleValue(uv(0.999))
+            ]
+        );
+        assert_eq!(
+            sequence.unpack(default_test_step_size()),
+            vec![
+                uv(0.250),
+                uv(0.251),
+                uv(0.252),
+                uv(0.253),
+                uv(0.254),
+                uv(0.255),
+                uv(0.500),
+                uv(0.501),
+                uv(0.750),
+                uv(0.752),
+                uv(0.754),
+                uv(0.520),
+                uv(0.510),
+                uv(0.500),
+                uv(0.999)
+            ]
+        );
+        assert_eq!(
+            &sequence.displayable(&TestValueContext).to_string(),
+            "250 - 255, 500 - 501, 750 - 755 (0.002), 520 - 500 (0.01), 999"
+        );
+        assert_eq!(
+            &sequence.to_string(),
+            "0.25 - 0.255, 0.5 - 0.501, 0.75 - 0.755 (0.002), 0.52 - 0.5 (0.01), 0.999"
+        )
+    }
+
+    #[test]
+    fn range_corner_cases() {
+        // Given
+        let sequence =
+            ValueSequence::parse(&TestValueContext, "250 - 250, 500 - 501 (0), 601 - 600 (0)")
+                .unwrap();
+        // When
+        // Then
+        assert!(!sequence.percent());
+        assert_eq!(sequence.unpack(default_test_step_size()), vec![uv(0.250)]);
     }
 
     fn uv(value: f64) -> UnitValue {
