@@ -96,7 +96,6 @@ pub enum ModeParameter {
     RoundTargetValue,
     #[display(fmt = "Absolute mode")]
     AbsoluteMode,
-    // TODO-high Enable and implement "Make absolute" also for incremental buttons!
     #[display(fmt = "Absolute mode \"{}\"", _0)]
     SpecificAbsoluteMode(AbsoluteMode),
     #[display(fmt = "Group interaction")]
@@ -605,16 +604,14 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         MakeAbsolute => {
             if input.is_feedback {
                 HasNoEffect
-            } else {
-                if input.source_character == DetailedSourceCharacter::Relative
-                    || input.absolute_mode == crate::AbsoluteMode::IncrementalButtons
-                {
-                    MakesSense(
+            } else if input.source_character == DetailedSourceCharacter::Relative
+                || input.absolute_mode == crate::AbsoluteMode::IncrementalButtons
+            {
+                MakesSense(
                         "Converts relative increments/decrements into an absolute value. This allows you to use control transformation and discontinuous target value sequences but comes with the disadvantage of parameter jumps (which can be mitigated using the jump settings).",
                     )
-                } else {
-                    HasNoEffect
-                }
+            } else {
+                HasNoEffect
             }
         }
         RoundTargetValue => {

@@ -41,8 +41,7 @@ impl ValueSequence {
                         }
                     })
                     .collect();
-                let result = result?;
-                result
+                result?
             },
         };
         Ok(sequence)
@@ -229,7 +228,7 @@ impl Iterator for ValueSequenceRangeIterator {
             }
             i - self.step_size
         };
-        Some(i.try_into().ok()?)
+        i.try_into().ok()
     }
 }
 
