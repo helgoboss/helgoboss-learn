@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn simple_range() {
         assert_eq!(
-            parse_simple_range("5-10"),
+            parse_simple_range("5 - 10"),
             Ok(("", RawSimpleRange::new("5", "10")))
         );
         assert_eq!(
@@ -109,7 +109,7 @@ mod tests {
             Ok(("", RawSimpleRange::new("5.0", "10.0")))
         );
         assert_eq!(
-            parse_simple_range("a-f"),
+            parse_simple_range("a - f"),
             Ok(("", RawSimpleRange::new("a", "f")))
         );
     }
@@ -117,11 +117,11 @@ mod tests {
     #[test]
     fn full_range() {
         assert_eq!(
-            parse_full_range("5-10"),
+            parse_full_range("5 - 10"),
             Ok(("", RawFullRange::new(RawSimpleRange::new("5", "10"), None)))
         );
         assert_eq!(
-            parse_full_range("5-10 (0.1)"),
+            parse_full_range("5 - 10 (0.1)"),
             Ok((
                 "",
                 RawFullRange::new(RawSimpleRange::new("5", "10"), Some("0.1"))
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn entry() {
         assert_eq!(
-            parse_entry("5-10 (0.1)"),
+            parse_entry("5 - 10 (0.1)"),
             Ok((
                 "",
                 RawEntry::Range(RawFullRange::new(
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn entries() {
         assert_eq!(
-            parse_entries("5-10 (0.1), 12.5, 15 - 20"),
+            parse_entries("5 - 10 (0.1), 12.5, 15 - 20"),
             Ok((
                 "",
                 vec![
