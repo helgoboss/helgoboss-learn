@@ -1,5 +1,4 @@
 use nom::branch::alt;
-use nom::bytes::complete::tag;
 use nom::character::complete::{space0, space1};
 use nom::combinator::opt;
 use nom::multi::separated_list0;
@@ -49,27 +48,9 @@ fn parse_entry(input: &str) -> IResult<&str, RawEntry> {
     parser(input)
 }
 
-fn parse_entries(input: &str) -> IResult<&str, Vec<RawEntry>> {
+pub fn parse_entries(input: &str) -> IResult<&str, Vec<RawEntry>> {
     let mut parser = separated_list0(tuple((space0, char(','), space0)), parse_entry);
     parser(input)
-}
-
-pub fn parse_value_sequence(input: &str) -> IResult<&str, ValueSequence> {
-    let mut parser = tuple((parse_entries, space0, opt(tag("%"))));
-    let (remainder, (entries, _, percent)) = parser(input)?;
-    Ok((
-        remainder,
-        ValueSequence {
-            entries,
-            percent: percent.is_some(),
-        },
-    ))
-}
-
-#[derive(PartialEq, Debug)]
-pub struct ValueSequence<'a> {
-    pub entries: Vec<RawEntry<'a>>,
-    pub percent: bool,
 }
 
 #[derive(PartialEq, Debug)]
@@ -177,27 +158,6 @@ mod tests {
                     RawEntry::SingleValue("12.5"),
                     RawEntry::Range(RawFullRange::new(RawSimpleRange::new("15", "20"), None))
                 ]
-            ))
-        );
-    }
-
-    #[test]
-    fn value_sequence() {
-        assert_eq!(
-            parse_value_sequence("5-10 (0.1), 12.5, 15 - 20 %"),
-            Ok((
-                "",
-                ValueSequence {
-                    entries: vec![
-                        RawEntry::Range(RawFullRange::new(
-                            RawSimpleRange::new("5", "10"),
-                            Some("0.1")
-                        )),
-                        RawEntry::SingleValue("12.5"),
-                        RawEntry::Range(RawFullRange::new(RawSimpleRange::new("15", "20"), None))
-                    ],
-                    percent: true
-                }
             ))
         );
     }
