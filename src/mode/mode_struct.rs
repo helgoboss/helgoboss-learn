@@ -394,6 +394,14 @@ impl<T: Transformation> Mode<T> {
         consider_press_duration: bool,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
+        // Filter presses/releases. Makes sense only for absolute mode "Normal". If this is used
+        // a filter is used with another absolute mode, it's considered a usage fault.
+        match self.settings.button_usage {
+            ButtonUsage::PressOnly if v.is_zero() => return None,
+            ButtonUsage::ReleaseOnly if !v.is_zero() => return None,
+            _ => {}
+        };
+        // Press duration
         let v = if consider_press_duration {
             self.state
                 .press_duration_processor
@@ -433,12 +441,6 @@ impl<T: Transformation> Mode<T> {
             .state
             .previous_absolute_control_value
             .replace(control_value.to_unit_value());
-        // Filter
-        match self.settings.button_usage {
-            ButtonUsage::PressOnly if control_value.is_zero() => return None,
-            ButtonUsage::ReleaseOnly if !control_value.is_zero() => return None,
-            _ => {}
-        };
         let interval_match_result = control_value.matches_tolerant(
             &self.settings.source_value_interval,
             &self.settings.discrete_source_value_interval,
