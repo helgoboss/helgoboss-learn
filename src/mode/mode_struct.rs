@@ -176,10 +176,15 @@ pub struct ModeGarbage<T> {
 
 impl<T: Transformation> Mode<T> {
     pub fn new(settings: ModeSettings<T>) -> Self {
-        Mode {
-            settings,
-            state: Default::default(),
-        }
+        let state = ModeState {
+            press_duration_processor: PressDurationProcessor::new(
+                settings.fire_mode,
+                settings.press_duration_interval,
+                settings.turbo_rate,
+            ),
+            ..Default::default()
+        };
+        Mode { settings, state }
     }
 
     pub fn settings(&self) -> &ModeSettings<T> {
