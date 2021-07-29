@@ -66,7 +66,7 @@ pub enum ModeParameter {
     TakeoverMode,
     #[display(fmt = "Control transformation")]
     ControlTransformation,
-    #[display(fmt = "Target values")]
+    #[display(fmt = "Target value sequence")]
     TargetValueSequence,
     #[display(fmt = "Target min/max")]
     TargetMinMax,
