@@ -2280,6 +2280,33 @@ mod tests {
             }
 
             #[test]
+            fn target_value_sequence_continuous_target_range() {
+                // Given
+                let target_value_sequence: ValueSequence =
+                    "0.25 - 0.50 (0.01), 0.75, 0.50, 0.10".parse().unwrap();
+                let count = target_value_sequence.unpack(UnitValue::new(0.01)).len();
+                let max = count - 1;
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    target_value_sequence,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.6)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                mode.update_from_target(&target);
+                // When
+                // Then
+                assert_eq!(29, count);
+                assert_eq!(28, max);
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(26.0 / max as f64), &target, ())
+                        .unwrap(),
+                    abs_con(0.5)
+                );
+            }
+
+            #[test]
             fn feedback() {
                 // Given
                 let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
