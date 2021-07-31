@@ -3792,7 +3792,7 @@ mod tests {
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis(127, 127), &target, ()).unwrap(),
-                    abs_dis(127 - 127, 200)
+                    abs_dis(0, 200)
                 );
             }
 

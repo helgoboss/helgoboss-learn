@@ -144,7 +144,7 @@ impl RawMidiEvent {
         // TODO-low I think copying from a slice is the only way to go, even we own a vec or array.
         //  REAPER's struct layout requires us to put something in front of the vec, which is
         //  not or at least not easily possible without copying.
-        array[..midi_message.len()].copy_from_slice(&midi_message);
+        array[..midi_message.len()].copy_from_slice(midi_message);
         Ok(Self::new(frame_offset, midi_message.len() as _, array))
     }
 
