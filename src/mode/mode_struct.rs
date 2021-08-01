@@ -2300,9 +2300,17 @@ mod tests {
                 assert_eq!(29, count);
                 assert_eq!(28, max);
                 assert_abs_diff_eq!(
-                    mode.control(abs_con(26.0 / max as f64), &target, ())
+                    mode.control(abs_con(0.0), &target, ()).unwrap(),
+                    abs_con(0.25)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(25.0 / max as f64), &target, ())
                         .unwrap(),
                     abs_con(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(1.0), &target, ()).unwrap(),
+                    abs_con(0.10)
                 );
             }
 

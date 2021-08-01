@@ -1,5 +1,7 @@
 use crate::mode::value_sequence::parser::RawEntry;
-use crate::{format_percentage_without_unit, parse_percentage_without_unit, UnitValue};
+use crate::{
+    format_percentage_without_unit, parse_percentage_without_unit, UnitValue, BASE_EPSILON,
+};
 #[cfg(feature = "serde_with")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
@@ -218,12 +220,14 @@ impl Iterator for ValueSequenceRangeIterator {
         }
         let i = self.i;
         self.i = if self.from <= self.to {
-            if i > self.to {
+            // Forward
+            if i > self.to + BASE_EPSILON {
                 return None;
             }
             i + self.step_size
         } else {
-            if i < self.to {
+            // Backward
+            if i + BASE_EPSILON < self.to {
                 return None;
             }
             i - self.step_size
@@ -422,36 +426,36 @@ mod tests {
         let unpacked = sequence.unpack(UnitValue::new(0.01));
         // Then
         assert_eq!(unpacked.len(), 29);
-        let bla = |i| *unpacked.get(i).unwrap();
-        assert_abs_diff_eq!(bla(0), uv(0.25));
-        assert_abs_diff_eq!(bla(1), uv(0.26));
-        assert_abs_diff_eq!(bla(2), uv(0.27));
-        assert_abs_diff_eq!(bla(3), uv(0.28));
-        assert_abs_diff_eq!(bla(4), uv(0.29));
-        assert_abs_diff_eq!(bla(5), uv(0.30));
-        assert_abs_diff_eq!(bla(6), uv(0.31));
-        assert_abs_diff_eq!(bla(7), uv(0.32));
-        assert_abs_diff_eq!(bla(8), uv(0.33));
-        assert_abs_diff_eq!(bla(9), uv(0.34));
-        assert_abs_diff_eq!(bla(10), uv(0.35));
-        assert_abs_diff_eq!(bla(11), uv(0.36));
-        assert_abs_diff_eq!(bla(12), uv(0.37));
-        assert_abs_diff_eq!(bla(13), uv(0.38));
-        assert_abs_diff_eq!(bla(14), uv(0.39));
-        assert_abs_diff_eq!(bla(15), uv(0.40));
-        assert_abs_diff_eq!(bla(16), uv(0.41));
-        assert_abs_diff_eq!(bla(17), uv(0.42));
-        assert_abs_diff_eq!(bla(18), uv(0.43));
-        assert_abs_diff_eq!(bla(19), uv(0.44));
-        assert_abs_diff_eq!(bla(20), uv(0.45));
-        assert_abs_diff_eq!(bla(21), uv(0.46));
-        assert_abs_diff_eq!(bla(22), uv(0.47));
-        assert_abs_diff_eq!(bla(23), uv(0.48));
-        assert_abs_diff_eq!(bla(24), uv(0.49));
-        assert_abs_diff_eq!(bla(25), uv(0.50));
-        assert_abs_diff_eq!(bla(26), uv(0.75));
-        assert_abs_diff_eq!(bla(27), uv(0.50));
-        assert_abs_diff_eq!(bla(28), uv(0.01));
+        let at = |i| *unpacked.get(i).unwrap();
+        assert_abs_diff_eq!(at(0), uv(0.25));
+        assert_abs_diff_eq!(at(1), uv(0.26));
+        assert_abs_diff_eq!(at(2), uv(0.27));
+        assert_abs_diff_eq!(at(3), uv(0.28));
+        assert_abs_diff_eq!(at(4), uv(0.29));
+        assert_abs_diff_eq!(at(5), uv(0.30));
+        assert_abs_diff_eq!(at(6), uv(0.31));
+        assert_abs_diff_eq!(at(7), uv(0.32));
+        assert_abs_diff_eq!(at(8), uv(0.33));
+        assert_abs_diff_eq!(at(9), uv(0.34));
+        assert_abs_diff_eq!(at(10), uv(0.35));
+        assert_abs_diff_eq!(at(11), uv(0.36));
+        assert_abs_diff_eq!(at(12), uv(0.37));
+        assert_abs_diff_eq!(at(13), uv(0.38));
+        assert_abs_diff_eq!(at(14), uv(0.39));
+        assert_abs_diff_eq!(at(15), uv(0.40));
+        assert_abs_diff_eq!(at(16), uv(0.41));
+        assert_abs_diff_eq!(at(17), uv(0.42));
+        assert_abs_diff_eq!(at(18), uv(0.43));
+        assert_abs_diff_eq!(at(19), uv(0.44));
+        assert_abs_diff_eq!(at(20), uv(0.45));
+        assert_abs_diff_eq!(at(21), uv(0.46));
+        assert_abs_diff_eq!(at(22), uv(0.47));
+        assert_abs_diff_eq!(at(23), uv(0.48));
+        assert_abs_diff_eq!(at(24), uv(0.49));
+        assert_abs_diff_eq!(at(25), uv(0.50));
+        assert_abs_diff_eq!(at(26), uv(0.75));
+        assert_abs_diff_eq!(at(27), uv(0.50));
+        assert_abs_diff_eq!(at(28), uv(0.10));
     }
 
     #[test]
