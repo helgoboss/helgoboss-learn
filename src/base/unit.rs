@@ -474,11 +474,35 @@ pub fn create_unit_value_interval(min: f64, max: f64) -> Interval<UnitValue> {
 pub struct UnitIncrement(f64);
 
 impl UnitIncrement {
-    /// Creates the unit increment. Panics if the given number is 0.0.
+    pub fn is_valid(number: f64) -> bool {
+        number != 0.0 && (-1.0..=1.0).contains(&number)
+    }
+
+    /// Creates the unit increment. Panics if the given number is 0.0 or not within the positive or
+    /// negative unit interval.
     #[allow(clippy::float_cmp)]
-    pub fn new(increment: f64) -> UnitIncrement {
-        assert_ne!(increment, 0.0);
-        UnitIncrement(increment)
+    pub fn new(number: f64) -> UnitIncrement {
+        assert!(
+            Self::is_valid(number),
+            "{} is not a valid unit increment",
+            number
+        );
+        UnitIncrement(number)
+    }
+
+    /// Creates the unit increment. Panics if the given number is 0.0 but clamps it if not in the
+    /// positive or negative unit interval.
+    #[allow(clippy::float_cmp)]
+    pub fn new_clamped(number: f64) -> UnitIncrement {
+        assert_ne!(number, 0.0);
+        let actual_number = if number > 1.0 {
+            1.0
+        } else if number < -1.0 {
+            -1.0
+        } else {
+            number
+        };
+        UnitIncrement(actual_number)
     }
 
     /// Checks preconditions only in debug build. Should only be used if you want to squeeze out
@@ -490,9 +514,13 @@ impl UnitIncrement {
     ///
     /// Make sure the given increment is not zero.
     #[allow(clippy::float_cmp)]
-    pub unsafe fn new_unchecked(increment: f64) -> UnitIncrement {
-        debug_assert_ne!(increment, 0.0);
-        UnitIncrement(increment)
+    pub unsafe fn new_unchecked(number: f64) -> UnitIncrement {
+        debug_assert!(
+            Self::is_valid(number),
+            "{} is not a valid unit increment",
+            number
+        );
+        UnitIncrement(number)
     }
 
     /// Returns the underlying number.

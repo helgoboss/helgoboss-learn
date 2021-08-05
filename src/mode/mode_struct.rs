@@ -437,10 +437,6 @@ impl<T: Transformation> Mode<T> {
         context: C,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         // Memorize as previous value for next control cycle.
-        let previous_control_value = self
-            .state
-            .previous_absolute_control_value
-            .replace(control_value.to_unit_value());
         let interval_match_result = control_value.matches_tolerant(
             &self.settings.source_value_interval,
             &self.settings.discrete_source_value_interval,
@@ -461,17 +457,30 @@ impl<T: Transformation> Mode<T> {
         // Control value is within source value interval
         let current_target_value = target.current_value(context);
         let control_type = target.control_type();
+        // 1. Apply source interval
+        let source_normalized_control_value = source_bound_value.normalize(
+            &self.settings.source_value_interval,
+            &self.settings.discrete_source_value_interval,
+            min_is_max_behavior,
+            self.settings.use_discrete_processing,
+            BASE_EPSILON,
+        );
+        let prev_source_normalized_control_value = self
+            .state
+            .previous_absolute_control_value
+            .replace(source_normalized_control_value.to_unit_value())
+            .map(AbsoluteValue::Continuous);
         let pepped_up_control_value = self.pep_up_control_value(
-            source_bound_value,
+            source_normalized_control_value,
             control_type,
             current_target_value,
-            min_is_max_behavior,
         );
         self.hitting_target_considering_max_jump(
             pepped_up_control_value,
             current_target_value,
             control_type,
-            previous_control_value.map(AbsoluteValue::Continuous),
+            source_normalized_control_value,
+            prev_source_normalized_control_value,
         )
     }
 
@@ -800,19 +809,11 @@ impl<T: Transformation> Mode<T> {
 
     fn pep_up_control_value(
         &self,
-        control_value: AbsoluteValue,
+        source_normalized_control_value: AbsoluteValue,
         control_type: ControlType,
         current_target_value: Option<AbsoluteValue>,
-        min_is_max_behavior: MinIsMaxBehavior,
     ) -> AbsoluteValue {
-        // 1. Apply source interval
-        let mut v = control_value.normalize(
-            &self.settings.source_value_interval,
-            &self.settings.discrete_source_value_interval,
-            min_is_max_behavior,
-            self.settings.use_discrete_processing,
-            BASE_EPSILON,
-        );
+        let mut v = source_normalized_control_value;
         // 2. Apply transformation
         if let Some(transformation) = self.settings.control_transformation.as_ref() {
             if let Ok(res) = v.transform(
@@ -874,27 +875,36 @@ impl<T: Transformation> Mode<T> {
 
     fn hitting_target_considering_max_jump(
         &mut self,
-        control_value: AbsoluteValue,
+        pepped_up_control_value: AbsoluteValue,
         current_target_value: Option<AbsoluteValue>,
         control_type: ControlType,
-        previous_control_value: Option<AbsoluteValue>,
+        source_normalized_control_value: AbsoluteValue,
+        prev_source_normalized_control_value: Option<AbsoluteValue>,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
             None => {
                 return Some(ModeControlResult::HitTarget(
-                    self.get_final_absolute_value(control_value, control_type),
+                    self.get_final_absolute_value(pepped_up_control_value, control_type),
                 ))
             }
             Some(v) => v,
         };
-        if (!self.settings.use_discrete_processing || control_value.is_continuous())
+        if (!self.settings.use_discrete_processing || pepped_up_control_value.is_continuous())
             && self.settings.jump_interval.is_full()
         {
             // No jump restrictions whatsoever
-            return self.hit_if_changed(control_value, current_target_value, control_type);
+            return self.hit_if_changed(
+                pepped_up_control_value,
+                current_target_value,
+                control_type,
+            );
         }
-        let distance = control_value.calc_distance_from(current_target_value);
+        let distance = if self.settings.use_discrete_processing {
+            pepped_up_control_value.calc_distance_from(current_target_value)
+        } else {
+            pepped_up_control_value.calc_distance_from(current_target_value.to_continuous_value())
+        };
         if distance.is_greater_than(
             self.settings.jump_interval.max_val(),
             self.settings.discrete_jump_interval.max_val(),
@@ -908,14 +918,13 @@ impl<T: Transformation> Mode<T> {
                 }
                 Parallel => {
                     // TODO-high-discrete Implement advanced takeover modes for discrete values, too
-                    // TODO-medium Add tests for advanced takeover modes!
-                    if let Some(prev) = previous_control_value {
+                    if let Some(prev) = prev_source_normalized_control_value {
                         let relative_increment =
-                            control_value.to_unit_value() - prev.to_unit_value();
+                            source_normalized_control_value.to_unit_value() - prev.to_unit_value();
                         if relative_increment == 0.0 {
                             None
                         } else {
-                            let relative_increment = UnitIncrement::new(relative_increment);
+                            let relative_increment = UnitIncrement::new_clamped(relative_increment);
                             let restrained_increment = relative_increment
                                 .clamp_to_interval(&self.settings.jump_interval)?;
                             let final_target_value =
@@ -945,7 +954,8 @@ impl<T: Transformation> Mode<T> {
                     );
                     let approach_increment =
                         approach_distance.to_unit_value().to_increment(negative_if(
-                            control_value.to_unit_value() < current_target_value.to_unit_value(),
+                            pepped_up_control_value.to_unit_value()
+                                < current_target_value.to_unit_value(),
                         ))?;
                     let final_target_value = current_target_value.to_unit_value().add_clamping(
                         approach_increment,
@@ -959,33 +969,38 @@ impl<T: Transformation> Mode<T> {
                     )
                 }
                 CatchUp => {
-                    if let Some(prev) = previous_control_value {
+                    if let Some(prev) = prev_source_normalized_control_value {
                         let prev = prev.to_unit_value();
-                        let relative_increment = control_value.to_unit_value() - prev;
+                        let relative_increment =
+                            source_normalized_control_value.to_unit_value() - prev;
                         if relative_increment == 0.0 {
                             None
                         } else {
                             let goes_up = relative_increment.is_sign_positive();
-                            let source_distance_from_border = if goes_up {
+                            // We already normalized the prev/current control values on the source
+                            // interval, so we can use 0.0..=1.0 at this point.
+                            let source_distance_from_bound = if goes_up {
                                 1.0 - prev.get()
                             } else {
                                 prev.get()
                             };
                             let current_target_value = current_target_value.to_unit_value();
-                            let target_distance_from_border = if goes_up {
-                                1.0 - current_target_value.get()
+                            let target_distance_from_bound = if goes_up {
+                                self.settings.target_value_interval.max_val() - current_target_value
                             } else {
-                                current_target_value.get()
-                            };
-                            if source_distance_from_border == 0.0
-                                || target_distance_from_border == 0.0
+                                current_target_value - self.settings.target_value_interval.min_val()
+                            }
+                            .max(0.0);
+                            if source_distance_from_bound == 0.0
+                                || target_distance_from_bound == 0.0
                             {
                                 None
                             } else {
+                                // => -55484347409216.99
                                 let scaled_increment = relative_increment
-                                    * target_distance_from_border
-                                    / source_distance_from_border;
-                                let scaled_increment = UnitIncrement::new(scaled_increment);
+                                    * target_distance_from_bound
+                                    / source_distance_from_bound;
+                                let scaled_increment = UnitIncrement::new_clamped(scaled_increment);
                                 let restrained_increment = scaled_increment
                                     .clamp_to_interval(&self.settings.jump_interval)?;
                                 let final_target_value = current_target_value.add_clamping(
@@ -1016,7 +1031,7 @@ impl<T: Transformation> Mode<T> {
             return None;
         }
         // Distance is also not too small
-        self.hit_if_changed(control_value, current_target_value, control_type)
+        self.hit_if_changed(pepped_up_control_value, current_target_value, control_type)
     }
 
     fn hit_if_changed(
@@ -1944,7 +1959,7 @@ mod tests {
             }
 
             #[test]
-            fn jump_interval() {
+            fn jump_interval_max_pickup() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.2),
@@ -1958,6 +1973,10 @@ mod tests {
                 // Then
                 assert!(mode.control(abs_con(0.0), &target, ()).is_none());
                 assert!(mode.control(abs_con(0.1), &target, ()).is_none());
+                assert_abs_diff_eq!(
+                    mode.control(abs_con(0.3), &target, ()).unwrap(),
+                    abs_con(0.3)
+                );
                 assert_abs_diff_eq!(
                     mode.control(abs_con(0.4), &target, ()).unwrap(),
                     abs_con(0.4)
@@ -1973,6 +1992,61 @@ mod tests {
                 assert!(mode.control(abs_con(0.8), &target, ()).is_none());
                 assert!(mode.control(abs_con(0.9), &target, ()).is_none());
                 assert!(mode.control(abs_con(1.0), &target, ()).is_none());
+            }
+
+            #[test]
+            fn jump_interval_max_pickup_with_target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    target_value_interval: create_unit_value_interval(0.0, 0.5),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.1)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |i, o| {
+                    abs_test(&mut mode, &target, i, o);
+                };
+                test(0.0, Some(0.00));
+                test(0.1, Some(0.05));
+                test(0.2, None);
+                test(0.3, Some(0.15));
+                test(0.4, Some(0.20));
+                test(0.5, None);
+                test(0.7, None);
+                test(1.0, None);
+            }
+
+            #[test]
+            fn jump_interval_max_pickup_with_target_interval_out_of_range() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    target_value_interval: create_unit_value_interval(0.0, 0.5),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(1.0)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |i, o| {
+                    abs_test(&mut mode, &target, i, o);
+                };
+                // Pickup mode is strict. If we never reach the actual value, we can't pick it up.
+                test(0.0, None);
+                test(0.1, None);
+                test(0.2, None);
+                test(0.3, None);
+                test(0.4, None);
+                test(0.5, None);
+                test(0.7, None);
+                test(1.0, None);
             }
 
             #[test]
@@ -1992,9 +2066,9 @@ mod tests {
                     mode.control(abs_con(0.1), &target, ()).unwrap(),
                     abs_con(0.1)
                 );
-                assert!(mode.control(abs_con(0.4), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.41), &target, ()).is_none());
                 assert!(mode.control(abs_con(0.5), &target, ()).is_none());
-                assert!(mode.control(abs_con(0.6), &target, ()).is_none());
+                assert!(mode.control(abs_con(0.59), &target, ()).is_none());
                 assert_abs_diff_eq!(
                     mode.control(abs_con(1.0), &target, ()).unwrap(),
                     abs_con(1.0)
@@ -2002,7 +2076,7 @@ mod tests {
             }
 
             #[test]
-            fn jump_interval_approach() {
+            fn jump_interval_max_long_time_no_see() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.2),
@@ -2015,34 +2089,312 @@ mod tests {
                 };
                 // When
                 // Then
-                assert_abs_diff_eq!(
-                    mode.control(abs_con(0.0), &target, ()).unwrap(),
-                    abs_con(0.4)
-                );
-                assert_abs_diff_eq!(
-                    mode.control(abs_con(0.1), &target, ()).unwrap(),
-                    abs_con(0.42)
-                );
-                assert_abs_diff_eq!(
-                    mode.control(abs_con(0.4), &target, ()).unwrap(),
-                    abs_con(0.4)
-                );
-                assert_abs_diff_eq!(
-                    mode.control(abs_con(0.6), &target, ()).unwrap(),
-                    abs_con(0.6)
-                );
-                assert_abs_diff_eq!(
-                    mode.control(abs_con(0.7), &target, ()).unwrap(),
-                    abs_con(0.7)
-                );
-                assert_abs_diff_eq!(
-                    mode.control(abs_con(0.8), &target, ()).unwrap(),
-                    abs_con(0.56)
-                );
-                assert_abs_diff_eq!(
-                    mode.control(abs_con(1.0), &target, ()).unwrap(),
-                    abs_con(0.6)
-                );
+                let mut test = |i, o| {
+                    // Takeover mode "Long time no see" works without having to maintain a previous
+                    // control value. So each assertion is independent and therefore we can
+                    // intuitively test it without actually adjusting the current target value
+                    // between each assertion.
+                    abs_test(&mut mode, &target, i, o);
+                };
+                test(0.0, Some(0.4));
+                test(0.1, Some(0.42));
+                test(0.4, Some(0.4));
+                test(0.6, Some(0.6));
+                test(0.7, Some(0.7));
+                test(0.8, Some(0.56));
+                test(1.0, Some(0.6));
+            }
+
+            #[test]
+            fn jump_interval_max_long_time_no_see_with_target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    target_value_interval: create_unit_value_interval(0.0, 0.5),
+                    takeover_mode: TakeoverMode::LongTimeNoSee,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.1)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |i, o| {
+                    abs_test(&mut mode, &target, i, o);
+                };
+                test(0.0, Some(0.00));
+                test(0.1, Some(0.05));
+                test(0.2, None);
+                test(0.3, Some(0.15));
+                test(0.4, Some(0.20));
+                test(0.5, Some(0.115));
+                test(0.6, Some(0.12));
+                test(0.7, Some(0.125));
+                test(0.8, Some(0.13));
+                test(0.9, Some(0.135));
+                test(1.0, Some(0.14));
+            }
+
+            #[test]
+            fn jump_interval_max_long_time_no_see_with_target_interval_out_of_range() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    target_value_interval: create_unit_value_interval(0.0, 0.5),
+                    takeover_mode: TakeoverMode::LongTimeNoSee,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(1.0)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |i, o| {
+                    abs_test(&mut mode, &target, i, o);
+                };
+                // That's a jump, but one that we allow because target value being out of range
+                // is an exceptional situation.
+                test(0.0, Some(0.5));
+                test(0.1, Some(0.5));
+                test(0.2, Some(0.5));
+                test(0.3, Some(0.5));
+                test(0.4, Some(0.5));
+                test(0.5, Some(0.5));
+                test(0.6, Some(0.5));
+                test(0.7, Some(0.5));
+                test(0.8, Some(0.5));
+                test(0.9, Some(0.5));
+                test(1.0, Some(0.5));
+            }
+
+            #[test]
+            fn jump_interval_max_parallel() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    takeover_mode: TakeoverMode::Parallel,
+                    ..Default::default()
+                });
+                let mut target = TestTarget {
+                    current_value: Some(con_val(0.1)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |i, o| {
+                    // In order to intuitively test this takeover mode, we need to also adjust
+                    // the current target value after each assertion.
+                    abs_test_cumulative(&mut mode, &mut target, i, o);
+                };
+                // First one indeterminate
+                test(0.6, None);
+                // Raising in parallel
+                test(0.7, Some(0.2));
+                test(0.8, Some(0.3));
+                test(0.85, Some(0.35));
+                test(0.9, Some(0.4));
+                test(1.0, Some(0.5));
+                // Falling in parallel
+                test(0.9, Some(0.4));
+                test(0.8, Some(0.3));
+                test(0.75, Some(0.25));
+                test(0.7, Some(0.2));
+                test(0.6, Some(0.1));
+                test(0.5, Some(0.0));
+                // Saturating
+                test(0.4, None);
+                test(0.3, None);
+                test(0.4, Some(0.1));
+                // Raising in parallel without exceeding max jump
+                test(0.6, Some(0.2));
+                test(0.7, Some(0.3));
+                test(1.0, Some(0.4));
+                // Falling in parallel without exceeding max jump
+                test(0.6, Some(0.3));
+            }
+
+            #[test]
+            fn jump_interval_max_parallel_with_target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    target_value_interval: create_unit_value_interval(0.0, 0.5),
+                    takeover_mode: TakeoverMode::Parallel,
+                    ..Default::default()
+                });
+                let mut target = TestTarget {
+                    current_value: Some(con_val(0.0)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |i, o| {
+                    abs_test_cumulative(&mut mode, &mut target, i, o);
+                };
+                // First one indeterminate
+                test(0.6, None);
+                // Raising in parallel
+                test(0.7, Some(0.1));
+                test(0.8, Some(0.2));
+                test(0.85, Some(0.25));
+                test(0.9, Some(0.30));
+                test(1.0, Some(0.4));
+                // No jump
+                test(0.9, Some(0.45));
+                // Falling in parallel
+                test(0.3, Some(0.35));
+                test(0.2, Some(0.25));
+                test(0.1, Some(0.15));
+                test(0.0, Some(0.05));
+                // No jump
+                test(0.0, Some(0.00));
+                // Saturating
+                test(0.0, None);
+            }
+
+            #[test]
+            fn jump_interval_max_catch_up() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    takeover_mode: TakeoverMode::CatchUp,
+                    ..Default::default()
+                });
+                let mut target = TestTarget {
+                    current_value: Some(con_val(0.1)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |input: f64, output: Option<f64>| {
+                    if let Some(o) = output {
+                        assert_abs_diff_eq!(
+                            mode.control(abs_con(input), &target, ()).unwrap(),
+                            abs_con(o)
+                        );
+                        // In order to intuitively test this takeover mode, we need to also adjust
+                        // the current target value after each assertion.
+                        target.current_value = Some(con_val(o));
+                    } else {
+                        assert_eq!(mode.control(abs_con(input), &target, ()), None);
+                    }
+                };
+                // First one indeterminate
+                test(0.6, None);
+                // Raising as fast as possible (= catching up) without exceeding max jump
+                test(0.7, Some(0.2));
+                test(0.8, Some(0.3));
+                test(0.85, Some(0.4));
+                test(0.9, Some(0.5));
+                test(1.0, Some(0.6));
+                // Falling slower than usually (= seeking convergence)
+                test(0.9, Some(0.54));
+                test(0.8, Some(0.48));
+                test(0.75, Some(0.45));
+                test(0.7, Some(0.42));
+                test(0.6, Some(0.36));
+                test(0.5, Some(0.30));
+                // Mmh?
+                test(0.0, Some(0.2));
+                test(0.0, None);
+                // Raising as fast as possible (= catching up) without exceeding max jump
+                test(0.1, Some(0.1));
+                test(0.3, Some(0.2));
+                test(0.5, Some(0.3));
+                // Falling and seeing that we already are at this value.
+                test(0.3, None);
+            }
+
+            #[test]
+            fn jump_interval_max_catch_up_corner_case() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    source_value_interval: create_unit_value_interval(0.47, 0.53),
+                    jump_interval: create_unit_value_interval(0.0, 0.02),
+                    target_value_interval: create_unit_value_interval(0.0, 0.716),
+                    takeover_mode: TakeoverMode::CatchUp,
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.6897)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |input: f64| {
+                    mode.control(abs_con(input), &target, ());
+                };
+                // In older versions this panicked because of invalid unit values/increments
+                test(0.0);
+                test(0.1);
+                test(0.2);
+                test(0.3);
+                test(0.4);
+                test(0.5);
+                test(0.6);
+                test(0.7);
+                test(0.8);
+                test(0.9);
+                test(1.0);
+                test(0.9);
+                test(0.8);
+                test(0.7);
+                test(0.6);
+                test(0.5);
+                test(0.4);
+                test(0.3);
+                test(0.2);
+                test(0.1);
+                test(0.0);
+            }
+
+            #[test]
+            fn jump_interval_max_catch_up_with_target_interval() {
+                // Given
+                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    jump_interval: create_unit_value_interval(0.0, 0.1),
+                    target_value_interval: create_unit_value_interval(0.5, 1.0),
+                    takeover_mode: TakeoverMode::CatchUp,
+                    ..Default::default()
+                });
+                let mut target = TestTarget {
+                    current_value: Some(con_val(0.1)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                let mut test = |input: f64, output: Option<f64>| {
+                    if let Some(o) = output {
+                        assert_abs_diff_eq!(
+                            mode.control(abs_con(input), &target, ()).unwrap(),
+                            abs_con(o)
+                        );
+                        // In order to intuitively test this takeover mode, we need to also adjust
+                        // the current target value after each assertion.
+                        target.current_value = Some(con_val(o));
+                    } else {
+                        assert_eq!(mode.control(abs_con(input), &target, ()), None);
+                    }
+                };
+                // First one indeterminate
+                test(0.6, None);
+                // Raising as fast as possible (= catching up) without exceeding max jump
+                test(0.7, Some(0.5));
+                test(0.8, Some(0.6));
+                test(0.85, Some(0.7));
+                test(0.9, Some(0.8));
+                test(1.0, Some(0.9));
+                // No jump detected. Interesting case. TODO-medium This is debatable. Value raise
+                //  when fader turned down is something we wouldn't expect with this takeover
+                //  mode. It's only the moment though when fader and value get in sync again. It
+                //  snaps back, so it probably doesn't hurt and is barely noticeable.
+                test(0.9, Some(0.95));
+                // Falling as fast as possible (= catching up)
+                test(0.5, Some(0.85));
+                // Converging
+                test(0.4, Some(0.78));
             }
 
             #[test]
@@ -7893,6 +8245,32 @@ mod tests {
 
     fn dis_val(actual: u32, max: u32) -> AbsoluteValue {
         AbsoluteValue::Discrete(Fraction::new(actual, max))
+    }
+
+    fn abs_test(
+        mode: &mut Mode<TestTransformation>,
+        target: &TestTarget,
+        input: f64,
+        output: Option<f64>,
+    ) {
+        let result = mode.control(abs_con(input), target, ());
+        if let Some(o) = output {
+            assert_abs_diff_eq!(result.unwrap(), abs_con(o));
+        } else {
+            assert_eq!(result, None);
+        }
+    }
+
+    fn abs_test_cumulative(
+        mode: &mut Mode<TestTransformation>,
+        target: &mut TestTarget,
+        input: f64,
+        output: Option<f64>,
+    ) {
+        abs_test(mode, target, input, output);
+        if let Some(o) = output {
+            target.current_value = Some(con_val(o));
+        }
     }
 
     const FB_OPTS: ModeFeedbackOptions = ModeFeedbackOptions {

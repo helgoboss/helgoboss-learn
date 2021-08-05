@@ -1,6 +1,6 @@
 use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
-    Transformation, UnitValue,
+    Transformation, UnitValue, BASE_EPSILON,
 };
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
@@ -338,7 +338,7 @@ impl AbsoluteValue {
     pub fn is_greater_than(&self, continuous_jump_max: UnitValue, discrete_jump_max: u32) -> bool {
         use AbsoluteValue::*;
         match self {
-            Continuous(d) => *d > continuous_jump_max,
+            Continuous(d) => d.get() > continuous_jump_max.get() + BASE_EPSILON,
             Discrete(d) => d.actual() > discrete_jump_max,
         }
     }
@@ -346,7 +346,7 @@ impl AbsoluteValue {
     pub fn is_lower_than(&self, continuous_jump_min: UnitValue, discrete_jump_min: u32) -> bool {
         use AbsoluteValue::*;
         match self {
-            Continuous(d) => *d < continuous_jump_min,
+            Continuous(d) => d.get() + BASE_EPSILON < continuous_jump_min.get(),
             Discrete(d) => d.actual() < discrete_jump_min,
         }
     }
