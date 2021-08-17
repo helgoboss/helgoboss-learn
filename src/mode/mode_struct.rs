@@ -8294,6 +8294,8 @@ pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
     create_discrete_increment_interval(1, 1)
 }
 
+/// If something like this is returned from the mode, it already means that the source value
+/// was not filtered out (e.g. because of button filter).
 pub enum ModeControlResult<T> {
     /// Target should be hit with the given value.
     HitTarget(T),

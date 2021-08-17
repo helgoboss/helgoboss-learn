@@ -317,6 +317,11 @@ impl AbsoluteValue {
         if let (AbsoluteValue::Discrete(f1), AbsoluteValue::Discrete(f2)) = (self, other) {
             f1.actual() == f2.actual()
         } else {
+            // We do an exact comparison here for the moment (no BASE_EPSILON tolerance).
+            // Reasoning: We don't know the target epsilon. It's very unlikely but maybe the
+            // target cares about minimal differences and then not hitting the target would be
+            // bad. Better hit it redundantly instead of omitting a hit that would have made a
+            // difference.
             self.to_unit_value() == other.to_unit_value()
         }
     }
