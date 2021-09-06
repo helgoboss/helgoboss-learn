@@ -140,20 +140,11 @@ struct ModeState {
     /// Used in absolute control for certain takeover modes to calculate the next value based on the
     /// previous one.
     previous_absolute_control_value: Option<UnitValue>,
-    stuck_state: Option<StuckState>,
     discrete_previous_absolute_control_value: Option<u32>,
     // For absolute control
     unpacked_target_value_sequence: Vec<UnitValue>,
     // For relative control
     unpacked_target_value_set: BTreeSet<UnitValue>,
-}
-
-/// Used in relative control to detect if getting whether we got stuck in a dead zone due to
-/// target-specific rounding/snapping.
-#[derive(Copy, Clone, Debug, Default)]
-pub struct StuckState {
-    pub previously_desired_target_value: UnitValue,
-    pub previous_result_target_value: UnitValue,
 }
 
 #[derive(
@@ -362,7 +353,6 @@ impl<T: Transformation> Mode<T> {
     /// Gives the mode the opportunity to update internal state when it's being connected to a
     /// target (either initial target resolve or refreshing target resolve).  
     pub fn update_from_target<'a, C: Copy>(&mut self, target: &impl Target<'a, Context = C>) {
-        self.state.stuck_state = None;
         let default_step_size = target
             .control_type()
             .step_size()
@@ -1169,46 +1159,8 @@ impl<T: Transformation> Mode<T> {
                 ControlValue::AbsoluteContinuous(v),
             ));
         }
-        // Detect if we got stuck.
-        //
-        // Getting stuck can happen with relative control ...
-        //
-        // a) if the target uses some rounding/snapping and the step size is too small to eject it
-        //    out of this "dead" zone (e.g. https://github.com/helgoboss/realearn/issues/433)
-        // b) if the step size and therefore the value difference is so small that the target
-        //    essentially ignores the value change (less likely)
-        //
-        // ... and therefore the target reports the same old value even after hitting it with
-        // the desired value.
-        //
-        // We check whether the *previous* hit was successful. That means we don't
-        // check the success of setting the target value right away. We check it on the next
-        // control invocation. Otherwise we would need to query the target value after each
-        // hit which would increase the amount of target queries for not much benefit.
-        let stuck_state = if let Some(s) = self.state.stuck_state.replace(StuckState {
-            previously_desired_target_value: v,
-            previous_result_target_value: current_target_value,
-        }) {
-            // Check if previous target value hasn't changed although it should have.
-            if current_target_value == s.previous_result_target_value
-            // Check if we are not close to the target bounds (otherwise too many false positives)
-            && (0.1..=0.9).contains(&s.previously_desired_target_value.get())
-            // Check if previous result value is quite far away from previously desired value.
-            // That means it's not a matter of natural rounding issues to be tolerated.
-            && (s.previous_result_target_value - s.previously_desired_target_value).abs()
-                > BASE_EPSILON
-            {
-                // Stuck!
-                Some(s)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
         Some(ModeControlResult::HitTarget {
             value: ControlValue::AbsoluteContinuous(v),
-            stuck_state,
         })
     }
 
@@ -8342,10 +8294,7 @@ pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
 /// was not filtered out (e.g. because of button filter).
 pub enum ModeControlResult<T> {
     /// Target should be hit with the given value.
-    HitTarget {
-        value: T,
-        stuck_state: Option<StuckState>,
-    },
+    HitTarget { value: T },
     /// Target is reached but already has the given desired value and is not retriggerable.
     /// It shouldn't be hit.
     LeaveTargetUntouched(T),
@@ -8353,19 +8302,13 @@ pub enum ModeControlResult<T> {
 
 impl<T> ModeControlResult<T> {
     pub fn hit_target(value: T) -> Self {
-        Self::HitTarget {
-            value,
-            stuck_state: None,
-        }
+        Self::HitTarget { value }
     }
 
     pub fn map<R>(self, f: impl FnOnce(T) -> R) -> ModeControlResult<R> {
         use ModeControlResult::*;
         match self {
-            HitTarget { value, stuck_state } => HitTarget {
-                value: f(value),
-                stuck_state,
-            },
+            HitTarget { value } => HitTarget { value: f(value) },
             LeaveTargetUntouched(v) => LeaveTargetUntouched(f(v)),
         }
     }
