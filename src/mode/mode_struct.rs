@@ -137,13 +137,23 @@ struct ModeState {
     /// when the last change was a positive increment and negative when the last change was a
     /// negative increment.
     increment_counter: i32,
-    /// For absolute-to-relative mode and value-scaling takeover mode.
+    /// Used in absolute control for certain takeover modes to calculate the next value based on the
+    /// previous one.
     previous_absolute_control_value: Option<UnitValue>,
+    stuck_state: Option<StuckState>,
     discrete_previous_absolute_control_value: Option<u32>,
     // For absolute control
     unpacked_target_value_sequence: Vec<UnitValue>,
     // For relative control
     unpacked_target_value_set: BTreeSet<UnitValue>,
+}
+
+/// Used in relative control to detect if getting whether we got stuck in a dead zone due to
+/// target-specific rounding/snapping.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct StuckState {
+    pub previously_desired_target_value: UnitValue,
+    pub previous_result_target_value: UnitValue,
 }
 
 #[derive(
@@ -352,6 +362,7 @@ impl<T: Transformation> Mode<T> {
     /// Gives the mode the opportunity to update internal state when it's being connected to a
     /// target (either initial target resolve or refreshing target resolve).  
     pub fn update_from_target<'a, C: Copy>(&mut self, target: &impl Target<'a, Context = C>) {
+        self.state.stuck_state = None;
         let default_step_size = target
             .control_type()
             .step_size()
@@ -564,7 +575,6 @@ impl<T: Transformation> Mode<T> {
                     self.settings.step_size_interval.min_val(),
                     target.current_value(context)?.to_unit_value(),
                     options,
-                    control_type
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -596,7 +606,7 @@ impl<T: Transformation> Mode<T> {
                 // - Minimum target step count (enables accurate normal/minimum increment, atomic)
                 // - Maximum target step count (enables accurate maximum increment, mapped)
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                Some(ModeControlResult::HitTarget(ControlValue::Relative(discrete_increment)))
+                Some(ModeControlResult::hit_target(ControlValue::Relative(discrete_increment)))
             }
             VirtualButton => {
                 // This doesn't make sense at all. Buttons just need to be triggered, not fed with
@@ -633,7 +643,7 @@ impl<T: Transformation> Mode<T> {
             AbsoluteValue::Continuous(desired_target_value),
             target.control_type(),
         );
-        Some(ModeControlResult::HitTarget(final_absolute_value))
+        Some(ModeControlResult::hit_target(final_absolute_value))
     }
 
     /// Relative-to-absolute conversion mode.
@@ -718,7 +728,6 @@ impl<T: Transformation> Mode<T> {
                     self.settings.step_size_interval.min_val(),
                     target.current_value(context)?.to_unit_value(),
                     options,
-                    control_type
                 )
             }
             AbsoluteDiscrete { atomic_step_size } => {
@@ -744,7 +753,7 @@ impl<T: Transformation> Mode<T> {
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
-                Some(ModeControlResult::HitTarget(ControlValue::Relative(pepped_up_increment)))
+                Some(ModeControlResult::hit_target(ControlValue::Relative(pepped_up_increment)))
             }
             VirtualButton => {
                 // Controlling a button target with +/- n doesn't make sense.
@@ -802,7 +811,7 @@ impl<T: Transformation> Mode<T> {
         if v == current {
             return None;
         }
-        Some(ModeControlResult::HitTarget(
+        Some(ModeControlResult::hit_target(
             ControlValue::AbsoluteContinuous(v),
         ))
     }
@@ -884,7 +893,7 @@ impl<T: Transformation> Mode<T> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
             None => {
-                return Some(ModeControlResult::HitTarget(
+                return Some(ModeControlResult::hit_target(
                     self.get_final_absolute_value(pepped_up_control_value, control_type),
                 ))
             }
@@ -1048,9 +1057,10 @@ impl<T: Transformation> Mode<T> {
             ));
         }
         let final_value = self.get_final_absolute_value(desired_target_value, control_type);
-        Some(ModeControlResult::HitTarget(final_value))
+        Some(ModeControlResult::hit_target(final_value))
     }
 
+    /// Use this only if the given desired target value could be a discrete value.
     fn get_final_absolute_value(
         &self,
         desired_target_value: AbsoluteValue,
@@ -1080,7 +1090,7 @@ impl<T: Transformation> Mode<T> {
     /// - Applying increment
     /// - Wrap (rotate)
     fn hit_discrete_target_absolutely(
-        &self,
+        &mut self,
         discrete_increment: DiscreteIncrement,
         target_step_size: UnitValue,
         options: ModeControlOptions,
@@ -1098,7 +1108,6 @@ impl<T: Transformation> Mode<T> {
                         target_step_size,
                         current_value()?.to_unit_value(),
                         options,
-                        control_type,
                     )
                 }
                 AbsoluteValue::Discrete(f) => self.hit_target_absolutely_with_discrete_increment(
@@ -1115,7 +1124,6 @@ impl<T: Transformation> Mode<T> {
                 target_step_size,
                 current_value()?.to_unit_value(),
                 options,
-                control_type,
             )
         }
     }
@@ -1124,12 +1132,11 @@ impl<T: Transformation> Mode<T> {
     /// - Applying increment
     /// - Wrap (rotate)
     fn hit_target_absolutely_with_unit_increment(
-        &self,
+        &mut self,
         increment: UnitIncrement,
         grid_interval_size: UnitValue,
         current_target_value: UnitValue,
         options: ModeControlOptions,
-        control_type: ControlType,
     ) -> Option<ModeControlResult<ControlValue>> {
         let snapped_target_value_interval = Interval::new(
             self.settings
@@ -1157,15 +1164,52 @@ impl<T: Transformation> Mode<T> {
             v.add_clamping(increment, &snapped_target_value_interval, BASE_EPSILON)
         };
         if v == current_target_value {
+            // Desired value is equal to current target value. No reason to hit the target.
             return Some(ModeControlResult::LeaveTargetUntouched(
                 ControlValue::AbsoluteContinuous(v),
             ));
         }
-        let final_absolute_value =
-            self.get_final_absolute_value(AbsoluteValue::Continuous(v), control_type);
-        Some(ModeControlResult::HitTarget(ControlValue::from_absolute(
-            final_absolute_value,
-        )))
+        // Detect if we got stuck.
+        //
+        // Getting stuck can happen with relative control ...
+        //
+        // a) if the target uses some rounding/snapping and the step size is too small to eject it
+        //    out of this "dead" zone (e.g. https://github.com/helgoboss/realearn/issues/433)
+        // b) if the step size and therefore the value difference is so small that the target
+        //    essentially ignores the value change (less likely)
+        //
+        // ... and therefore the target reports the same old value even after hitting it with
+        // the desired value.
+        //
+        // We check whether the *previous* hit was successful. That means we don't
+        // check the success of setting the target value right away. We check it on the next
+        // control invocation. Otherwise we would need to query the target value after each
+        // hit which would increase the amount of target queries for not much benefit.
+        let stuck_state = if let Some(s) = self.state.stuck_state.replace(StuckState {
+            previously_desired_target_value: v,
+            previous_result_target_value: current_target_value,
+        }) {
+            // Check if previous target value hasn't changed although it should have.
+            if current_target_value == s.previous_result_target_value
+            // Check if we are not close to the target bounds (otherwise too many false positives)
+            && (0.1..=0.9).contains(&s.previously_desired_target_value.get())
+            // Check if previous result value is quite far away from previously desired value.
+            // That means it's not a matter of natural rounding issues to be tolerated.
+            && (s.previous_result_target_value - s.previously_desired_target_value).abs()
+                > BASE_EPSILON
+            {
+                // Stuck!
+                Some(s)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        Some(ModeControlResult::HitTarget {
+            value: ControlValue::AbsoluteContinuous(v),
+            stuck_state,
+        })
     }
 
     fn hit_target_absolutely_with_discrete_increment(
@@ -1191,7 +1235,7 @@ impl<T: Transformation> Mode<T> {
         }
         let final_absolute_value =
             self.get_final_absolute_value(AbsoluteValue::Discrete(v), control_type);
-        Some(ModeControlResult::HitTarget(ControlValue::from_absolute(
+        Some(ModeControlResult::hit_target(ControlValue::from_absolute(
             final_absolute_value,
         )))
     }
@@ -8298,17 +8342,30 @@ pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
 /// was not filtered out (e.g. because of button filter).
 pub enum ModeControlResult<T> {
     /// Target should be hit with the given value.
-    HitTarget(T),
+    HitTarget {
+        value: T,
+        stuck_state: Option<StuckState>,
+    },
     /// Target is reached but already has the given desired value and is not retriggerable.
     /// It shouldn't be hit.
     LeaveTargetUntouched(T),
 }
 
 impl<T> ModeControlResult<T> {
+    pub fn hit_target(value: T) -> Self {
+        Self::HitTarget {
+            value,
+            stuck_state: None,
+        }
+    }
+
     pub fn map<R>(self, f: impl FnOnce(T) -> R) -> ModeControlResult<R> {
         use ModeControlResult::*;
         match self {
-            HitTarget(v) => HitTarget(f(v)),
+            HitTarget { value, stuck_state } => HitTarget {
+                value: f(value),
+                stuck_state,
+            },
             LeaveTargetUntouched(v) => LeaveTargetUntouched(f(v)),
         }
     }
@@ -8319,7 +8376,7 @@ impl<T> From<ModeControlResult<T>> for Option<T> {
         use ModeControlResult::*;
         match res {
             LeaveTargetUntouched(_) => None,
-            HitTarget(v) => Some(v),
+            HitTarget { value, .. } => Some(value),
         }
     }
 }
