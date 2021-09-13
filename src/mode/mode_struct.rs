@@ -352,9 +352,13 @@ impl<T: Transformation> Mode<T> {
 
     /// Gives the mode the opportunity to update internal state when it's being connected to a
     /// target (either initial target resolve or refreshing target resolve).  
-    pub fn update_from_target<'a, C: Copy>(&mut self, target: &impl Target<'a, Context = C>) {
+    pub fn update_from_target<'a, C: Copy>(
+        &mut self,
+        target: &impl Target<'a, Context = C>,
+        context: C,
+    ) {
         let default_step_size = target
-            .control_type()
+            .control_type(context)
             .step_size()
             .unwrap_or_else(|| UnitValue::new(DEFAULT_STEP_SIZE));
         let unpacked_sequence = self
@@ -457,7 +461,7 @@ impl<T: Transformation> Mode<T> {
         };
         // Control value is within source value interval
         let current_target_value = target.current_value(context);
-        let control_type = target.control_type();
+        let control_type = target.control_type(context);
         // 1. Apply source interval
         let source_normalized_control_value = source_bound_value.normalize(
             &self.settings.source_value_interval,
@@ -536,7 +540,7 @@ impl<T: Transformation> Mode<T> {
             );
         }
         use ControlType::*;
-        let control_type = target.control_type();
+        let control_type = target.control_type(context);
         match control_type {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
@@ -631,7 +635,7 @@ impl<T: Transformation> Mode<T> {
         // already has that value.
         let final_absolute_value = self.get_final_absolute_value(
             AbsoluteValue::Continuous(desired_target_value),
-            target.control_type(),
+            target.control_type(context),
         );
         Some(ModeControlResult::hit_target(final_absolute_value))
     }
@@ -690,7 +694,7 @@ impl<T: Transformation> Mode<T> {
             );
         }
         use ControlType::*;
-        let control_type = target.control_type();
+        let control_type = target.control_type(context);
         match control_type {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
@@ -2459,7 +2463,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target);
+                mode.update_from_target(&target, ());
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -2550,7 +2554,7 @@ mod tests {
                         atomic_step_size: UnitValue::new(0.5),
                     },
                 };
-                mode.update_from_target(&target);
+                mode.update_from_target(&target, ());
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -2642,7 +2646,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target);
+                mode.update_from_target(&target, ());
                 // When
                 // Then
                 assert_eq!(29, count);
@@ -5542,7 +5546,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target);
+                mode.update_from_target(&target, ());
                 // When
                 // Then
                 assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.9));
@@ -5569,7 +5573,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target);
+                mode.update_from_target(&target, ());
                 // When
                 // Then
                 assert_abs_diff_eq!(mode.control(rel(1), &target, ()).unwrap(), abs_con(0.9));
@@ -7418,7 +7422,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target);
+                mode.update_from_target(&target, ());
                 // When
                 // Then
                 assert_eq!(mode.control(abs_con(0.0), &target, ()), None);

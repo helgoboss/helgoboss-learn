@@ -69,5 +69,5 @@ pub trait Target<'a> {
     /// but others will still work.
     fn current_value(&self, context: Self::Context) -> Option<AbsoluteValue>;
 
-    fn control_type(&self) -> ControlType;
+    fn control_type(&self, context: Self::Context) -> ControlType;
 }

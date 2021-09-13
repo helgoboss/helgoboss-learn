@@ -12,7 +12,7 @@ impl<'a> Target<'a> for TestTarget {
         self.current_value
     }
 
-    fn control_type(&self) -> ControlType {
+    fn control_type(&self, _: ()) -> ControlType {
         self.control_type
     }
 }
