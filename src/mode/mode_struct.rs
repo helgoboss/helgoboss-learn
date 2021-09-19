@@ -261,6 +261,7 @@ impl<T: Transformation> Mode<T> {
         let interval_match_result = v.matches_tolerant(
             &self.settings.target_value_interval,
             &self.settings.discrete_target_value_interval,
+            self.settings.use_discrete_processing,
             FEEDBACK_EPSILON,
         );
         let (mut v, min_is_max_behavior) = if interval_match_result.matches() {
@@ -441,6 +442,7 @@ impl<T: Transformation> Mode<T> {
         let interval_match_result = control_value.matches_tolerant(
             &self.settings.source_value_interval,
             &self.settings.discrete_source_value_interval,
+            self.settings.use_discrete_processing,
             BASE_EPSILON,
         );
         let (source_bound_value, min_is_max_behavior) = if interval_match_result.matches() {
