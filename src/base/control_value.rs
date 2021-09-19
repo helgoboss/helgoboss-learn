@@ -123,11 +123,18 @@ impl AbsoluteValue {
         self,
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
+        use_discrete_processing: bool,
         epsilon: f64,
     ) -> IntervalMatchResult {
         match self {
             AbsoluteValue::Continuous(v) => continuous_interval.value_matches_tolerant(v, epsilon),
-            AbsoluteValue::Discrete(v) => discrete_interval.value_matches(v.actual()),
+            AbsoluteValue::Discrete(v) => {
+                if use_discrete_processing {
+                    discrete_interval.value_matches(v.actual())
+                } else {
+                    continuous_interval.value_matches_tolerant(v.to_unit_value(), epsilon)
+                }
+            }
         }
     }
 
