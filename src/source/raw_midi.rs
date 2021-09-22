@@ -1,4 +1,4 @@
-use crate::{AbsoluteValue, RawMidiEvent, UnitValue};
+use crate::{AbsoluteValue, Fraction, RawMidiEvent, UnitValue};
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::{Display, Formatter, Write};
@@ -11,32 +11,18 @@ pub struct RawMidiPattern {
 }
 
 impl RawMidiPattern {
-    /// Resolution in bit.
-    pub fn resolution(&self) -> u8 {
-        self.resolution
-    }
-
-    pub fn max_discrete_value(&self) -> u16 {
-        (2u32.pow(self.resolution as _) - 1) as u16
-    }
-
-    pub fn step_size(&self) -> Option<UnitValue> {
-        let max = self.max_discrete_value();
-        if max == 0 {
-            return None;
-        }
-        Some(UnitValue::new_clamped(1.0 / max as f64))
-    }
-
     pub fn from_entries(entries: Vec<RawMidiPatternEntry>) -> Self {
         let max_variable_bit_index = entries
             .iter()
-            .map(|e| e.max_variable_bit_index())
-            .max()
-            .unwrap_or(0);
+            .filter_map(|e| e.max_variable_bit_index())
+            .max();
         Self {
             entries,
-            resolution: max_variable_bit_index + 1,
+            resolution: if let Some(i) = max_variable_bit_index {
+                i + 1
+            } else {
+                0
+            },
         }
     }
 
@@ -49,6 +35,45 @@ impl RawMidiPattern {
             entries,
             resolution: 0,
         }
+    }
+
+    /// Resolution in bit (maximum 16 bit).
+    ///
+    /// If no variable bytes, this returns 0.
+    pub fn resolution(&self) -> u8 {
+        self.resolution
+    }
+
+    /// If no variable bytes, this returns 0.
+    pub fn max_discrete_value(&self) -> u16 {
+        (2u32.pow(self.resolution as _) - 1) as u16
+    }
+
+    pub fn step_size(&self) -> Option<UnitValue> {
+        let max = self.max_discrete_value();
+        if max == 0 {
+            return None;
+        }
+        Some(UnitValue::new_clamped(1.0 / max as f64))
+    }
+
+    /// If it matches and there are no variable bytes in the pattern, this returns
+    /// `Some(Fraction(0, 0))`.
+    pub fn match_and_capture(&self, bytes: &[u8]) -> Option<Fraction> {
+        if bytes.len() != self.entries.len() {
+            return None;
+        }
+        let mut current_value: u16 = 0;
+        for (i, b) in bytes.iter().enumerate() {
+            let pattern_entry = self.entries[i];
+            if let Some(v) = pattern_entry.match_and_capture(*b, current_value) {
+                current_value = v;
+            } else {
+                return None;
+            }
+        }
+        let fraction = Fraction::new(current_value as _, self.max_discrete_value() as _);
+        Some(fraction)
     }
 
     pub fn to_bytes(&self, variable_value: AbsoluteValue) -> Vec<u8> {
@@ -95,12 +120,11 @@ pub struct BitPattern {
 }
 
 impl BitPattern {
-    fn max_variable_bit_index(&self) -> u8 {
+    fn max_variable_bit_index(&self) -> Option<u8> {
         self.entries
             .iter()
-            .map(|bpe| bpe.variable_bit_index())
+            .filter_map(|bpe| bpe.variable_bit_index())
             .max()
-            .unwrap()
     }
 
     fn to_byte(self, discrete_value: u16) -> u8 {
@@ -116,6 +140,27 @@ impl BitPattern {
             }
         }
         final_byte
+    }
+
+    fn match_and_capture(&self, actual_byte: u8, current_value: u16) -> Option<u16> {
+        let mut new_value = current_value;
+        for i in 0..8 {
+            let actual_bit = (actual_byte >> (7 - i)) & 1 == 1;
+            use BitPatternEntry::*;
+            match self.entries[i] {
+                FixedBit(bit) => {
+                    if bit != actual_bit {
+                        return None;
+                    }
+                }
+                VariableBit(bit_index) => {
+                    if actual_bit {
+                        new_value |= 1 << bit_index;
+                    }
+                }
+            };
+        }
+        Some(new_value)
     }
 }
 
@@ -134,20 +179,34 @@ impl Default for BitPatternEntry {
 }
 
 impl BitPatternEntry {
-    fn variable_bit_index(&self) -> u8 {
+    fn variable_bit_index(&self) -> Option<u8> {
         use BitPatternEntry::*;
         match self {
-            FixedBit(_) => 0,
-            VariableBit(i) => *i,
+            FixedBit(_) => None,
+            VariableBit(i) => Some(*i),
         }
     }
 }
 
 impl RawMidiPatternEntry {
-    fn max_variable_bit_index(&self) -> u8 {
+    fn match_and_capture(&self, actual_byte: u8, current_value: u16) -> Option<u16> {
         use RawMidiPatternEntry::*;
         match self {
-            FixedByte(_) => 0u8,
+            FixedByte(b) => {
+                if actual_byte == *b {
+                    Some(current_value)
+                } else {
+                    None
+                }
+            }
+            VariableByte(pattern) => pattern.match_and_capture(actual_byte, current_value),
+        }
+    }
+
+    fn max_variable_bit_index(&self) -> Option<u8> {
+        use RawMidiPatternEntry::*;
+        match self {
+            FixedByte(_) => None,
             VariableByte(bit_pattern) => bit_pattern.max_variable_bit_index(),
         }
     }
@@ -172,7 +231,7 @@ impl Display for RawMidiPatternEntry {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         use RawMidiPatternEntry::*;
         match self {
-            FixedByte(byte) => write!(f, "{:X}", *byte),
+            FixedByte(byte) => write!(f, "{:02X}", *byte),
             VariableByte(pattern) => write!(f, "[{}]", pattern),
         }
     }
@@ -223,7 +282,7 @@ impl FromStr for RawMidiPattern {
 enum RawMidiPatternToken {
     #[regex(r"\[[01abcdefghijklmnop ]*\]", parse_as_bit_pattern)]
     VariableByte(BitPattern),
-    #[regex(r"[0-9a-fA-F][0-9a-fA-F]", parse_as_byte)]
+    #[regex(r"[0-9a-fA-F][0-9a-fA-F]?", parse_as_byte)]
     FixedByte(u8),
     #[error]
     #[regex(r"[ \t\n\f]+", logos::skip)]
@@ -271,14 +330,27 @@ mod tests {
             vec![0xf0, 0x0f, 0xf7]
         );
         assert_eq!(
+            pattern.match_and_capture(&[0xf0, 0x0f, 0xf7]),
+            Some(Fraction::new(15, 15))
+        );
+        assert_eq!(
             pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MIN)),
             vec![0xf0, 0x00, 0xf7]
+        );
+        assert_eq!(
+            pattern.match_and_capture(&[0xf0, 0x00, 0xf7]),
+            Some(Fraction::new(0, 15))
         );
         assert_eq!(
             pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::new(0.5))),
             vec![0xf0, 0x08, 0xf7]
         );
+        assert_eq!(
+            pattern.match_and_capture(&[0xf0, 0x08, 0xf7]),
+            Some(Fraction::new(8, 15))
+        );
         assert_eq!(&pattern.to_string(), "F0 [0000 dcba] F7");
+        assert_eq!(pattern.match_and_capture(&[0xf1, 0x0f, 0xf7]), None);
     }
 
     #[test]
@@ -313,12 +385,24 @@ mod tests {
             vec![0xf0, 0xff, 0xf7]
         );
         assert_eq!(
+            pattern.match_and_capture(&[0xf0, 0x0ff, 0xf7]),
+            Some(Fraction::new(15, 15))
+        );
+        assert_eq!(
             pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::MIN)),
             vec![0xf0, 0xf0, 0xf7]
         );
         assert_eq!(
+            pattern.match_and_capture(&[0xf0, 0x0f0, 0xf7]),
+            Some(Fraction::new(0, 15))
+        );
+        assert_eq!(
             pattern.to_bytes(AbsoluteValue::Continuous(UnitValue::new(0.5))),
             vec![0xf0, 0xf8, 0xf7]
+        );
+        assert_eq!(
+            pattern.match_and_capture(&[0xf0, 0x0f8, 0xf7]),
+            Some(Fraction::new(8, 15))
         );
         assert_eq!(&pattern.to_string(), "F0 [1111 dcba] F7");
     }
@@ -345,5 +429,43 @@ mod tests {
         // When
         // Then
         assert_eq!(pattern.resolution(), 7);
+    }
+
+    #[test]
+    fn fixed_pattern() {
+        // Given
+        let pattern: RawMidiPattern = "B0 00 F7".parse().unwrap();
+        // When
+        // Then
+        assert_eq!(pattern.resolution(), 0);
+        assert_eq!(pattern.max_discrete_value(), 0);
+        assert_eq!(pattern.match_and_capture(&[0xf0, 0x0f8, 0xf7]), None);
+        assert_eq!(
+            pattern.match_and_capture(&[0xb0, 0x00, 0xf7]),
+            Some(Fraction::new(0, 0))
+        );
+    }
+
+    #[test]
+    fn real_world_fixed_pattern() {
+        // Given
+        let pattern: RawMidiPattern = "F0 0 20 6B 7F 42 02 00 0 2F 7F F7".parse().unwrap();
+        // When
+        // Then
+        assert_eq!(pattern.resolution(), 0);
+        assert_eq!(pattern.max_discrete_value(), 0);
+        assert_eq!(pattern.match_and_capture(&[0xf0, 0x0f8, 0xf7]), None);
+        assert_eq!(
+            pattern.match_and_capture(&[
+                0xF0, 0x0, 0x20, 0x6B, 0x7F, 0x42, 0x2, 0x0, 0x0, 0x2F, 0x7F, 0xF6
+            ]),
+            None
+        );
+        assert_eq!(
+            pattern.match_and_capture(&[
+                0xF0, 0x0, 0x20, 0x6B, 0x7F, 0x42, 0x2, 0x0, 0x0, 0x2F, 0x7F, 0xF7
+            ]),
+            Some(Fraction::new(0, 0))
+        );
     }
 }

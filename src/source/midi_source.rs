@@ -183,6 +183,7 @@ pub enum MidiSource<S: MidiSourceScript> {
 }
 
 impl<S: MidiSourceScript> MidiSource<S> {
+    /// Might allocate!
     pub fn from_source_value(source_value: MidiSourceValue<impl ShortMessage>) -> Option<Self> {
         use MidiSourceValue::*;
         let source = match source_value {
@@ -201,11 +202,13 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Tempo(_) => MidiSource::ClockTempo,
             Plain(msg) => MidiSource::from_short_message(msg)?,
             Raw(msg) => MidiSource::from_raw(msg.bytes()),
+            BorrowedSysEx(msg) => MidiSource::from_raw(msg),
         };
         Some(source)
     }
 
-    fn from_raw(msg: &[u8]) -> Self {
+    /// Allocates!
+    pub fn from_raw(msg: &[u8]) -> Self {
         MidiSource::Raw {
             pattern: RawMidiPattern::fixed_from_slice(msg),
             custom_character: Default::default(),
@@ -467,7 +470,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         controller_number: cn,
                         control_value,
                     } if matches(ch, *channel) && matches(cn, *controller_number) => {
-                        calc_control_value_from_7_bit_cc(*custom_character, control_value).ok()
+                        calc_control_value_from_n_bit_cc(*custom_character, control_value, 7).ok()
                     }
                     _ => None,
                 },
@@ -482,7 +485,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     if matches(msg.channel(), *channel)
                         && matches(msg.msb_controller_number(), *msb_controller_number) =>
                 {
-                    calc_control_value_from_14_bit_cc(*custom_character, msg.value()).ok()
+                    calc_control_value_from_n_bit_cc(*custom_character, msg.value(), 14).ok()
                 }
                 _ => None,
             },
@@ -500,10 +503,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         && matches(msg.is_registered(), *is_registered) =>
                 {
                     if msg.is_14_bit() {
-                        calc_control_value_from_14_bit_cc(*custom_character, msg.value()).ok()
+                        calc_control_value_from_n_bit_cc(*custom_character, msg.value(), 14).ok()
                     } else {
                         let u7_value = U7::try_from(msg.value()).unwrap();
-                        calc_control_value_from_7_bit_cc(*custom_character, u7_value).ok()
+                        calc_control_value_from_n_bit_cc(*custom_character, u7_value, 7).ok()
                     }
                 }
                 _ => None,
@@ -516,9 +519,26 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Tempo(bpm) => Some(ControlValue::AbsoluteContinuous(bpm.to_unit_value())),
                 _ => None,
             },
-            // TODO-low Support control for raw/sys-ex. Not difficult because we have the pattern
-            //  structure already.
-            S::Raw { .. } => None,
+            S::Raw {
+                pattern,
+                custom_character,
+            } => match value {
+                BorrowedSysEx(bytes) => {
+                    let fraction = pattern.match_and_capture(bytes)?;
+                    if fraction.max_val() == 0 {
+                        // Fixed pattern with no variable parts. This should act like a trigger!
+                        Some(ControlValue::AbsoluteContinuous(UnitValue::MAX))
+                    } else {
+                        calc_control_value_from_n_bit_cc(
+                            *custom_character,
+                            fraction.actual(),
+                            pattern.resolution() as _,
+                        )
+                        .ok()
+                    }
+                }
+                _ => None,
+            },
             // Feedback-only forever.
             S::Script { .. } => None,
         }
@@ -572,7 +592,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
     pub fn feedback<M: ShortMessage + ShortMessageFactory>(
         &self,
         feedback_value: AbsoluteValue,
-    ) -> Option<MidiSourceValue<M>> {
+    ) -> Option<MidiSourceValue<'static, M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
         match self {
@@ -875,30 +895,17 @@ fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> b
     }
 }
 
-fn calc_control_value_from_7_bit_cc(
+fn calc_control_value_from_n_bit_cc<T: Into<u32>>(
     character: SourceCharacter,
-    cc_control_value: U7,
+    cc_control_value: T,
+    resolution: u32,
 ) -> Result<ControlValue, &'static str> {
     use SourceCharacter::*;
+    let cc_control_value = cc_control_value.into();
     let result = match character {
-        RangeElement | MomentaryButton => abs(normalize_7_bit(cc_control_value)),
-        Encoder1 => rel(DiscreteIncrement::from_encoder_1_value(cc_control_value)?),
-        Encoder2 => rel(DiscreteIncrement::from_encoder_2_value(cc_control_value)?),
-        Encoder3 => rel(DiscreteIncrement::from_encoder_3_value(cc_control_value)?),
-        ToggleButton => abs(MAX_U7_FRACTION),
-    };
-    Ok(result)
-}
-
-fn calc_control_value_from_14_bit_cc(
-    character: SourceCharacter,
-    cc_control_value: U14,
-) -> Result<ControlValue, &'static str> {
-    use SourceCharacter::*;
-    let result = match character {
-        RangeElement | MomentaryButton => abs(normalize_14_bit(cc_control_value)),
+        RangeElement | MomentaryButton => abs(normalize_n_bit(cc_control_value, resolution)),
         Encoder1 | Encoder2 | Encoder3 => {
-            let value_7_bit = extract_low_7_bit_value_from_14_bit_value(cc_control_value);
+            let value_7_bit = extract_low_7_bit(cc_control_value);
             let increment = match character {
                 Encoder1 => DiscreteIncrement::from_encoder_1_value(value_7_bit)?,
                 Encoder2 => DiscreteIncrement::from_encoder_2_value(value_7_bit)?,
@@ -907,21 +914,27 @@ fn calc_control_value_from_14_bit_cc(
             };
             rel(increment)
         }
-        ToggleButton => abs(MAX_U14_FRACTION),
+        ToggleButton => abs(max_n_bit_fraction(resolution)),
     };
     Ok(result)
 }
 
 const MIN_U7_FRACTION: Fraction = Fraction::new_min(U7::MAX.get() as _);
-const MAX_U7_FRACTION: Fraction = Fraction::new_max(U7::MAX.get() as _);
-const MAX_U14_FRACTION: Fraction = Fraction::new_max(U14::MAX.get() as _);
 
 fn normalize_7_bit<T: Into<u32>>(value: T) -> Fraction {
-    Fraction::new(value.into(), U7::MAX.into())
+    normalize_n_bit(value, 7)
 }
 
 fn normalize_14_bit(value: U14) -> Fraction {
-    Fraction::new(value.into(), U14::MAX.into())
+    normalize_n_bit(value, 14)
+}
+
+fn normalize_n_bit<T: Into<u32>>(value: T, resolution: u32) -> Fraction {
+    Fraction::new(value.into(), 2u32.pow(resolution) - 1)
+}
+
+fn max_n_bit_fraction(resolution: u32) -> Fraction {
+    Fraction::new_max(2u32.pow(resolution) - 1)
 }
 
 /// See denormalize_14_bit_centered for an explanation
@@ -2234,15 +2247,15 @@ mod tests {
         ControlValue::relative(increment)
     }
 
-    fn plain(msg: RawShortMessage) -> MidiSourceValue<RawShortMessage> {
+    fn plain(msg: RawShortMessage) -> MidiSourceValue<'static, RawShortMessage> {
         MidiSourceValue::Plain(msg)
     }
 
-    fn pn(msg: ParameterNumberMessage) -> MidiSourceValue<RawShortMessage> {
+    fn pn(msg: ParameterNumberMessage) -> MidiSourceValue<'static, RawShortMessage> {
         MidiSourceValue::ParameterNumber(msg)
     }
 
-    fn cc(msg: ControlChange14BitMessage) -> MidiSourceValue<RawShortMessage> {
+    fn cc(msg: ControlChange14BitMessage) -> MidiSourceValue<'static, RawShortMessage> {
         MidiSourceValue::ControlChange14Bit(msg)
     }
 
@@ -2250,11 +2263,11 @@ mod tests {
         AbsoluteValue::Continuous(UnitValue::new(value))
     }
 
-    fn tempo(bpm: f64) -> MidiSourceValue<RawShortMessage> {
+    fn tempo(bpm: f64) -> MidiSourceValue<'static, RawShortMessage> {
         MidiSourceValue::Tempo(Bpm::new(bpm))
     }
 }
 
-fn extract_low_7_bit_value_from_14_bit_value(value: U14) -> U7 {
-    U7::new((value.get() & 0x7f) as u8)
+fn extract_low_7_bit<T: Into<u32>>(value: T) -> U7 {
+    U7::new((value.into() & 0x7f) as u8)
 }

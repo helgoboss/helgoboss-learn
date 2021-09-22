@@ -8,7 +8,7 @@ use std::convert::TryFrom;
 
 /// Incoming value which might be used to control something
 #[derive(Clone, PartialEq, Debug)]
-pub enum MidiSourceValue<M: ShortMessage> {
+pub enum MidiSourceValue<'a, M: ShortMessage> {
     Plain(M),
     ParameterNumber(ParameterNumberMessage),
     ControlChange14Bit(ControlChange14BitMessage),
@@ -16,23 +16,37 @@ pub enum MidiSourceValue<M: ShortMessage> {
     /// We must take care not to allocate this in real-time thread! At the moment only feedback
     /// is supported with this source but once we support control, this gets relevant.
     Raw(Box<RawMidiEvent>),
+    BorrowedSysEx(&'a [u8]),
 }
 
-impl<M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<M> {
+impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
+    /// Might allocate!
+    pub fn try_to_owned(self) -> Result<MidiSourceValue<'static, M>, &'static str> {
+        use MidiSourceValue::*;
+        let res = match self {
+            Plain(v) => Plain(v),
+            ParameterNumber(v) => ParameterNumber(v),
+            ControlChange14Bit(v) => ControlChange14Bit(v),
+            Tempo(v) => Tempo(v),
+            Raw(v) => Raw(v),
+            BorrowedSysEx(bytes) => Raw(Box::new(RawMidiEvent::try_from_slice(0, bytes)?)),
+        };
+        Ok(res)
+    }
+
     pub fn to_short_messages(
         &self,
         nrpn_data_entry_byte_order: DataEntryByteOrder,
     ) -> [Option<M>; 4] {
+        use MidiSourceValue::*;
         match self {
-            MidiSourceValue::Plain(msg) => [Some(*msg), None, None, None],
-            MidiSourceValue::ParameterNumber(msg) => {
-                msg.to_short_messages(nrpn_data_entry_byte_order)
-            }
-            MidiSourceValue::ControlChange14Bit(msg) => {
+            Plain(msg) => [Some(*msg), None, None, None],
+            ParameterNumber(msg) => msg.to_short_messages(nrpn_data_entry_byte_order),
+            ControlChange14Bit(msg) => {
                 let inner_shorts = msg.to_short_messages();
                 [Some(inner_shorts[0]), Some(inner_shorts[1]), None, None]
             }
-            MidiSourceValue::Tempo(_) | MidiSourceValue::Raw(_) => [None; 4],
+            Tempo(_) | Raw(_) | BorrowedSysEx(_) => [None; 4],
         }
     }
 }
