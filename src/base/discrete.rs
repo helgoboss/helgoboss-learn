@@ -2,6 +2,7 @@ use crate::{Interval, UnitIncrement, UnitValue};
 use derive_more::Display;
 use helgoboss_midi::U7;
 use std::cmp;
+use std::convert::TryFrom;
 use std::ops::Sub;
 
 /// A positive discrete number most likely representing a step count.
@@ -227,6 +228,17 @@ impl Sub for DiscreteIncrement {
 
     fn sub(self, rhs: Self) -> Self::Output {
         self.0 - rhs.0
+    }
+}
+
+impl TryFrom<i32> for DiscreteIncrement {
+    type Error = &'static str;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        if value == 0 {
+            return Err("zero is not an increment");
+        }
+        Ok(DiscreteIncrement::new(value))
     }
 }
 

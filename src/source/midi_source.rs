@@ -9,8 +9,9 @@ use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use helgoboss_midi::{
-    Channel, ControlChange14BitMessage, ControllerNumber, KeyNumber, ParameterNumberMessage,
-    ShortMessage, ShortMessageFactory, ShortMessageType, StructuredShortMessage, U14, U7,
+    Channel, ControlChange14BitMessage, ControllerNumber, DataType, KeyNumber,
+    ParameterNumberMessage, ShortMessage, ShortMessageFactory, ShortMessageType,
+    StructuredShortMessage, U14, U7,
 };
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -335,10 +336,20 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             | ControlChange14BitValue {
                 custom_character, ..
-            }
-            | ParameterNumberValue {
-                custom_character, ..
             } => custom_character.possible_detailed_characters(),
+            ParameterNumberValue {
+                custom_character,
+                is_14_bit,
+                ..
+            } => {
+                if *is_14_bit == Some(true) {
+                    custom_character.possible_detailed_characters()
+                } else {
+                    let mut res = custom_character.possible_detailed_characters();
+                    res.push(DetailedSourceCharacter::Relative);
+                    res
+                }
+            }
             // Usually a range control but sometimes more like a button (e.g. see #316).
             ProgramChangeNumber { .. } | ChannelPressureAmount { .. } => vec![
                 DetailedSourceCharacter::RangeControl,
@@ -502,11 +513,23 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         && matches(msg.is_14_bit(), *is_14_bit)
                         && matches(msg.is_registered(), *is_registered) =>
                 {
-                    if msg.is_14_bit() {
-                        calc_control_value_from_n_bit_cc(*custom_character, msg.value(), 14).ok()
-                    } else {
-                        let u7_value = U7::try_from(msg.value()).unwrap();
-                        calc_control_value_from_n_bit_cc(*custom_character, u7_value, 7).ok()
+                    match msg.data_type() {
+                        DataType::DataEntry => {
+                            if msg.is_14_bit() {
+                                calc_control_value_from_n_bit_cc(*custom_character, msg.value(), 14)
+                                    .ok()
+                            } else {
+                                let u7_value = U7::try_from(msg.value()).unwrap();
+                                calc_control_value_from_n_bit_cc(*custom_character, u7_value, 7)
+                                    .ok()
+                            }
+                        }
+                        DataType::DataIncrement => {
+                            (msg.value().get() as i32).try_into().ok().map(rel)
+                        }
+                        DataType::DataDecrement => {
+                            (-(msg.value().get() as i32)).try_into().ok().map(rel)
+                        }
                     }
                 }
                 _ => None,
