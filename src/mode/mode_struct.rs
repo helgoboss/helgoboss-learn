@@ -623,16 +623,35 @@ impl<T: Transformation> Mode<T> {
         if control_value.is_zero() {
             return None;
         }
-        let center_target_value = self.settings.target_value_interval.center();
         // Nothing we can do if we can't get the current target value. This shouldn't happen
         // usually because virtual targets are not supposed to be used with toggle mode.
         let current_target_value = target.current_value(context)?;
-        let desired_target_value = if current_target_value.to_unit_value() > center_target_value {
-            // Target value is within the second half of the target range (considered as on).
-            self.settings.target_value_interval.min_val()
+        let desired_target_value = if self.settings.target_value_interval.min_is_max(BASE_EPSILON) {
+            // Special case #452 (target min == target max).
+            // Make it usable for exclusive toggle buttons.
+            if current_target_value
+                .matches_tolerant(
+                    &self.settings.target_value_interval,
+                    &self.settings.discrete_target_value_interval,
+                    false,
+                    BASE_EPSILON,
+                )
+                .matches()
+            {
+                UnitValue::MIN
+            } else {
+                self.settings.target_value_interval.max_val()
+            }
         } else {
-            // Target value is within the first half of the target range (considered as off).
-            self.settings.target_value_interval.max_val()
+            // Normal case (target min != target max)
+            let center_target_value = self.settings.target_value_interval.center();
+            if current_target_value.to_unit_value() > center_target_value {
+                // Target value is within the second half of the target range (considered as on).
+                self.settings.target_value_interval.min_val()
+            } else {
+                // Target value is within the first half of the target range (considered as off).
+                self.settings.target_value_interval.max_val()
+            }
         };
         // If the settings make sense for toggling, the desired target value should *always*
         // be different than the current value. Therefore no need to check if the target value
