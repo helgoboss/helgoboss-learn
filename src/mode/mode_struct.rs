@@ -628,8 +628,10 @@ impl<T: Transformation> Mode<T> {
         // usually because virtual targets are not supposed to be used with toggle mode.
         let current_target_value = target.current_value(context)?;
         let desired_target_value = if current_target_value.to_unit_value() > center_target_value {
+            // Target value is within the second half of the target range (considered as on).
             self.settings.target_value_interval.min_val()
         } else {
+            // Target value is within the first half of the target range (considered as off).
             self.settings.target_value_interval.max_val()
         };
         // If the settings make sense for toggling, the desired target value should *always*

@@ -734,6 +734,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             }
                         }
                     }
+                    InverseTargetValueOnOnly => {
+                        MakesSense(
+                            "Like \"Inverse target value\" but doesn't apply the inverse to other mappings if the target value is zero. Useful for exclusive toggle buttons.",
+                        )
+                    }
                 }
             }
         }

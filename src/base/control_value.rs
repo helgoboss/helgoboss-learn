@@ -84,6 +84,12 @@ impl ControlValue {
             }
         }
     }
+
+    pub fn is_on(self) -> bool {
+        self.to_unit_value()
+            .map(|uv| !uv.is_zero())
+            .unwrap_or(false)
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
