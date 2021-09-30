@@ -1,5 +1,11 @@
+#[macro_use]
+mod regex_util;
+
 mod control_value;
 pub use control_value::*;
+
+mod feedback_value;
+pub use feedback_value::*;
 
 mod unit;
 pub use unit::*;

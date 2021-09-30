@@ -1,7 +1,7 @@
 use crate::DetailedSourceCharacter::PressOnlyButton;
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, SourceCharacter, UnitValue,
+    DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, SourceCharacter, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -282,7 +282,8 @@ impl OscSource {
         }
     }
 
-    pub fn feedback(&self, feedback_value: UnitValue) -> Option<OscMessage> {
+    pub fn feedback(&self, feedback_value: FeedbackValue) -> Option<OscMessage> {
+        let feedback_value = feedback_value.to_numeric()?.to_unit_value();
         let msg = OscMessage {
             addr: self.address_pattern.clone(),
             args: if let Some(desc) = self.arg_descriptor {

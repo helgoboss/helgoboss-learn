@@ -2,14 +2,16 @@ use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
     DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
-    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, Transformation,
-    UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
+    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TargetPropKey,
+    Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use regex::Captures;
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -64,6 +66,8 @@ pub struct ModeSettings<T: Transformation> {
     pub press_duration_interval: Interval<Duration>,
     pub turbo_rate: Duration,
     pub target_value_sequence: ValueSequence,
+    pub feedback_type: FeedbackType,
+    pub textual_feedback_expression: String,
 }
 
 const ZERO_DURATION: Duration = Duration::from_millis(0);
@@ -95,6 +99,8 @@ impl<T: Transformation> Default for ModeSettings<T> {
             press_duration_interval: Interval::new(ZERO_DURATION, ZERO_DURATION),
             turbo_rate: ZERO_DURATION,
             target_value_sequence: Default::default(),
+            feedback_type: Default::default(),
+            textual_feedback_expression: Default::default(),
         }
     }
 }
@@ -167,12 +173,33 @@ impl Default for AbsoluteMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
+#[repr(usize)]
+pub enum FeedbackType {
+    Numerical = 0,
+    Textual = 1,
+}
+
+impl FeedbackType {
+    pub fn is_textual(self) -> bool {
+        self == FeedbackType::Textual
+    }
+}
+
+impl Default for FeedbackType {
+    fn default() -> Self {
+        FeedbackType::Numerical
+    }
+}
+
 pub struct ModeGarbage<T> {
     _control_transformation: Option<T>,
     _feedback_transformation: Option<T>,
     _target_value_sequence: ValueSequence,
     _unpacked_target_value_sequence: Vec<UnitValue>,
     _unpacked_target_value_set: BTreeSet<UnitValue>,
+    _textual_feedback_expression: String,
 }
 
 impl<T: Transformation> Mode<T> {
@@ -200,6 +227,7 @@ impl<T: Transformation> Mode<T> {
             _target_value_sequence: self.settings.target_value_sequence,
             _unpacked_target_value_sequence: self.state.unpacked_target_value_sequence,
             _unpacked_target_value_set: self.state.unpacked_target_value_set,
+            _textual_feedback_expression: self.settings.textual_feedback_expression,
         }
     }
 
@@ -247,6 +275,36 @@ impl<T: Transformation> Mode<T> {
     #[cfg(test)]
     fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
         self.feedback_with_options(target_value, ModeFeedbackOptions::default())
+    }
+
+    pub fn wants_textual_feedback(&self) -> bool {
+        self.settings.feedback_type.is_textual()
+    }
+    pub fn query_textual_feedback<'a, C: Copy>(
+        &self,
+        target: Option<&impl Target<'a, Context = C>>,
+        context: C,
+    ) -> Cow<str> {
+        let expression_regex = regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#);
+        if self.settings.textual_feedback_expression.is_empty() {
+            target
+                .and_then(|t| t.textual_value(TargetPropKey::Default, context))
+                .unwrap_or_default()
+                .into()
+        } else {
+            expression_regex.replace_all(
+                &self.settings.textual_feedback_expression,
+                |c: &Captures| {
+                    if let Some(target_prop_key) = c[1].strip_prefix("target.") {
+                        target
+                            .and_then(|t| t.textual_value(target_prop_key.into(), context))
+                            .unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
+                },
+            )
+        }
     }
 
     /// Takes a target value, interprets and transforms it conforming to mode rules and

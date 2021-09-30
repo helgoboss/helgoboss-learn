@@ -1,7 +1,7 @@
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
-    ControlValue, DetailedSourceCharacter, DiscreteIncrement, Fraction, MidiSourceScript,
-    MidiSourceValue, RawMidiPattern, UnitValue,
+    ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction,
+    MidiSourceScript, MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
 };
 use derivative::Derivative;
 use derive_more::Display;
@@ -13,8 +13,11 @@ use helgoboss_midi::{
     ParameterNumberMessage, ShortMessage, ShortMessageFactory, ShortMessageType,
     StructuredShortMessage, U14, U7,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 
 #[derive(
@@ -176,10 +179,13 @@ pub enum MidiSource<S: MidiSourceScript> {
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         custom_character: SourceCharacter,
     },
-    // For advanced feedback (e.g. to drive hardware displays).
+    // For advanced programmable feedback (e.g. to drive hardware displays).
     Script {
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         script: Option<S>,
+    },
+    Display {
+        type_specific_settings: DisplayTypeSpecificSettings,
     },
 }
 
@@ -287,7 +293,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
             | PitchBendChangeValue { channel }
             | ControlChange14BitValue { channel, .. }
             | ParameterNumberValue { channel, .. } => *channel,
-            ClockTempo | ClockTransport { .. } | Raw { .. } | Script { .. } => None,
+            ClockTempo | ClockTransport { .. } | Raw { .. } | Script { .. } | Display { .. } => {
+                None
+            }
         }
     }
 
@@ -315,6 +323,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             | ChannelPressureAmount { .. }
             | PitchBendChangeValue { .. }
             | Script { .. }
+            | Display { .. }
             | ClockTempo => SourceCharacter::RangeElement,
         }
     }
@@ -358,7 +367,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
             ],
             // Usually a range control but could also be a velocity-sensitive button.
             // Script source could be any source really.
-            PolyphonicKeyPressureAmount { .. } | PitchBendChangeValue { .. } | Script { .. } => {
+            PolyphonicKeyPressureAmount { .. }
+            | PitchBendChangeValue { .. }
+            | Script { .. }
+            | Display { .. } => {
                 vec![
                     DetailedSourceCharacter::RangeControl,
                     DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
@@ -563,7 +575,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 _ => None,
             },
             // Feedback-only forever.
-            S::Script { .. } => None,
+            S::Script { .. } | S::Display { .. } => None,
         }
     }
 
@@ -614,7 +626,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
     /// supported by this source.
     pub fn feedback<M: ShortMessage + ShortMessageFactory>(
         &self,
-        feedback_value: AbsoluteValue,
+        feedback_value: FeedbackValue,
     ) -> Option<MidiSourceValue<'static, M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
@@ -625,11 +637,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::Plain(M::note_on(
                 *ch,
                 *kn,
-                denormalize_7_bit(feedback_value),
+                denormalize_7_bit(feedback_value.to_numeric()?),
             ))),
             NoteKeyNumber { channel: Some(ch) } => Some(V::Plain(M::note_on(
                 *ch,
-                denormalize_7_bit(feedback_value),
+                denormalize_7_bit(feedback_value.to_numeric()?),
                 U7::MAX,
             ))),
             PolyphonicKeyPressureAmount {
@@ -638,7 +650,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::Plain(M::polyphonic_key_pressure(
                 *ch,
                 *kn,
-                denormalize_7_bit(feedback_value),
+                denormalize_7_bit(feedback_value.to_numeric()?),
             ))),
             ControlChangeValue {
                 channel: Some(ch),
@@ -647,19 +659,19 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::Plain(M::control_change(
                 *ch,
                 *cn,
-                denormalize_7_bit(feedback_value),
+                denormalize_7_bit(feedback_value.to_numeric()?),
             ))),
             ProgramChangeNumber { channel: Some(ch) } => Some(V::Plain(M::program_change(
                 *ch,
-                denormalize_7_bit(feedback_value),
+                denormalize_7_bit(feedback_value.to_numeric()?),
             ))),
             ChannelPressureAmount { channel: Some(ch) } => Some(V::Plain(M::channel_pressure(
                 *ch,
-                denormalize_7_bit(feedback_value),
+                denormalize_7_bit(feedback_value.to_numeric()?),
             ))),
             PitchBendChangeValue { channel: Some(ch) } => Some(V::Plain(M::pitch_bend_change(
                 *ch,
-                denormalize_14_bit_centered(feedback_value),
+                denormalize_14_bit_centered(feedback_value.to_numeric()?),
             ))),
             ControlChange14BitValue {
                 channel: Some(ch),
@@ -668,7 +680,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::ControlChange14Bit(ControlChange14BitMessage::new(
                 *ch,
                 *mcn,
-                denormalize_14_bit(feedback_value),
+                denormalize_14_bit(feedback_value.to_numeric()?),
             ))),
             ParameterNumberValue {
                 channel: Some(ch),
@@ -681,25 +693,25 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     ParameterNumberMessage::non_registered_7_bit(
                         *ch,
                         *n,
-                        denormalize_7_bit(feedback_value),
+                        denormalize_7_bit(feedback_value.to_numeric()?),
                     )
                 } else if !*is_registered && *is_14_bit {
                     ParameterNumberMessage::non_registered_14_bit(
                         *ch,
                         *n,
-                        denormalize_14_bit(feedback_value),
+                        denormalize_14_bit(feedback_value.to_numeric()?),
                     )
                 } else if *is_registered && !*is_14_bit {
                     ParameterNumberMessage::registered_7_bit(
                         *ch,
                         *n,
-                        denormalize_7_bit(feedback_value),
+                        denormalize_7_bit(feedback_value.to_numeric()?),
                     )
                 } else if *is_registered && *is_14_bit {
                     ParameterNumberMessage::registered_14_bit(
                         *ch,
                         *n,
-                        denormalize_14_bit(feedback_value),
+                        denormalize_14_bit(feedback_value.to_numeric()?),
                     )
                 } else {
                     unreachable!()
@@ -707,13 +719,37 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Some(V::ParameterNumber(n))
             }
             Raw { pattern, .. } => {
-                let raw_midi_event = pattern.to_concrete_midi_event(feedback_value);
+                let raw_midi_event = pattern.to_concrete_midi_event(feedback_value.to_numeric()?);
                 Some(V::Raw(Box::new(raw_midi_event)))
             }
             Script { script } => {
                 let script = script.as_ref()?;
-                let raw_midi_event = script.execute(feedback_value).ok()?;
+                // TODO-high LCD Make textual value available
+                let raw_midi_event = script.execute(feedback_value.to_numeric()?).ok()?;
                 Some(V::Raw(raw_midi_event))
+            }
+            Display { .. } => {
+                use FeedbackValue::*;
+                let text = match feedback_value {
+                    Off => Cow::default(),
+                    Numeric(v) => {
+                        Cow::Owned(format_percentage_without_unit(v.to_unit_value().get()))
+                    }
+                    Textual(text) => text,
+                };
+                let mut data = [0u8; MACKIE_LCD_SYSEX_PREFIX.len() + MACKIE_LCD_MAX_BYTES + 1];
+                data[0..MACKIE_LCD_SYSEX_PREFIX.len()].copy_from_slice(&MACKIE_LCD_SYSEX_PREFIX);
+                for (i, ch) in text
+                    .chars()
+                    .filter_map(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
+                    .take(MACKIE_LCD_MAX_BYTES)
+                    .enumerate()
+                {
+                    data[MACKIE_LCD_SYSEX_PREFIX.len() + i] = ch;
+                }
+                data[data.len() - 1] = 0xF7;
+                let raw_midi_event = RawMidiEvent::try_from_slice(0, &data).ok()?;
+                Some(V::Raw(Box::new(raw_midi_event)))
             }
             _ => None,
         }
@@ -737,7 +773,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
             ClockTransport { .. } => {
                 return Err("clock transport sources have just one possible control value");
             }
-            Script { .. } => format_percentage_without_unit(value.to_unit_value()?.get()),
+            Script { .. } | Display { .. } => {
+                format_percentage_without_unit(value.to_unit_value()?.get())
+            }
             _ => self
                 .convert_control_value_to_midi_value(value.to_unit_value()?)?
                 .to_string(),
@@ -757,7 +795,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             ClockTransport { .. } => {
                 return Err("parsing doesn't make sense for clock transport MIDI source");
             }
-            Script { .. } => parse_percentage_without_unit(text)?.try_into()?,
+            Script { .. } | Display { .. } => parse_percentage_without_unit(text)?.try_into()?,
             _ => {
                 let midi_value: i32 = text.parse().map_err(|_| "not a valid integer")?;
                 self.convert_midi_value_to_control_value(midi_value)?
@@ -815,7 +853,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 }
             },
             Raw { pattern, .. } => v.to_discrete(pattern.max_discrete_value()) as _,
-            ClockTempo | ClockTransport { .. } | Script { .. } => {
+            ClockTempo | ClockTransport { .. } | Script { .. } | Display { .. } => {
                 return Err("not supported");
             }
         };
@@ -858,7 +896,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 }
                 Fraction::new(value as _, pattern.max_discrete_value() as _)
             }
-            ClockTempo | ClockTransport { .. } | Script { .. } => {
+            ClockTempo | ClockTransport { .. } | Script { .. } | Display { .. } => {
                 return Err("not supported");
             }
         };
@@ -896,7 +934,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     Some(127)
                 }
             }
-            ClockTempo | ClockTransport { .. } | Script { .. } => None,
+            ClockTempo | ClockTransport { .. } | Script { .. } | Display { .. } => None,
             Raw {
                 custom_character,
                 pattern,
@@ -1019,6 +1057,88 @@ const fn rel(increment: DiscreteIncrement) -> ControlValue {
     ControlValue::Relative(increment)
 }
 
+fn extract_low_7_bit<T: Into<u32>>(value: T) -> U7 {
+    U7::new((value.into() & 0x7f) as u8)
+}
+
+const MACKIE_LCD_SYSEX_PREFIX: [u8; 7] = [0xF0, 0x00, 0x00, 0x66, 0x14, 0x12, 0x00];
+const MACKIE_LCD_MAX_BYTES: usize = 112;
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(usize)]
+pub enum DisplayType {
+    #[cfg_attr(feature = "serde", serde(rename = "mackie-lcd"))]
+    #[display(fmt = "Mackie LCD")]
+    MackieLcd,
+    #[cfg_attr(feature = "serde", serde(rename = "mackie-time-code"))]
+    #[display(fmt = "Mackie Time Code")]
+    MackieTimeCode,
+    #[cfg_attr(feature = "serde", serde(rename = "mackie-assignment"))]
+    #[display(fmt = "Mackie Assignment")]
+    MackieAssignment,
+}
+
+impl Default for DisplayType {
+    fn default() -> Self {
+        DisplayType::MackieLcd
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub enum DisplayTypeSpecificSettings {
+    MackieLcd {
+        channel: Option<u8>,
+        line: Option<u8>,
+    },
+    MackieTimeCode {
+        scope: TimeCodeDisplayScope,
+    },
+    MackieAssignment,
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+)]
+#[cfg_attr(feature = "serde", derive(Serialize_repr, Deserialize_repr))]
+#[repr(usize)]
+pub enum TimeCodeDisplayScope {
+    #[display(fmt = "Left 3 digits (hours/bars)")]
+    Left3Digits = 0,
+    #[display(fmt = "Left 2 digits (minutes/beats)")]
+    Left2Digits = 1,
+    #[display(fmt = "Right 2 digits (seconds/sub division)")]
+    Right2Digits = 2,
+    #[display(fmt = "Right 3 digits (frames/ticks)")]
+    Right3Digits = 3,
+}
+
+impl Default for TimeCodeDisplayScope {
+    fn default() -> Self {
+        TimeCodeDisplayScope::Left3Digits
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1098,7 +1218,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -1129,7 +1249,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(note_off(15, 20, 100,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(note_on(4, 20, 64)))
         );
     }
@@ -1189,7 +1309,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -1220,7 +1340,7 @@ mod tests {
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(note_on(1, 64, 127)))
         );
     }
@@ -1289,7 +1409,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -1325,7 +1445,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(polyphonic_key_pressure(1, 53, 64)))
         );
     }
@@ -1383,7 +1503,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -1410,24 +1530,24 @@ mod tests {
             None
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.0)),
+            source.feedback::<RawShortMessage>(fv(0.0)),
             Some(plain(control_change(1, 64, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.25)),
+            source.feedback::<RawShortMessage>(fv(0.25)),
             Some(plain(control_change(1, 64, 32)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(control_change(1, 64, 64)))
         );
         // In a center-oriented mapping this would yield 96 instead of 95
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.75)),
+            source.feedback::<RawShortMessage>(fv(0.75)),
             Some(plain(control_change(1, 64, 95)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(1.0)),
+            source.feedback::<RawShortMessage>(fv(1.0)),
             Some(plain(control_change(1, 64, 127)))
         );
     }
@@ -1493,7 +1613,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -1522,7 +1642,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(program_change(6, 127,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(program_change(10, 64)))
         );
     }
@@ -1588,7 +1708,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -1625,7 +1745,7 @@ mod tests {
             None
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(channel_pressure(15, 64)))
         );
     }
@@ -1731,7 +1851,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "0"
@@ -1760,23 +1880,23 @@ mod tests {
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.0)),
+            source.feedback::<RawShortMessage>(fv(0.0)),
             Some(plain(pitch_bend_change(3, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.25)),
+            source.feedback::<RawShortMessage>(fv(0.25)),
             Some(plain(pitch_bend_change(3, 4096)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(pitch_bend_change(3, 8192)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.75)),
+            source.feedback::<RawShortMessage>(fv(0.75)),
             Some(plain(pitch_bend_change(3, 12288)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(1.0)),
+            source.feedback::<RawShortMessage>(fv(1.0)),
             Some(plain(pitch_bend_change(3, 16383)))
         );
     }
@@ -1847,7 +1967,7 @@ mod tests {
         assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "8192"
@@ -1885,24 +2005,24 @@ mod tests {
             frac(16383, 16383)
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.0)),
+            source.feedback::<RawShortMessage>(fv(0.0)),
             Some(cc(control_change_14_bit(1, 7, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.25)),
+            source.feedback::<RawShortMessage>(fv(0.25)),
             Some(cc(control_change_14_bit(1, 7, 4096)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(cc(control_change_14_bit(1, 7, 8192)))
         );
         // In a center-oriented mapping this would yield 12288 instead of 12287
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.75)),
+            source.feedback::<RawShortMessage>(fv(0.75)),
             Some(cc(control_change_14_bit(1, 7, 12287)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(1.0)),
+            source.feedback::<RawShortMessage>(fv(1.0)),
             Some(cc(control_change_14_bit(1, 7, 16383)))
         );
     }
@@ -1996,7 +2116,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert!(source.format_control_value(abs(0.5)).is_err());
     }
 
@@ -2035,24 +2155,24 @@ mod tests {
         assert_eq!(source.control(&pn(nrpn_14_bit(7, 3000, 45))), None);
         assert_eq!(source.control(&pn(nrpn(7, 3000, 24))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.0)),
+            source.feedback::<RawShortMessage>(fv(0.0)),
             Some(pn(rpn(7, 3000, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.25)),
+            source.feedback::<RawShortMessage>(fv(0.25)),
             Some(pn(rpn(7, 3000, 32)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(pn(rpn(7, 3000, 64)))
         );
         // In a center-oriented mapping this would yield 96 instead of 95
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.75)),
+            source.feedback::<RawShortMessage>(fv(0.75)),
             Some(pn(rpn(7, 3000, 95)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(1.0)),
+            source.feedback::<RawShortMessage>(fv(1.0)),
             Some(pn(rpn(7, 3000, 127)))
         );
         assert_eq!(
@@ -2124,24 +2244,24 @@ mod tests {
         // When
         // Then
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.0)),
+            source.feedback::<RawShortMessage>(fv(0.0)),
             Some(pn(rpn_14_bit(7, 3000, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.25)),
+            source.feedback::<RawShortMessage>(fv(0.25)),
             Some(pn(rpn_14_bit(7, 3000, 4096)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.5)),
+            source.feedback::<RawShortMessage>(fv(0.5)),
             Some(pn(rpn_14_bit(7, 3000, 8192)))
         );
         // In a center-oriented mapping this would yield 12288 instead of 12287
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(0.75)),
+            source.feedback::<RawShortMessage>(fv(0.75)),
             Some(pn(rpn_14_bit(7, 3000, 12287)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(uv(1.0)),
+            source.feedback::<RawShortMessage>(fv(1.0)),
             Some(pn(rpn_14_bit(7, 3000, 16383)))
         );
         assert_eq!(
@@ -2195,7 +2315,7 @@ mod tests {
             source.control(&tempo(120.0)).unwrap(),
             abs(0.12408759124087591)
         );
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "480.50"
@@ -2254,7 +2374,7 @@ mod tests {
         assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(uv(0.5)), None);
+        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
         assert!(source.format_control_value(abs(0.5)).is_err());
     }
 
@@ -2282,15 +2402,11 @@ mod tests {
         MidiSourceValue::ControlChange14Bit(msg)
     }
 
-    fn uv(value: f64) -> AbsoluteValue {
-        AbsoluteValue::Continuous(UnitValue::new(value))
+    fn fv(value: f64) -> FeedbackValue<'static> {
+        FeedbackValue::Numeric(AbsoluteValue::Continuous(UnitValue::new(value)))
     }
 
     fn tempo(bpm: f64) -> MidiSourceValue<'static, RawShortMessage> {
         MidiSourceValue::Tempo(Bpm::new(bpm))
     }
-}
-
-fn extract_low_7_bit<T: Into<u32>>(value: T) -> U7 {
-    U7::new((value.into() & 0x7f) as u8)
 }

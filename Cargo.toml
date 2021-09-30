@@ -27,3 +27,5 @@ reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "mas
 logos = "0.12.0"
 partial-min-max = "0.4.0"
 nom = "6.2.1"
+regex = "1"
+once_cell = "1.4.0"

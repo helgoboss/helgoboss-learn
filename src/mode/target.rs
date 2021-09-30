@@ -69,5 +69,25 @@ pub trait Target<'a> {
     /// but others will still work.
     fn current_value(&self, context: Self::Context) -> Option<AbsoluteValue>;
 
+    fn textual_value(&self, key: TargetPropKey, context: Self::Context) -> Option<String> {
+        let _ = key;
+        let _ = context;
+        None
+    }
+
     fn control_type(&self, context: Self::Context) -> ControlType;
+}
+
+pub enum TargetPropKey<'a> {
+    Default,
+    Custom(&'a str),
+}
+
+impl<'a> From<&'a str> for TargetPropKey<'a> {
+    fn from(text: &'a str) -> Self {
+        match text.trim() {
+            "default" => Self::Default,
+            trimmed => Self::Custom(trimmed),
+        }
+    }
 }

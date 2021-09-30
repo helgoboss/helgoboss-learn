@@ -36,6 +36,7 @@ pub struct ModeApplicabilityCheckInput {
     pub target_supports_discrete_values: bool,
     pub is_feedback: bool,
     pub make_absolute: bool,
+    pub use_textual_feedback: bool,
     pub source_character: DetailedSourceCharacter,
     pub absolute_mode: AbsoluteMode,
     pub mode_parameter: ModeParameter,
@@ -72,6 +73,8 @@ pub enum ModeParameter {
     TargetMinMax,
     #[display(fmt = "Feedback transformation")]
     FeedbackTransformation,
+    #[display(fmt = "Textual feedback expression")]
+    TextualFeedbackExpression,
     #[display(fmt = "Step size min")]
     StepSizeMin,
     #[display(fmt = "Step size max")]
@@ -92,6 +95,8 @@ pub enum ModeParameter {
     ButtonFilter,
     #[display(fmt = "Make absolute")]
     MakeAbsolute,
+    #[display(fmt = "Use textual feedback")]
+    UseTextualFeedback,
     #[display(fmt = "Round target value")]
     RoundTargetValue,
     #[display(fmt = "Absolute mode")]
@@ -388,9 +393,18 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             }
         }
         FeedbackTransformation => {
-            if input.is_feedback {
+            if input.is_feedback && !input.use_textual_feedback {
                 MakesSense(
                     "Defines via EEL how to transform the normalized feedback value y (where 0.0 <= y <= 1.0). Example: x = 1 - y",
+                )
+            } else {
+                HasNoEffect
+            }
+        }
+        TextualFeedbackExpression => {
+            if input.is_feedback && input.use_textual_feedback && !input.target_is_virtual {
+                MakesSense(
+                    "This fields lets you write arbitrary text to be sent to the textual source.",
                 )
             } else {
                 HasNoEffect
@@ -610,6 +624,15 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 MakesSense(
                         "Converts relative increments/decrements into an absolute value. This allows you to use control transformation and discontinuous target value sequences but comes with the disadvantage of parameter jumps (which can be mitigated using the jump settings).",
                     )
+            } else {
+                HasNoEffect
+            }
+        }
+        UseTextualFeedback => {
+            if input.is_feedback {
+                MakesSense(
+                    "Switches to textual feedback (to be used with textual sources such as LCDs).",
+                )
             } else {
                 HasNoEffect
             }
