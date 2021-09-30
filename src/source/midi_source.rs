@@ -728,7 +728,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 let raw_midi_event = script.execute(feedback_value.to_numeric()?).ok()?;
                 Some(V::Raw(raw_midi_event))
             }
-            Display { .. } => {
+            Display {
+                type_specific_settings,
+            } => {
                 use FeedbackValue::*;
                 let text = match feedback_value {
                     Off => Cow::default(),
@@ -737,18 +739,65 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     }
                     Textual(text) => text,
                 };
-                let mut data = [0u8; MACKIE_LCD_SYSEX_PREFIX.len() + MACKIE_LCD_MAX_BYTES + 1];
-                data[0..MACKIE_LCD_SYSEX_PREFIX.len()].copy_from_slice(&MACKIE_LCD_SYSEX_PREFIX);
-                for (i, ch) in text
-                    .chars()
-                    .filter_map(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
-                    .take(MACKIE_LCD_MAX_BYTES)
-                    .enumerate()
-                {
-                    data[MACKIE_LCD_SYSEX_PREFIX.len() + i] = ch;
-                }
-                data[data.len() - 1] = 0xF7;
-                let raw_midi_event = RawMidiEvent::try_from_slice(0, &data).ok()?;
+                let raw_midi_event = match type_specific_settings {
+                    DisplayTypeSpecificSettings::MackieLcd { .. } => {
+                        let mut data =
+                            [0u8; MACKIE_LCD_SYSEX_PREFIX.len() + MACKIE_LCD_MAX_BYTES + 1];
+                        data[0..MACKIE_LCD_SYSEX_PREFIX.len()]
+                            .copy_from_slice(&MACKIE_LCD_SYSEX_PREFIX);
+                        for (i, ch) in text
+                            .chars()
+                            .filter_map(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
+                            .take(MACKIE_LCD_MAX_BYTES)
+                            .enumerate()
+                        {
+                            data[MACKIE_LCD_SYSEX_PREFIX.len() + i] = ch;
+                        }
+                        data[data.len() - 1] = 0xF7;
+                        RawMidiEvent::try_from_slice(0, &data).ok()?
+                    }
+                    DisplayTypeSpecificSettings::MackieTimeCode { .. } => {
+                        let mut data = [
+                            0xB0, 0x49, 0, 0x48, 0, 0x47, 0, 0x46, 0, 0x45, 0, 0x44, 0, 0x43, 0,
+                            0x42, 0, 0x41, 0, 0x40, 0,
+                        ];
+                        let mut peekable = text.chars().peekable();
+                        let mut i = 0usize;
+                        while let Some(ch) = peekable.next() {
+                            if i > 9 {
+                                break;
+                            }
+                            let next_ch = peekable.peek().copied();
+                            let result = convert_to_7_segment_char(ch, next_ch);
+                            if result.consumed_one_more {
+                                peekable.next();
+                            }
+                            let code = match result.code {
+                                None => continue,
+                                Some(c) => c,
+                            };
+                            let target_index = i * 2 + 2;
+                            data[target_index] = code;
+                            i = i + 1;
+                        }
+                        RawMidiEvent::try_from_slice(0, &data).ok()?
+                    }
+                    DisplayTypeSpecificSettings::MackieAssignment => {
+                        let mut data = [0xB0, 0x4B, 0, 0x4A, 0];
+                        for (i, ch) in text
+                            .chars()
+                            .filter_map(|ch| convert_to_7_segment_char(ch, None).code)
+                            .enumerate()
+                        {
+                            if i > 9 {
+                                break;
+                            }
+                            let target_index = i * 2 + 2;
+                            data[target_index] = ch;
+                        }
+                        RawMidiEvent::try_from_slice(0, &data).ok()?
+                    }
+                };
                 Some(V::Raw(Box::new(raw_midi_event)))
             }
             _ => None,
@@ -1123,20 +1172,53 @@ pub enum DisplayTypeSpecificSettings {
 #[cfg_attr(feature = "serde", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum TimeCodeDisplayScope {
+    #[display(fmt = "Complete")]
+    Complete = 0,
     #[display(fmt = "Left 3 digits (hours/bars)")]
-    Left3Digits = 0,
+    Left3Digits = 1,
     #[display(fmt = "Left 2 digits (minutes/beats)")]
-    Left2Digits = 1,
+    Left2Digits = 2,
     #[display(fmt = "Right 2 digits (seconds/sub division)")]
-    Right2Digits = 2,
+    Right2Digits = 3,
     #[display(fmt = "Right 3 digits (frames/ticks)")]
-    Right3Digits = 3,
+    Right3Digits = 4,
 }
 
 impl Default for TimeCodeDisplayScope {
     fn default() -> Self {
-        TimeCodeDisplayScope::Left3Digits
+        TimeCodeDisplayScope::Complete
     }
+}
+
+fn convert_to_7_segment_char(ch: char, next_ch: Option<char>) -> ConversionResult {
+    if !ch.is_ascii() {
+        return Default::default();
+    }
+    let ch = ch.to_ascii_uppercase() as u8;
+    let res = match ch {
+        b'@'..=b'`' => ch - 0x40,
+        b'!'..=b'?' => ch,
+        _ => {
+            return Default::default();
+        }
+    };
+    if next_ch == Some('.') {
+        ConversionResult {
+            code: Some(res + 0x40),
+            consumed_one_more: true,
+        }
+    } else {
+        ConversionResult {
+            code: Some(res),
+            consumed_one_more: false,
+        }
+    }
+}
+
+#[derive(Default)]
+struct ConversionResult {
+    code: Option<u8>,
+    consumed_one_more: bool,
 }
 
 #[cfg(test)]
