@@ -772,7 +772,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             .map(|_| {
                                 let ch = peekable_chars.next()?;
                                 let next_ch = peekable_chars.peek().copied();
-                                let result = convert_to_7_segment_code(ch, next_ch);
+                                let result = convert_to_7_segment_code(ch, next_ch, true);
                                 if result.consumed_one_more {
                                     peekable_chars.next();
                                 }
@@ -1203,19 +1203,36 @@ impl LcdPortions {
     }
 }
 
-fn convert_to_7_segment_code(ch: char, next_ch: Option<char>) -> ConversionResult {
+/// `reverse` must be used if we are iterating over the text in reverse order (for right alignment).
+fn convert_to_7_segment_code(ch: char, next_ch: Option<char>, reverse: bool) -> ConversionResult {
+    let (ch, with_decimal_point) = if reverse {
+        if ch == '.' {
+            (next_ch.unwrap_or(' '), true)
+        } else {
+            (ch, false)
+        }
+    } else {
+        (ch, next_ch == Some('.'))
+    };
+    if ch == '.' {
+        // Translate period to space with decimal point, not to underscore.
+        return ConversionResult {
+            code: Some(0x20 + 0x40),
+            consumed_one_more: false,
+        };
+    }
     if !ch.is_ascii() {
         return Default::default();
     }
     let ch = ch.to_ascii_uppercase() as u8;
     let res = match ch {
         b'@'..=b'`' => ch - 0x40,
-        b'!'..=b'?' => ch,
+        b' '..=b'?' => ch,
         _ => {
             return Default::default();
         }
     };
-    if next_ch == Some('.') {
+    if with_decimal_point {
         ConversionResult {
             code: Some(res + 0x40),
             consumed_one_more: true,
