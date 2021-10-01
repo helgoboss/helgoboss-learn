@@ -15,7 +15,7 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
     Tempo(Bpm),
     /// We must take care not to allocate this in real-time thread! At the moment only feedback
     /// is supported with this source but once we support control, this gets relevant.
-    Raw(Box<RawMidiEvent>),
+    Raw(Vec<RawMidiEvent>),
     BorrowedSysEx(&'a [u8]),
 }
 
@@ -29,7 +29,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
             ControlChange14Bit(v) => ControlChange14Bit(v),
             Tempo(v) => Tempo(v),
             Raw(v) => Raw(v),
-            BorrowedSysEx(bytes) => Raw(Box::new(RawMidiEvent::try_from_slice(0, bytes)?)),
+            BorrowedSysEx(bytes) => Raw(vec![RawMidiEvent::try_from_slice(0, bytes)?]),
         };
         Ok(res)
     }
@@ -150,6 +150,8 @@ impl RawMidiEvent {
         }
     }
 
+    /// If you already have a slice, use this. If you are just building something, `try_from_iter`
+    /// is probably more efficient.
     pub fn try_from_slice(frame_offset: u32, midi_message: &[u8]) -> Result<Self, &'static str> {
         if midi_message.len() > Self::MAX_LENGTH {
             return Err("given MIDI message too long");
@@ -160,6 +162,23 @@ impl RawMidiEvent {
         //  not or at least not easily possible without copying.
         array[..midi_message.len()].copy_from_slice(midi_message);
         Ok(Self::new(frame_offset, midi_message.len() as _, array))
+    }
+
+    pub fn try_from_iter<T: IntoIterator<Item = u8>>(
+        frame_offset: u32,
+        iter: T,
+    ) -> Result<Self, &'static str> {
+        let mut array = [0; Self::MAX_LENGTH];
+        let mut i = 0usize;
+        for b in iter {
+            if i == Self::MAX_LENGTH {
+                return Err("given content too long");
+            }
+            let elem = unsafe { array.get_unchecked_mut(i) };
+            *elem = b;
+            i += 1;
+        }
+        Ok(Self::new(frame_offset, i as u32, array))
     }
 
     pub fn bytes(&self) -> &[u8] {

@@ -1,8 +1,8 @@
 use std::fmt::Debug;
-use std::ops::Sub;
+use std::ops::{RangeInclusive, Sub};
 
 /// An interval which has an inclusive min and inclusive max value.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Interval<T: PartialOrd + Copy + Sub + Debug> {
     min: T,
     max: T,
@@ -85,6 +85,12 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     pub fn with_min(&self, min: T) -> Interval<T> {
         Interval::new(min, if min <= self.max { self.max } else { min })
     }
+
+    /// Range from min to (inclusive) max.
+    pub fn range(&self) -> RangeInclusive<T> {
+        self.min..=self.max
+    }
+
     /// Returns a new interval containing the given maximum.
     ///
     /// If the given maximum is lower than the current minimum, the minimum will be set to the given

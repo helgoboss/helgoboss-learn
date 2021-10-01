@@ -1,8 +1,9 @@
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
-    ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction,
+    ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction, Interval,
     MidiSourceScript, MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
 };
+use core::iter;
 use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -190,6 +191,8 @@ pub enum MidiSource<S: MidiSourceScript> {
 }
 
 impl<S: MidiSourceScript> MidiSource<S> {
+    /// Used for learning but also for source takeover.
+    ///
     /// Might allocate!
     pub fn from_source_value(source_value: MidiSourceValue<impl ShortMessage>) -> Option<Self> {
         use MidiSourceValue::*;
@@ -208,7 +211,13 @@ impl<S: MidiSourceScript> MidiSource<S> {
             },
             Tempo(_) => MidiSource::ClockTempo,
             Plain(msg) => MidiSource::from_short_message(msg)?,
-            Raw(msg) => MidiSource::from_raw(msg.bytes()),
+            // This is important for source takeoever, not for learning.
+            // TODO-high This probably doesn't work with source takeover. We would need to find a
+            //  way to extract the correct source from the message - e.g. which portion of the
+            //  display is affected.
+            Raw(_) => return None,
+            // This is not important for source takeover because we don't send this as feedback.
+            // Important (and working) for learning only.
             BorrowedSysEx(msg) => MidiSource::from_raw(msg),
         };
         Some(source)
@@ -720,7 +729,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             Raw { pattern, .. } => {
                 let raw_midi_event = pattern.to_concrete_midi_event(feedback_value.to_numeric()?);
-                Some(V::Raw(Box::new(raw_midi_event)))
+                Some(V::Raw(vec![raw_midi_event]))
             }
             Script { script } => {
                 let script = script.as_ref()?;
@@ -739,66 +748,49 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     }
                     Textual(text) => text,
                 };
-                let raw_midi_event = match type_specific_settings {
-                    DisplayTypeSpecificSettings::MackieLcd { .. } => {
-                        let mut data =
-                            [0u8; MACKIE_LCD_SYSEX_PREFIX.len() + MACKIE_LCD_MAX_BYTES + 1];
-                        data[0..MACKIE_LCD_SYSEX_PREFIX.len()]
-                            .copy_from_slice(&MACKIE_LCD_SYSEX_PREFIX);
-                        for (i, ch) in text
+                let raw_midi_events: Vec<_> = match type_specific_settings {
+                    DisplayTypeSpecificSettings::MackieLcd { portions } => {
+                        let mut ascii_chars = text
                             .chars()
                             .filter_map(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
-                            .take(MACKIE_LCD_MAX_BYTES)
-                            .enumerate()
-                        {
-                            data[MACKIE_LCD_SYSEX_PREFIX.len() + i] = ch;
-                        }
-                        data[data.len() - 1] = 0xF7;
-                        RawMidiEvent::try_from_slice(0, &data).ok()?
+                            .fuse();
+                        portions
+                            .iter()
+                            .filter_map(|interval| {
+                                let body = interval
+                                    .range()
+                                    .map(|_| ascii_chars.next().unwrap_or_default());
+                                let complete = mackie_lcd_sysex(0x14, interval.min_val(), body);
+                                RawMidiEvent::try_from_iter(0, complete).ok()
+                            })
+                            .collect()
                     }
-                    DisplayTypeSpecificSettings::MackieTimeCode { .. } => {
-                        let mut data = [
-                            0xB0, 0x49, 0, 0x48, 0, 0x47, 0, 0x46, 0, 0x45, 0, 0x44, 0, 0x43, 0,
-                            0x42, 0, 0x41, 0, 0x40, 0,
-                        ];
-                        let mut peekable = text.chars().peekable();
-                        let mut i = 0usize;
-                        while let Some(ch) = peekable.next() {
-                            if i > 9 {
-                                break;
-                            }
-                            let next_ch = peekable.peek().copied();
-                            let result = convert_to_7_segment_char(ch, next_ch);
-                            if result.consumed_one_more {
-                                peekable.next();
-                            }
-                            let code = match result.code {
-                                None => continue,
-                                Some(c) => c,
-                            };
-                            let target_index = i * 2 + 2;
-                            data[target_index] = code;
-                            i = i + 1;
-                        }
-                        RawMidiEvent::try_from_slice(0, &data).ok()?
-                    }
-                    DisplayTypeSpecificSettings::MackieAssignment => {
-                        let mut data = [0xB0, 0x4B, 0, 0x4A, 0];
-                        for (i, ch) in text
-                            .chars()
-                            .filter_map(|ch| convert_to_7_segment_char(ch, None).code)
-                            .enumerate()
-                        {
-                            if i > 9 {
-                                break;
-                            }
-                            let target_index = i * 2 + 2;
-                            data[target_index] = ch;
-                        }
-                        RawMidiEvent::try_from_slice(0, &data).ok()?
+                    DisplayTypeSpecificSettings::MackieSevenSegmentDisplay { positions } => {
+                        // Reverse because we want right-aligned
+                        let mut peekable_chars = text.chars().rev().peekable();
+                        let mut codes = iter::repeat(())
+                            .map(|_| {
+                                let ch = peekable_chars.next()?;
+                                let next_ch = peekable_chars.peek().copied();
+                                let result = convert_to_7_segment_code(ch, next_ch);
+                                if result.consumed_one_more {
+                                    peekable_chars.next();
+                                }
+                                result.code
+                            })
+                            .take_while(Option::is_some)
+                            .map(Option::unwrap)
+                            .fuse();
+                        // Reverse because we want right-aligned
+                        let body = positions.iter().rev().flat_map(|pos| {
+                            iter::once(0x40u8 + pos)
+                                .chain(iter::once(codes.next().unwrap_or_default()))
+                        });
+                        let complete = mackie_7_segment_msg(body);
+                        vec![RawMidiEvent::try_from_iter(0, complete).ok()?]
                     }
                 };
-                Some(V::Raw(Box::new(raw_midi_event)))
+                Some(V::Raw(raw_midi_events))
             }
             _ => None,
         }
@@ -1110,8 +1102,34 @@ fn extract_low_7_bit<T: Into<u32>>(value: T) -> U7 {
     U7::new((value.into() & 0x7f) as u8)
 }
 
-const MACKIE_LCD_SYSEX_PREFIX: [u8; 7] = [0xF0, 0x00, 0x00, 0x66, 0x14, 0x12, 0x00];
-const MACKIE_LCD_MAX_BYTES: usize = 112;
+fn mackie_prefix(model_id: u8) -> impl Iterator<Item = u8> {
+    const MACKIE_PREFIX: [u8; 4] = [0xF0, 0x00, 0x00, 0x66];
+    MACKIE_PREFIX.iter().copied().chain(iter::once(model_id))
+}
+
+fn mackie_lcd_sysex_prefix(model_id: u8, display_offset: u8) -> impl Iterator<Item = u8> {
+    mackie_prefix(model_id)
+        .chain(iter::once(0x12))
+        .chain(iter::once(display_offset))
+}
+
+fn mackie_lcd_sysex(
+    model_id: u8,
+    display_offset: u8,
+    body: impl Iterator<Item = u8>,
+) -> impl Iterator<Item = u8> {
+    mackie_lcd_sysex_prefix(model_id, display_offset)
+        .chain(body)
+        .chain(mackie_sysex_suffix())
+}
+
+fn mackie_sysex_suffix() -> impl Iterator<Item = u8> {
+    iter::once(0xF7)
+}
+
+fn mackie_7_segment_msg(body: impl Iterator<Item = u8>) -> impl Iterator<Item = u8> {
+    iter::once(0xB0).chain(body)
+}
 
 #[derive(
     Copy,
@@ -1131,12 +1149,9 @@ pub enum DisplayType {
     #[cfg_attr(feature = "serde", serde(rename = "mackie-lcd"))]
     #[display(fmt = "Mackie LCD")]
     MackieLcd,
-    #[cfg_attr(feature = "serde", serde(rename = "mackie-time-code"))]
-    #[display(fmt = "Mackie Time Code")]
-    MackieTimeCode,
-    #[cfg_attr(feature = "serde", serde(rename = "mackie-assignment"))]
-    #[display(fmt = "Mackie Assignment")]
-    MackieAssignment,
+    #[cfg_attr(feature = "serde", serde(rename = "mackie-seven"))]
+    #[display(fmt = "Mackie 7-segment display")]
+    MackieSevenSegmentDisplay,
 }
 
 impl Default for DisplayType {
@@ -1145,52 +1160,50 @@ impl Default for DisplayType {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DisplayTypeSpecificSettings {
-    MackieLcd {
-        channel: Option<u8>,
-        line: Option<u8>,
-    },
-    MackieTimeCode {
-        scope: TimeCodeDisplayScope,
-    },
-    MackieAssignment,
+    MackieLcd { portions: LcdPortions },
+    MackieSevenSegmentDisplay { positions: DisplayPositions },
 }
 
-#[derive(
-    Copy,
-    Clone,
-    Eq,
-    PartialEq,
-    Hash,
-    Debug,
-    IntoEnumIterator,
-    TryFromPrimitive,
-    IntoPrimitive,
-    Display,
-)]
-#[cfg_attr(feature = "serde", derive(Serialize_repr, Deserialize_repr))]
-#[repr(usize)]
-pub enum TimeCodeDisplayScope {
-    #[display(fmt = "Complete")]
-    Complete = 0,
-    #[display(fmt = "Left 3 digits (hours/bars)")]
-    Left3Digits = 1,
-    #[display(fmt = "Left 2 digits (minutes/beats)")]
-    Left2Digits = 2,
-    #[display(fmt = "Right 2 digits (seconds/sub division)")]
-    Right2Digits = 3,
-    #[display(fmt = "Right 3 digits (frames/ticks)")]
-    Right3Digits = 4,
+/// A sequence of positions on a display, left-to-right.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct DisplayPositions {
+    positions: Vec<u8>,
 }
 
-impl Default for TimeCodeDisplayScope {
-    fn default() -> Self {
-        TimeCodeDisplayScope::Complete
+impl DisplayPositions {
+    /// Takes left-to-right display positions.
+    pub fn new(positions: Vec<u8>) -> Self {
+        Self { positions }
+    }
+
+    /// Returns left-to-right display positions.
+    pub fn iter(&self) -> impl Iterator<Item = u8> + DoubleEndedIterator + '_ {
+        self.positions.iter().copied()
     }
 }
 
-fn convert_to_7_segment_char(ch: char, next_ch: Option<char>) -> ConversionResult {
+/// A list of disjoint position intervals on a display, each one left-to-right.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct LcdPortions {
+    intervals: Vec<Interval<u8>>,
+}
+
+impl LcdPortions {
+    pub fn from_channel_and_line(channel: Option<u8>, line: Option<u8>) -> Self {
+        // TODO-high
+        Self {
+            intervals: vec![Interval::new(0, 6), Interval::new(56, 62)],
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Interval<u8>> + '_ {
+        self.intervals.iter().copied()
+    }
+}
+
+fn convert_to_7_segment_code(ch: char, next_ch: Option<char>) -> ConversionResult {
     if !ch.is_ascii() {
         return Default::default();
     }

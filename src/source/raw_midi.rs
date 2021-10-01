@@ -94,6 +94,7 @@ impl RawMidiPattern {
     }
 
     pub fn to_concrete_midi_event(&self, variable_value: AbsoluteValue) -> RawMidiEvent {
+        // TODO-medium Use RawMidiEvent::try_from_iter
         let mut array = [0; RawMidiEvent::MAX_LENGTH];
         let mut i = 0u32;
         for byte in self
