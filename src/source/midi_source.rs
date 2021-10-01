@@ -1,6 +1,6 @@
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
-    ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction, Interval,
+    ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction,
     MidiSourceScript, MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
 };
 use core::iter;
@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
+use std::ops::Range;
 
 #[derive(
     Clone,
@@ -756,11 +757,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             .fuse();
                         portions
                             .iter()
-                            .filter_map(|interval| {
-                                let body = interval
-                                    .range()
+                            .filter_map(|range| {
+                                let body = range
+                                    .clone()
                                     .map(|_| ascii_chars.next().unwrap_or_default());
-                                let complete = mackie_lcd_sysex(0x14, interval.min_val(), body);
+                                let complete = mackie_lcd_sysex(0x14, range.start, body);
                                 RawMidiEvent::try_from_iter(0, complete).ok()
                             })
                             .collect()
@@ -1187,19 +1188,16 @@ impl DisplayPositions {
 /// A list of disjoint position intervals on a display, each one left-to-right.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct LcdPortions {
-    intervals: Vec<Interval<u8>>,
+    ranges: Vec<Range<u8>>,
 }
 
 impl LcdPortions {
-    pub fn from_channel_and_line(channel: Option<u8>, line: Option<u8>) -> Self {
-        // TODO-high
-        Self {
-            intervals: vec![Interval::new(0, 6), Interval::new(56, 62)],
-        }
+    pub fn new(ranges: Vec<Range<u8>>) -> Self {
+        Self { ranges }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = Interval<u8>> + '_ {
-        self.intervals.iter().copied()
+    pub fn iter(&self) -> impl Iterator<Item = &Range<u8>> + '_ {
+        self.ranges.iter()
     }
 }
 
