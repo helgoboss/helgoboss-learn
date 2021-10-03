@@ -7,6 +7,8 @@ use std::fmt::{Display, Formatter};
 pub enum FeedbackValue<'a> {
     Off,
     Numeric(AbsoluteValue),
+    // This Cow is in case the producer of the feedback value can use the borrowed value. At the
+    // moment this is not the case because the target API is designed to returns owned strings.
     Textual(Cow<'a, str>),
 }
 
@@ -29,7 +31,7 @@ impl<'a> FeedbackValue<'a> {
         }
     }
 
-    pub fn into_owned(self) -> FeedbackValue<'static> {
+    pub fn make_owned(self) -> FeedbackValue<'static> {
         use FeedbackValue::*;
         match self {
             Off => Off,

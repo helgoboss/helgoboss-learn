@@ -69,6 +69,16 @@ pub trait Target<'a> {
     /// but others will still work.
     fn current_value(&self, context: Self::Context) -> Option<AbsoluteValue>;
 
+    /// Returns a textual feedback value for the given key if the target supports it.
+    //
+    // Requiring owned strings here makes the API more pleasant and is probably not a big deal
+    // performance-wise (feedback strings don't get large). If we want to optimize this in future,
+    // don't use Cows. The only real performance win would be to use a writer API.
+    // With Cows, we would still need to turn ReaperStr into owned String. With writer API,
+    // we could just read borrowed ReaperStr as str and write into the result buffer. However, in
+    // practice we don't often get borrowed strings from Reaper anyway.
+    // TODO-low Use a formatter API instead of returning owned strings (for this to work, we also
+    //  need to adjust the textual feedback expression parsing to take advantage of it).
     fn textual_value(&self, key: TargetPropKey, context: Self::Context) -> Option<String> {
         let _ = key;
         let _ = context;
