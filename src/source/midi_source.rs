@@ -762,19 +762,17 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     DisplayTypeSpecificSettings::MackieSevenSegmentDisplay { positions } => {
                         // Reverse because we want right-aligned
                         let mut peekable_chars = text.chars().rev().peekable();
-                        let mut codes = iter::repeat(())
-                            .map(|_| {
-                                let ch = peekable_chars.next()?;
-                                let next_ch = peekable_chars.peek().copied();
-                                let result = convert_to_7_segment_code(ch, next_ch, true);
-                                if result.consumed_one_more {
-                                    peekable_chars.next();
-                                }
-                                result.code
-                            })
-                            .take_while(Option::is_some)
-                            .map(Option::unwrap)
-                            .fuse();
+                        let mut codes = iter::from_fn(|| {
+                            let ch = peekable_chars.next()?;
+                            let next_ch = peekable_chars.peek().copied();
+                            let result = convert_to_7_segment_code(ch, next_ch, true);
+                            if result.consumed_one_more {
+                                peekable_chars.next();
+                            }
+                            Some(result.code)
+                        })
+                        .flatten()
+                        .fuse();
                         // Reverse because we want right-aligned
                         let body = positions.iter().rev().flat_map(|pos| {
                             iter::once(0x40u8 + pos)
