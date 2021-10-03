@@ -18,7 +18,6 @@ use helgoboss_midi::{
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::borrow::Cow;
 use std::convert::{TryFrom, TryInto};
 use std::ops::Range;
 
@@ -215,7 +214,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
             // This is important for source takeoever, not for learning.
             // TODO-high This probably doesn't work with source takeover. We would need to find a
             //  way to extract the correct source from the message - e.g. which portion of the
-            //  display is affected.
+            //  display is affected. For this, we need extra info that says which parts of the
+            //  message are constant.
             Raw(_) => return None,
             // This is not important for source takeover because we don't send this as feedback.
             // Important (and working) for learning only.
@@ -734,21 +734,14 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             Script { script } => {
                 let script = script.as_ref()?;
-                // TODO-high LCD Make textual value available
+                // TODO-medium Make textual value available
                 let raw_midi_event = script.execute(feedback_value.to_numeric()?).ok()?;
                 Some(V::Raw(raw_midi_event))
             }
             Display {
                 type_specific_settings,
             } => {
-                use FeedbackValue::*;
-                let text = match feedback_value {
-                    Off => Cow::default(),
-                    Numeric(v) => {
-                        Cow::Owned(format_percentage_without_unit(v.to_unit_value().get()))
-                    }
-                    Textual(text) => text,
-                };
+                let text = feedback_value.to_textual();
                 let raw_midi_events: Vec<_> = match type_specific_settings {
                     DisplayTypeSpecificSettings::MackieLcd { portions } => {
                         let mut ascii_chars = text

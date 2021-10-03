@@ -63,7 +63,7 @@ impl OscArgDescriptor {
         Some(desc)
     }
 
-    pub fn to_concrete_args(self, value: UnitValue) -> Option<Vec<OscType>> {
+    pub fn to_concrete_args(self, value: FeedbackValue) -> Option<Vec<OscType>> {
         self.type_tag.to_concrete_args(self.index, value)
     }
 
@@ -109,7 +109,7 @@ pub enum OscTypeTag {
     Inf,
     #[display(fmt = "Int (ignored)")]
     Int,
-    #[display(fmt = "String (ignored)")]
+    #[display(fmt = "String (feedback only)")]
     String,
     #[display(fmt = "Blob (ignored)")]
     Blob,
@@ -154,15 +154,15 @@ impl OscTypeTag {
         }
     }
 
-    pub fn to_concrete_args(self, index: u32, value: UnitValue) -> Option<Vec<OscType>> {
-        let v = value.get();
+    pub fn to_concrete_args(self, index: u32, v: FeedbackValue) -> Option<Vec<OscType>> {
         use OscTypeTag::*;
         let value = match self {
-            Float => OscType::Float(v as _),
-            Double => OscType::Double(v),
-            Bool => OscType::Bool(v > 0.0),
+            Float => OscType::Float(v.to_numeric()?.to_unit_value().get() as _),
+            Double => OscType::Double(v.to_numeric()?.to_unit_value().get()),
+            Bool => OscType::Bool(v.to_numeric()?.is_on()),
             Nil => OscType::Nil,
             Inf => OscType::Inf,
+            String => OscType::String(v.to_textual().into_owned()),
             _ => return None,
         };
         // Send nil for all other elements
@@ -283,7 +283,6 @@ impl OscSource {
     }
 
     pub fn feedback(&self, feedback_value: FeedbackValue) -> Option<OscMessage> {
-        let feedback_value = feedback_value.to_numeric()?.to_unit_value();
         let msg = OscMessage {
             addr: self.address_pattern.clone(),
             args: if let Some(desc) = self.arg_descriptor {
