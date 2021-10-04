@@ -1,9 +1,9 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
-    DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
-    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TargetPropKey,
-    Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
+    negative_if, target_prop_keys, AbsoluteValue, ButtonUsage, ControlType, ControlValue,
+    DiscreteIncrement, DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
+    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, Transformation,
+    UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -202,6 +202,62 @@ pub struct ModeGarbage<T> {
     _textual_feedback_expression: String,
 }
 
+/// Human-readable numeric value (not normalized, not zero-rooted).
+///
+/// The concrete type (decimal, discrete) just serves as a hint how to do the default formatting:
+/// With or without decimal points. In general, all numeric values should be treatable the same
+/// way, which is especially important if we want to add "value formatters" to the textual feedback
+/// expressions in future. Numeric value formatters then should work on all numeric values in the
+/// same way, the sub type shouldn't make a difference.
+pub enum NumericValue {
+    Decimal(f64),
+    /// Not zero-rooted if it's a number that represents a position.
+    Discrete(i32),
+}
+
+pub enum TargetPropValue {
+    /// Aka percentage.
+    Normalized(UnitValue),
+    /// Always a number that represents a position. Zero-rooted. So not human-friendly (which is
+    /// what it's different from `Numeric`! Important for users to know that such a type is
+    /// returned because then they know that they just need to add a *one* in order to obtain a
+    /// human-friendly position. We don't want to provide each prop value as both 0-rooted index and
+    /// 1-rooted position.
+    Index(u32),
+    /// Human-friendly numeric representation.
+    Numeric(NumericValue),
+    /// Textual representation.
+    Text(String),
+}
+
+impl Default for TargetPropValue {
+    fn default() -> Self {
+        Self::Text(String::new())
+    }
+}
+
+impl TargetPropValue {
+    pub fn into_textual(self) -> String {
+        use TargetPropValue::*;
+        match self {
+            Normalized(v) => format!("{:.2}", v.get() * 100.0),
+            Numeric(v) => v.into_textual(),
+            Index(i) => i.to_string(),
+            Text(text) => text,
+        }
+    }
+}
+
+impl NumericValue {
+    pub fn into_textual(self) -> String {
+        use NumericValue::*;
+        match self {
+            Decimal(v) => format!("{:.2}", v),
+            Discrete(v) => v.to_string(),
+        }
+    }
+}
+
 impl<T: Transformation> Mode<T> {
     pub fn new(settings: ModeSettings<T>) -> Self {
         let state = ModeState {
@@ -280,25 +336,25 @@ impl<T: Transformation> Mode<T> {
     pub fn wants_textual_feedback(&self) -> bool {
         self.settings.feedback_type.is_textual()
     }
-    pub fn query_textual_feedback<'a, C: Copy>(
+
+    pub fn query_textual_feedback(
         &self,
-        target: Option<&impl Target<'a, Context = C>>,
-        context: C,
+        get_target_prop_value: impl Fn(&str) -> Option<TargetPropValue>,
     ) -> Cow<str> {
         let expression_regex = regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#);
         if self.settings.textual_feedback_expression.is_empty() {
-            target
-                .and_then(|t| t.textual_value(TargetPropKey::Default, context))
+            get_target_prop_value(target_prop_keys::TEXT_VALUE)
                 .unwrap_or_default()
+                .into_textual()
                 .into()
         } else {
             expression_regex.replace_all(
                 &self.settings.textual_feedback_expression,
                 |c: &Captures| {
                     if let Some(target_prop_key) = c[1].strip_prefix("target.") {
-                        target
-                            .and_then(|t| t.textual_value(target_prop_key.into(), context))
+                        get_target_prop_value(target_prop_key.into())
                             .unwrap_or_default()
+                            .into_textual()
                     } else {
                         String::new()
                     }

@@ -69,35 +69,57 @@ pub trait Target<'a> {
     /// but others will still work.
     fn current_value(&self, context: Self::Context) -> Option<AbsoluteValue>;
 
-    /// Returns a textual feedback value for the given key if the target supports it.
-    //
-    // Requiring owned strings here makes the API more pleasant and is probably not a big deal
-    // performance-wise (feedback strings don't get large). If we want to optimize this in future,
-    // don't use Cows. The only real performance win would be to use a writer API.
-    // With Cows, we would still need to turn ReaperStr into owned String. With writer API,
-    // we could just read borrowed ReaperStr as str and write into the result buffer. However, in
-    // practice we don't often get borrowed strings from Reaper anyway.
-    // TODO-low Use a formatter API instead of returning owned strings (for this to work, we also
-    //  need to adjust the textual feedback expression parsing to take advantage of it).
-    fn textual_value(&self, key: TargetPropKey, context: Self::Context) -> Option<String> {
-        let _ = key;
-        let _ = context;
-        None
-    }
-
     fn control_type(&self, context: Self::Context) -> ControlType;
 }
 
-pub enum TargetPropKey<'a> {
-    Default,
-    Custom(&'a str),
-}
+/// Some standardized property keys.
+pub mod target_prop_keys {
+    /// Short text representing the current target value, including a possible unit.
+    ///
+    /// This is the default value shown if textual feedback is enabled and the textual feedback
+    /// expression is empty. Choose the textual representation that's most likely to be desired.
+    /// If there's some name to display, prefer that name over a numeric representation.
+    ///
+    /// Examples:
+    ///
+    /// - Track: Volume → "-6.00 dB"
+    /// - Track: Mute/unmute → "Mute"
+    /// - Project: Navigate within tracks → "Guitar"
+    pub const TEXT_VALUE: &str = "text_value";
 
-impl<'a> From<&'a str> for TargetPropKey<'a> {
-    fn from(text: &'a str) -> Self {
-        match text.trim() {
-            "default" => Self::Default,
-            trimmed => Self::Custom(trimmed),
-        }
-    }
+    /// Non-normalized representing the current target value as a *human-friendly number*
+    /// (type: [`crate::NumericValue`]).
+    ///
+    /// The purpose of this is to allow for more freedom in formatting numerical target values than
+    /// when using [`TEXT_VALUE`]. Future versions of ReaLearn might extend textual feedback
+    /// expressions in a way so the user can define how exactly the numerical value is presented
+    /// (decimal points etc.).
+    ///
+    /// "Human-readable" also means that if it's a position, then it's really a position number
+    /// (one-rooted), not an index number (zero-rooted).
+    ///
+    /// - Track: Volume → -6.00
+    /// - Track: Mute/unmute → 1.0
+    /// - Project: Navigate within tracks → 5
+    pub const NUMERIC_VALUE: &str = "numeric_value";
+
+    /// Unit of the non-normalized number in human-friendly form.
+    ///
+    /// - Track: Volume → "dB"
+    /// - Track: Mute/unmute → ""
+    /// - Project: Navigate within tracks → ""
+    pub const NUMERIC_VALUE_UNIT: &str = "numeric_value.unit";
+
+    /// Normalized value in the unit interval. You can think of it as a percentage.
+    ///
+    /// This value is available for most targets and good if you need a totally uniform
+    /// representation of the target value that doesn't differ between target types. By default,
+    /// this is formatted as percentage. Future versions of ReaLearn might offer user-defined
+    /// formatting. E.g. this will also be the preferred form to format on/off states in a
+    /// custom way (where 0% represents "off").
+    ///
+    /// - Track: Volume → 0.5
+    /// - Track: Mute/unmute → 0.0
+    /// - Project: Navigate within tracks → 0.7
+    pub const NORMALIZED_VALUE: &str = "normalized_value";
 }
