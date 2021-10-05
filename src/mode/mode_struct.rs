@@ -1,7 +1,7 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    negative_if, target_prop_keys, AbsoluteValue, ButtonUsage, ControlType, ControlValue,
-    DiscreteIncrement, DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
+    negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
+    DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
     OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, Transformation,
     UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
@@ -215,7 +215,7 @@ pub enum NumericValue {
     Discrete(i32),
 }
 
-pub enum TargetPropValue {
+pub enum PropValue {
     /// Aka percentage.
     Normalized(UnitValue),
     /// Always a number that represents a position. Zero-rooted. So not human-friendly (which is
@@ -230,15 +230,15 @@ pub enum TargetPropValue {
     Text(String),
 }
 
-impl Default for TargetPropValue {
+impl Default for PropValue {
     fn default() -> Self {
         Self::Text(String::new())
     }
 }
 
-impl TargetPropValue {
+impl PropValue {
     pub fn into_textual(self) -> String {
-        use TargetPropValue::*;
+        use PropValue::*;
         match self {
             Normalized(v) => format!("{:.2}", v.get() * 100.0),
             Numeric(v) => v.into_textual(),
@@ -339,26 +339,18 @@ impl<T: Transformation> Mode<T> {
 
     pub fn query_textual_feedback(
         &self,
-        get_target_prop_value: impl Fn(&str) -> Option<TargetPropValue>,
+        get_prop_value: impl Fn(&str) -> Option<PropValue>,
     ) -> Cow<str> {
         let expression_regex = regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#);
         if self.settings.textual_feedback_expression.is_empty() {
-            get_target_prop_value(target_prop_keys::TEXT_VALUE)
+            get_prop_value("target.text_value")
                 .unwrap_or_default()
                 .into_textual()
                 .into()
         } else {
             expression_regex.replace_all(
                 &self.settings.textual_feedback_expression,
-                |c: &Captures| {
-                    if let Some(target_prop_key) = c[1].strip_prefix("target.") {
-                        get_target_prop_value(target_prop_key.into())
-                            .unwrap_or_default()
-                            .into_textual()
-                    } else {
-                        String::new()
-                    }
-                },
+                |c: &Captures| get_prop_value(&c[1]).unwrap_or_default().into_textual(),
             )
         }
     }

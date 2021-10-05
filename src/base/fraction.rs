@@ -10,6 +10,8 @@ pub struct Fraction {
 }
 
 impl Fraction {
+    pub const MIN: Fraction = Fraction::new_max(0);
+
     pub const fn new(actual: u32, max: u32) -> Self {
         Self { actual, max }
     }

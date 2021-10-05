@@ -154,7 +154,9 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         }
         SourceMinMax => {
             if input.is_feedback {
-                if input.source_is_button() {
+                if input.use_textual_feedback {
+                    HasNoEffect
+                } else if input.source_is_button() {
                     MakesSense("Changes off/on LED colors.")
                 } else {
                     MakesSense("Changes lowest/highest position of motorized fader or LED ring.")
@@ -191,7 +193,9 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         }
         Reverse => {
             if input.is_feedback {
-                if input.source_is_button() {
+                if input.use_textual_feedback {
+                    HasNoEffect
+                } else if input.source_is_button() {
                     MakesSense(
                         "If enabled, uses \"off\" LED color if target is on and \"on\" LED color if target is off.",
                     )
@@ -228,7 +232,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         }
         OutOfRangeBehavior => {
             if input.is_feedback {
-                MakesSense("-")
+                if input.use_textual_feedback {
+                    HasNoEffect
+                } else {
+                    MakesSense("-")
+                }
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
@@ -378,7 +386,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             if input.target_is_virtual {
                 HasNoEffect
             } else if input.is_feedback {
-                MakesSense("Defines the relevant target value range.")
+                if input.use_textual_feedback {
+                    HasNoEffect
+                } else {
+                    MakesSense("Defines the relevant target value range.")
+                }
             } else if input.target_value_sequence_is_set {
                 HasNoEffect
             } else {
@@ -403,9 +415,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         }
         TextualFeedbackExpression => {
             if input.is_feedback && input.use_textual_feedback && !input.target_is_virtual {
-                MakesSense(
-                    "This fields lets you write arbitrary text to be sent to the textual source.",
-                )
+                MakesSense("Text that you write here will appear on your hardware display. You can access lots of mapping and target properties using double braces. Example: \"{{ target.normalized_value }} %\".")
             } else {
                 HasNoEffect
             }
