@@ -1215,6 +1215,7 @@ fn convert_to_7_segment_code(ch: char, next_ch: Option<char>, reverse: bool) -> 
     }
     let ch = ch.to_ascii_uppercase() as u8;
     let res = match ch {
+        b':' | b'!' | b'@' => return Default::default(),
         b'@'..=b'`' => ch - 0x40,
         b' '..=b'?' => ch,
         _ => {
