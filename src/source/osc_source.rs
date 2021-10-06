@@ -3,7 +3,6 @@ use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, ControlValue,
     DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, SourceCharacter, UnitValue,
 };
-use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -12,13 +11,14 @@ use rosc::{OscMessage, OscType};
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
-#[derive(Clone, Debug, Derivative)]
-#[derivative(Eq, PartialEq, Hash)]
+/// With OSC it's easy: The source address is the address!
+pub type OscSourceAddress = String;
+
+#[derive(Clone, PartialEq, Debug)]
 pub struct OscSource {
     /// To filter out the correct messages.
     address_pattern: String,
     /// To process a value (not just trigger).
-    #[derivative(PartialEq = "ignore", Hash = "ignore")]
     arg_descriptor: Option<OscArgDescriptor>,
 }
 
@@ -173,6 +173,29 @@ impl OscTypeTag {
 }
 
 impl OscSource {
+    pub fn feedback_address(&self) -> &OscSourceAddress {
+        &self.address_pattern
+    }
+
+    /// Checks if the given message is directed to the same address as the one of this source.
+    ///
+    /// Used for:
+    ///
+    /// -  Source takeover (feedback)
+    pub fn value_has_same_feedback_address(&self, value: &OscMessage) -> bool {
+        self.address_pattern == value.addr
+    }
+
+    /// Checks if this and the given source share the same address.
+    ///
+    /// Used for:
+    ///
+    /// - Source filtering
+    /// - Feedback diffing
+    pub fn source_address_matches(&self, other: &Self) -> bool {
+        self.address_pattern == other.address_pattern
+    }
+
     pub fn new(address_pattern: String, arg_descriptor: Option<OscArgDescriptor>) -> Self {
         Self {
             address_pattern,

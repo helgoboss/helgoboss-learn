@@ -13,10 +13,14 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
     ParameterNumber(ParameterNumberMessage),
     ControlChange14Bit(ControlChange14BitMessage),
     Tempo(Bpm),
-    /// We must take care not to allocate this in real-time thread! At the moment only feedback
-    /// is supported with this source but once we support control, this gets relevant.
+    /// We must take care not to allocate this in real-time thread!
     Raw(Vec<RawMidiEvent>),
     BorrowedSysEx(&'a [u8]),
+    // TODO-medium Not used so far. Just to show that we could defer raw-message generation to the
+    //  place at which we need to send it. We adjusted the signature so that any of these types
+    //  could potentially generate a bunch of raw MIDI messages - without allocation, using
+    //  iterators, one raw message at a time.
+    DisplaySpecific(()),
 }
 
 impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
@@ -29,11 +33,30 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
             ControlChange14Bit(v) => ControlChange14Bit(v),
             Tempo(v) => Tempo(v),
             Raw(v) => Raw(v),
+            DisplaySpecific(v) => DisplaySpecific(v),
             BorrowedSysEx(bytes) => Raw(vec![RawMidiEvent::try_from_slice(0, bytes)?]),
         };
         Ok(res)
     }
 
+    pub fn into_garbage(self) -> Option<Vec<RawMidiEvent>> {
+        use MidiSourceValue::*;
+        match self {
+            Raw(events) => Some(events),
+            _ => None,
+        }
+    }
+
+    /// For values that are best sent raw, e.g. sys-ex.
+    pub fn to_raw(&self) -> Option<impl Iterator<Item = &RawMidiEvent>> {
+        use MidiSourceValue::*;
+        match self {
+            Raw(events) => Some(events.iter()),
+            _ => None,
+        }
+    }
+
+    /// For values that are best sent as short messages.
     pub fn to_short_messages(
         &self,
         nrpn_data_entry_byte_order: DataEntryByteOrder,
@@ -46,7 +69,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                 let inner_shorts = msg.to_short_messages();
                 [Some(inner_shorts[0]), Some(inner_shorts[1]), None, None]
             }
-            Tempo(_) | Raw(_) | BorrowedSysEx(_) => [None; 4],
+            Tempo(_) | Raw(_) | BorrowedSysEx(_) | DisplaySpecific(_) => [None; 4],
         }
     }
 }

@@ -37,6 +37,10 @@ impl RawMidiPattern {
         }
     }
 
+    pub fn entries(&self) -> &[RawMidiPatternEntry] {
+        &self.entries
+    }
+
     /// Resolution in bit (maximum 16 bit).
     ///
     /// If no variable bytes, this returns 0.
@@ -111,7 +115,7 @@ impl RawMidiPattern {
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum RawMidiPatternEntry {
     FixedByte(u8),
-    VariableByte(BitPattern),
+    PotentiallyVariableByte(BitPattern),
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -121,6 +125,12 @@ pub struct BitPattern {
 }
 
 impl BitPattern {
+    pub fn contains_variable_portions(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|bpe| matches!(bpe, BitPatternEntry::VariableBit(_)))
+    }
+
     fn max_variable_bit_index(&self) -> Option<u8> {
         self.entries
             .iter()
@@ -128,7 +138,7 @@ impl BitPattern {
             .max()
     }
 
-    fn to_byte(self, discrete_value: u16) -> u8 {
+    pub fn to_byte(self, discrete_value: u16) -> u8 {
         let mut final_byte: u8 = 0;
         for i in 0..8 {
             use BitPatternEntry::*;
@@ -200,7 +210,9 @@ impl RawMidiPatternEntry {
                     None
                 }
             }
-            VariableByte(pattern) => pattern.match_and_capture(actual_byte, current_value),
+            PotentiallyVariableByte(pattern) => {
+                pattern.match_and_capture(actual_byte, current_value)
+            }
         }
     }
 
@@ -208,7 +220,7 @@ impl RawMidiPatternEntry {
         use RawMidiPatternEntry::*;
         match self {
             FixedByte(_) => None,
-            VariableByte(bit_pattern) => bit_pattern.max_variable_bit_index(),
+            PotentiallyVariableByte(bit_pattern) => bit_pattern.max_variable_bit_index(),
         }
     }
 
@@ -216,7 +228,7 @@ impl RawMidiPatternEntry {
         use RawMidiPatternEntry::*;
         match self {
             FixedByte(byte) => byte,
-            VariableByte(bit_pattern) => bit_pattern.to_byte(discrete_value),
+            PotentiallyVariableByte(bit_pattern) => bit_pattern.to_byte(discrete_value),
         }
     }
 }
@@ -233,7 +245,7 @@ impl Display for RawMidiPatternEntry {
         use RawMidiPatternEntry::*;
         match self {
             FixedByte(byte) => write!(f, "{:02X}", *byte),
-            VariableByte(pattern) => write!(f, "[{}]", pattern),
+            PotentiallyVariableByte(pattern) => write!(f, "[{}]", pattern),
         }
     }
 }
@@ -271,7 +283,9 @@ impl FromStr for RawMidiPattern {
             .map(|token| match token {
                 FixedByte(byte) => Ok(RawMidiPatternEntry::FixedByte(byte)),
                 Error => Err("invalid pattern expression"),
-                VariableByte(pattern) => Ok(RawMidiPatternEntry::VariableByte(pattern)),
+                PotentiallyVariableByte(pattern) => {
+                    Ok(RawMidiPatternEntry::PotentiallyVariableByte(pattern))
+                }
             })
             .collect();
         let p = RawMidiPattern::from_entries(entries?);
@@ -282,7 +296,7 @@ impl FromStr for RawMidiPattern {
 #[derive(Logos, Debug, PartialEq)]
 enum RawMidiPatternToken {
     #[regex(r"\[[01abcdefghijklmnop ]*\]", parse_as_bit_pattern)]
-    VariableByte(BitPattern),
+    PotentiallyVariableByte(BitPattern),
     #[regex(r"[0-9a-fA-F][0-9a-fA-F]?", parse_as_byte)]
     FixedByte(u8),
     #[error]
