@@ -450,7 +450,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 custom_character: custom_character_hint.unwrap_or_default(),
             },
             Tempo(_) => MidiSource::ClockTempo,
-            Plain(msg) => MidiSource::from_short_message(msg)?,
+            Plain(msg) => MidiSource::from_short_message(msg, custom_character_hint)?,
             BorrowedSysEx(msg) => MidiSource::from_raw(msg),
             // Important (and working) for learning.
             Raw(events) => MidiSource::from_raw(events.first()?.bytes()),
@@ -468,7 +468,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
         }
     }
 
-    fn from_short_message(msg: impl ShortMessage) -> Option<Self> {
+    fn from_short_message(
+        msg: impl ShortMessage,
+        custom_character_hint: Option<SourceCharacter>,
+    ) -> Option<Self> {
         use StructuredShortMessage::*;
         let source = match msg.to_structured() {
             NoteOn {
@@ -499,7 +502,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => MidiSource::ControlChangeValue {
                 channel: Some(channel),
                 controller_number: Some(controller_number),
-                custom_character: SourceCharacter::RangeElement,
+                custom_character: custom_character_hint.unwrap_or_default(),
             },
             ProgramChange { channel, .. } => MidiSource::ProgramChangeNumber {
                 channel: Some(channel),
