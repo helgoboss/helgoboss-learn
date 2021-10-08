@@ -374,11 +374,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
     /// Used for:
     ///
     /// -  Source takeover (feedback)
-    pub fn value_has_same_feedback_address(
+    pub fn has_same_feedback_address_as_value(
         &self,
         value: &MidiSourceValue<RawShortMessage>,
     ) -> bool {
-        // TODO-high
+        // TODO-high Create and compare addresses
         false
     }
 
@@ -395,9 +395,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
     ///
     /// Used for:
     ///
-    /// - Source filtering
     /// - Feedback diffing
-    pub fn source_address_matches(&self, other: &Self) -> bool {
+    pub fn has_same_feedback_address_as_source(&self, other: &Self) -> bool {
+        // TODO-high Create and compare addresses
         use MidiSource::*;
         match (self, other) {
             // Raw can only match Raw.

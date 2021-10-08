@@ -182,7 +182,7 @@ impl OscSource {
     /// Used for:
     ///
     /// -  Source takeover (feedback)
-    pub fn value_has_same_feedback_address(&self, value: &OscMessage) -> bool {
+    pub fn has_same_feedback_address_as_value(&self, value: &OscMessage) -> bool {
         self.address_pattern == value.addr
     }
 
@@ -190,9 +190,8 @@ impl OscSource {
     ///
     /// Used for:
     ///
-    /// - Source filtering
     /// - Feedback diffing
-    pub fn source_address_matches(&self, other: &Self) -> bool {
+    pub fn has_same_feedback_address_as_source(&self, other: &Self) -> bool {
         self.address_pattern == other.address_pattern
     }
 
