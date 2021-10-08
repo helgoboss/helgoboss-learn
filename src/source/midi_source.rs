@@ -378,7 +378,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
         &self,
         value: &MidiSourceValue<RawShortMessage>,
     ) -> bool {
-        todo!()
+        // TODO-high
+        false
     }
 
     /// Checks if this and the given source share the same address.
@@ -430,7 +431,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
     /// Used for scanning sources when learning.
     ///
     /// Might allocate!
-    pub fn from_source_value(source_value: MidiSourceValue<impl ShortMessage>) -> Option<Self> {
+    pub fn from_source_value(
+        source_value: MidiSourceValue<impl ShortMessage>,
+        custom_character_hint: Option<SourceCharacter>,
+    ) -> Option<Self> {
         use MidiSourceValue::*;
         let source = match source_value {
             ParameterNumber(msg) => MidiSource::ParameterNumberValue {
@@ -438,21 +442,20 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 number: Some(msg.number()),
                 is_14_bit: Some(msg.is_14_bit()),
                 is_registered: Some(msg.is_registered()),
-                custom_character: SourceCharacter::RangeElement,
+                custom_character: custom_character_hint.unwrap_or_default(),
             },
             ControlChange14Bit(msg) => MidiSource::ControlChange14BitValue {
                 channel: Some(msg.channel()),
                 msb_controller_number: Some(msg.msb_controller_number()),
-                custom_character: SourceCharacter::RangeElement,
+                custom_character: custom_character_hint.unwrap_or_default(),
             },
             Tempo(_) => MidiSource::ClockTempo,
             Plain(msg) => MidiSource::from_short_message(msg)?,
-            // Important (and working) for learning.
             BorrowedSysEx(msg) => MidiSource::from_raw(msg),
-            // Owned raw MIDI is never incoming, so not important. We only use it for output.
-            Raw(_) => return None,
+            // Important (and working) for learning.
+            Raw(events) => MidiSource::from_raw(events.first()?.bytes()),
             // Display messages are never incoming, we only use them for output.
-            Display => return None,
+            DisplaySpecific(_) => return None,
         };
         Some(source)
     }

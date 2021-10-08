@@ -1,7 +1,7 @@
 use crate::UnitValue;
 use derive_more::Display;
 use helgoboss_midi::{
-    ControlChange14BitMessage, DataEntryByteOrder, ParameterNumberMessage, ShortMessage,
+    Channel, ControlChange14BitMessage, DataEntryByteOrder, ParameterNumberMessage, ShortMessage,
     ShortMessageFactory,
 };
 use std::convert::TryFrom;
@@ -24,8 +24,18 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
 }
 
 impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
+    pub fn channel(&self) -> Option<Channel> {
+        use MidiSourceValue::*;
+        match self {
+            Plain(m) => m.channel(),
+            ParameterNumber(m) => Some(m.channel()),
+            ControlChange14Bit(m) => Some(m.channel()),
+            _ => None,
+        }
+    }
+
     /// Might allocate!
-    pub fn try_to_owned(self) -> Result<MidiSourceValue<'static, M>, &'static str> {
+    pub fn try_into_owned(self) -> Result<MidiSourceValue<'static, M>, &'static str> {
         use MidiSourceValue::*;
         let res = match self {
             Plain(v) => Plain(v),
