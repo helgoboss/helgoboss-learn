@@ -4,7 +4,7 @@ use crate::{
     MidiSourceScript, MidiSourceValue, RawMidiEvent, RawMidiPattern, RawMidiPatternEntry,
     UnitValue,
 };
-use core::iter;
+use core::{fmt, iter};
 use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use smallvec::{smallvec, SmallVec};
 use std::convert::{TryFrom, TryInto};
+use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 #[derive(
@@ -281,7 +282,7 @@ pub enum MidiSource<S: MidiSourceScript> {
         script: Option<S>,
     },
     Display {
-        type_specific_settings: DisplayTypeSpecificSettings,
+        spec: DisplaySpec,
     },
 }
 
@@ -356,9 +357,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Raw { pattern, .. } => MidiSourceAddress::from_raw_pattern(pattern),
             // TODO-high We need to sort this one out! Maybe we can go without heap space allocation
             //  (Vec) by including the construction plan.
-            Display {
-                type_specific_settings,
-            } => return None,
+            Display { .. } => return None,
             // No static analysis possible
             Script { .. } => return None,
             // No feedback
@@ -406,14 +405,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             (Raw { pattern: p1, .. }, Raw { pattern: p2, .. }) => p1 == p2,
             (Raw { .. }, _) | (_, Raw { .. }) => false,
             // Display can only match Display.
-            (
-                Display {
-                    type_specific_settings: s1,
-                },
-                Display {
-                    type_specific_settings: s2,
-                },
-            ) => s1 == s2,
+            (Display { spec: s1 }, Display { spec: s2 }) => s1 == s2,
             (Display { .. }, _) | (_, Display { .. }) => false,
             // Script can never match.
             (Script { .. }, _) | (_, Script { .. }) => false,
@@ -979,17 +971,16 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 let raw_midi_event = script.execute(feedback_value.to_numeric()?).ok()?;
                 Some(V::Raw(raw_midi_event))
             }
-            Display {
-                type_specific_settings,
-            } => {
+            Display { spec } => {
                 let text = feedback_value.to_textual();
-                let raw_midi_events: Vec<_> = match type_specific_settings {
-                    DisplayTypeSpecificSettings::MackieLcd { portions } => {
+                let raw_midi_events: Vec<_> = match spec {
+                    DisplaySpec::MackieLcd { scope } => {
                         let mut ascii_chars = text
                             .chars()
                             .filter_map(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
                             .fuse();
-                        portions
+                        scope
+                            .lcd_portions()
                             .iter()
                             .filter_map(|range| {
                                 let body = range
@@ -1000,7 +991,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             })
                             .collect()
                     }
-                    DisplayTypeSpecificSettings::MackieSevenSegmentDisplay { positions } => {
+                    DisplaySpec::MackieSevenSegmentDisplay { scope } => {
                         // Reverse because we want right-aligned
                         let mut peekable_chars = text.chars().rev().peekable();
                         let mut codes = iter::from_fn(|| {
@@ -1015,6 +1006,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         .flatten()
                         .fuse();
                         // Reverse because we want right-aligned
+                        let positions = scope.positions();
                         let body = positions.iter().rev().flat_map(|pos| {
                             iter::once(0x40u8 + pos)
                                 .chain(iter::once(codes.next().unwrap_or_default()))
@@ -1393,10 +1385,124 @@ impl Default for DisplayType {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum DisplayTypeSpecificSettings {
-    MackieLcd { portions: LcdPortions },
-    MackieSevenSegmentDisplay { positions: DisplayPositions },
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum DisplaySpec {
+    MackieLcd {
+        scope: MackieLcdScope,
+    },
+    MackieSevenSegmentDisplay {
+        scope: MackieSevenSegmentDisplayScope,
+    },
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Debug,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
+    Serialize_repr,
+    Deserialize_repr,
+)]
+#[repr(usize)]
+pub enum MackieSevenSegmentDisplayScope {
+    #[display(fmt = "All")]
+    All = 0,
+    #[display(fmt = ".... Assignment")]
+    Assignment = 1,
+    #[display(fmt = ".... Time code")]
+    Tc = 2,
+    #[display(fmt = "........ Left 3 digits (hours/bars)")]
+    TcLeft3Digits = 3,
+    #[display(fmt = "........ Left 2 digits (minutes/beats)")]
+    TcLeft2Digits = 4,
+    #[display(fmt = "........ Right 2 digits (seconds/sub)")]
+    TcRight2Digits = 5,
+    #[display(fmt = "........ Right 3 digits (frames/ticks)")]
+    TcRight3Digits = 6,
+}
+
+impl MackieSevenSegmentDisplayScope {
+    pub fn positions(&self) -> DisplayPositions {
+        use MackieSevenSegmentDisplayScope::*;
+        let positions = match self {
+            All => vec![0x0B, 0x0A, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+            Assignment => vec![0x0B, 0x0A],
+            Tc => vec![9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+            TcLeft3Digits => vec![9, 8, 7],
+            TcLeft2Digits => vec![6, 5],
+            TcRight2Digits => vec![4, 3],
+            TcRight3Digits => vec![2, 1, 0],
+        };
+        DisplayPositions::new(positions)
+    }
+}
+
+impl Default for MackieSevenSegmentDisplayScope {
+    fn default() -> Self {
+        MackieSevenSegmentDisplayScope::All
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct MackieLcdScope {
+    pub channel: Option<u8>,
+    pub line: Option<u8>,
+}
+
+impl MackieLcdScope {
+    pub fn new(channel: Option<u8>, line: Option<u8>) -> Self {
+        Self { channel, line }
+    }
+
+    pub fn generate_all_combinations() -> Vec<MackieLcdScope> {
+        iter::once(Self::new(None, None))
+            .chain((0..2).map(|l| Self::new(None, Some(l))))
+            .chain((0..8).map(|ch| Self::new(Some(ch), None)))
+            .chain((0..8).flat_map(|ch| (0..2).map(move |l| Self::new(Some(ch), Some(l)))))
+            .collect()
+    }
+
+    pub fn lcd_portions(&self) -> LcdPortions {
+        const CHANNEL_LEN: u8 = 7;
+        const CHANNEL_COUNT: u8 = 8;
+        const LINE_COUNT: u8 = 2;
+        const LINE_LEN: u8 = CHANNEL_COUNT * CHANNEL_LEN;
+        fn range(start: u8, len: u8) -> Range<u8> {
+            start..(start + len)
+        }
+        let ranges = match (self.channel, self.line) {
+            (None, None) => vec![range(0, LINE_COUNT * LINE_LEN)],
+            (None, Some(l)) => vec![range(l * LINE_LEN, LINE_LEN)],
+            (Some(ch), None) => (0..LINE_COUNT)
+                .map(|l| range(l * LINE_LEN + ch * CHANNEL_LEN, CHANNEL_LEN))
+                .collect(),
+            (Some(ch), Some(l)) => vec![range(l * LINE_LEN + ch * CHANNEL_LEN, CHANNEL_LEN)],
+        };
+        LcdPortions::new(ranges)
+    }
+}
+
+impl Display for MackieLcdScope {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if let Some(ch) = self.channel {
+            write!(f, "Channel {}", ch + 1)?;
+        } else {
+            f.write_str("All channels")?;
+        };
+        f.write_str(", ")?;
+        if let Some(l) = self.line {
+            write!(f, "line {}", l + 1)?;
+        } else {
+            f.write_str("multiline")?;
+        };
+        Ok(())
+    }
 }
 
 /// A sequence of positions on a display, left-to-right.
