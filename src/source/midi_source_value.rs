@@ -1,8 +1,8 @@
-use crate::UnitValue;
+use crate::{MidiSourceAddress, UnitValue};
 use derive_more::Display;
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, DataEntryByteOrder, ParameterNumberMessage, ShortMessage,
-    ShortMessageFactory,
+    ShortMessageFactory, StructuredShortMessage,
 };
 use std::convert::TryFrom;
 
@@ -16,14 +16,73 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
     /// We must take care not to allocate this in real-time thread!
     Raw(Vec<RawMidiEvent>),
     BorrowedSysEx(&'a [u8]),
-    // TODO-medium Not used so far. Just to show that we could defer raw-message generation to the
-    //  place at which we need to send it. We adjusted the signature so that any of these types
-    //  could potentially generate a bunch of raw MIDI messages - without allocation, using
-    //  iterators, one raw message at a time.
-    DisplaySpecific(()),
 }
 
 impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
+    pub fn extract_feedback_address(&self) -> Option<MidiSourceAddress> {
+        use MidiSourceValue::*;
+        let res = match self {
+            Plain(m) => {
+                use StructuredShortMessage::*;
+                match m.to_structured() {
+                    NoteOn {
+                        channel,
+                        key_number,
+                        ..
+                    }
+                    | NoteOff {
+                        channel,
+                        key_number,
+                        ..
+                    } => MidiSourceAddress::Note {
+                        channel,
+                        key_number,
+                    },
+                    PolyphonicKeyPressure {
+                        channel,
+                        key_number,
+                        ..
+                    } => MidiSourceAddress::PolyphonicKeyPressure {
+                        channel,
+                        key_number,
+                    },
+                    ControlChange {
+                        channel,
+                        controller_number,
+                        ..
+                    } => MidiSourceAddress::ControlChange {
+                        channel,
+                        controller_number,
+                        is_14_bit: false,
+                    },
+                    ProgramChange { channel, .. } => MidiSourceAddress::ProgramChange { channel },
+                    ChannelPressure { channel, .. } => {
+                        MidiSourceAddress::ChannelPressure { channel }
+                    }
+                    PitchBendChange { channel, .. } => {
+                        MidiSourceAddress::PitchBendChange { channel }
+                    }
+                    _ => return None,
+                }
+            }
+            ParameterNumber(msg) => MidiSourceAddress::ParameterNumber {
+                channel: msg.channel(),
+                number: msg.number(),
+                is_registered: msg.is_registered(),
+            },
+            ControlChange14Bit(msg) => MidiSourceAddress::ControlChange {
+                channel: msg.channel(),
+                controller_number: msg.msb_controller_number(),
+                is_14_bit: true,
+            },
+            // TODO-high RAW
+            Raw(_) => return None,
+            // No feedback
+            Tempo(_) | BorrowedSysEx(_) => return None,
+        };
+        Some(res)
+    }
+
     pub fn channel(&self) -> Option<Channel> {
         use MidiSourceValue::*;
         match self {
@@ -43,7 +102,6 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
             ControlChange14Bit(v) => ControlChange14Bit(v),
             Tempo(v) => Tempo(v),
             Raw(v) => Raw(v),
-            DisplaySpecific(v) => DisplaySpecific(v),
             BorrowedSysEx(bytes) => Raw(vec![RawMidiEvent::try_from_slice(0, bytes)?]),
         };
         Ok(res)
@@ -79,7 +137,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                 let inner_shorts = msg.to_short_messages();
                 [Some(inner_shorts[0]), Some(inner_shorts[1]), None, None]
             }
-            Tempo(_) | Raw(_) | BorrowedSysEx(_) | DisplaySpecific(_) => [None; 4],
+            Tempo(_) | Raw(_) | BorrowedSysEx(_) => [None; 4],
         }
     }
 }

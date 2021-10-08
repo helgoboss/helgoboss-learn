@@ -1,8 +1,7 @@
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
     ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction,
-    MidiSourceScript, MidiSourceValue, RawMidiEvent, RawMidiPattern, RawMidiPatternEntry,
-    UnitValue,
+    MidiSourceScript, MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
 };
 use core::{fmt, iter};
 use derivative::Derivative;
@@ -11,7 +10,7 @@ use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use helgoboss_midi::{
-    Channel, ControlChange14BitMessage, ControllerNumber, DataEntryByteOrder, DataType, KeyNumber,
+    Channel, ControlChange14BitMessage, ControllerNumber, DataType, KeyNumber,
     ParameterNumberMessage, RawShortMessage, ShortMessage, ShortMessageFactory, ShortMessageType,
     StructuredShortMessage, U14, U7,
 };
@@ -19,7 +18,6 @@ use helgoboss_midi::{
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use smallvec::{smallvec, SmallVec};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Display, Formatter};
 use std::ops::Range;
@@ -128,96 +126,6 @@ pub enum PatternByte {
     None,
 }
 
-/// Uniquely addresses a source (e.g. used for source takeover and filtering).
-///
-/// We represent these as slices of fixed/variable bytes so that comparison between different types
-/// of MIDI sources becomes possible. That's good because although two MIDI sources might differ
-/// on the surface (PitchBendChangeValue vs. Raw), they might be equal on byte level and therefore
-/// have the same source ID.
-///
-/// The representation as slices is also nice if we want to support "contained in" relationships
-/// one day - e.g. to handle larger LCD portions taking over smaller ones.
-// TODO-high If we implement PartialEq and Hash ourselves, we can do this in less than 12 bytes
-//  But the hash function could take longer because it needs to convert to short messages. We
-//  might need to do it anyway because we probably don't want huge display patterns if we can
-//  just represent the address using enum values?
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct MidiSourceAddress(SmallVec<[PatternByte; 12]>);
-
-impl MidiSourceAddress {
-    fn from_status_byte_only(msg: RawShortMessage) -> Self {
-        use PatternByte::*;
-        Self(smallvec![Fixed(msg.status_byte()), Variable])
-    }
-
-    fn from_status_and_data_byte_1(msg: RawShortMessage) -> Self {
-        use PatternByte::*;
-        Self(smallvec![
-            Fixed(msg.status_byte()),
-            Fixed(msg.data_byte_1().get()),
-            Variable
-        ])
-    }
-
-    fn from_cc_14_bit_msg(msg: ControlChange14BitMessage) -> Self {
-        let msgs: [RawShortMessage; 2] = msg.to_short_messages();
-        use PatternByte::*;
-        Self(smallvec![
-            Fixed(msgs[0].status_byte()),
-            Fixed(msgs[0].data_byte_1().get()),
-            Variable,
-            Fixed(msgs[1].status_byte()),
-            Fixed(msgs[1].data_byte_1().get()),
-            Variable,
-        ])
-    }
-
-    fn from_parameter_number_msg(msg: ParameterNumberMessage) -> Self {
-        let msgs: [Option<RawShortMessage>; 4] =
-            msg.to_short_messages(DataEntryByteOrder::MsbFirst);
-        use PatternByte::*;
-        let msg0 = msgs[0].unwrap();
-        let msg1 = msgs[1].unwrap();
-        Self(smallvec![
-            // Number MSB
-            Fixed(msg0.status_byte()),
-            Fixed(msg0.data_byte_1().get()),
-            Fixed(msg0.data_byte_2().get()),
-            // Number LSB
-            Fixed(msg1.status_byte()),
-            Fixed(msg1.data_byte_1().get()),
-            Fixed(msg1.data_byte_2().get()),
-            // Value MSB or increment
-            Variable,
-            // Optional value LSB (if 14-bit checked)
-            if msgs[3].is_some() { Variable } else { None }
-        ])
-    }
-
-    fn from_raw_pattern(pattern: &RawMidiPattern) -> Self {
-        let vec = pattern
-            .entries()
-            .iter()
-            .map(|e| {
-                use PatternByte::*;
-                match e {
-                    RawMidiPatternEntry::FixedByte(b) => Fixed(*b),
-                    RawMidiPatternEntry::PotentiallyVariableByte(p) => {
-                        if p.contains_variable_portions() {
-                            // We currently don't drill down to variable portions of a byte.
-                            Variable
-                        } else {
-                            // It doesn't matter which value we pass because the byte is fixed anyway.
-                            Fixed(p.to_byte(0))
-                        }
-                    }
-                }
-            })
-            .collect();
-        Self(vec)
-    }
-}
-
 #[derive(Clone, Debug, Derivative)]
 #[derivative(PartialEq)]
 pub enum MidiSource<S: MidiSourceScript> {
@@ -286,6 +194,44 @@ pub enum MidiSource<S: MidiSourceScript> {
     },
 }
 
+/// Uniquely addresses a source (e.g. used for source takeover and filtering).
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub enum MidiSourceAddress {
+    Note {
+        channel: Channel,
+        key_number: KeyNumber,
+    },
+    PolyphonicKeyPressure {
+        channel: Channel,
+        key_number: KeyNumber,
+    },
+    ControlChange {
+        channel: Channel,
+        controller_number: ControllerNumber,
+        is_14_bit: bool,
+    },
+    ProgramChange {
+        channel: Channel,
+    },
+    ChannelPressure {
+        channel: Channel,
+    },
+    PitchBendChange {
+        channel: Channel,
+    },
+    ParameterNumber {
+        channel: Channel,
+        number: U14,
+        is_registered: bool,
+    },
+    Display {
+        spec: DisplaySpec,
+    },
+    Raw {
+        pattern: RawMidiPattern,
+    },
+}
+
 impl<S: MidiSourceScript> MidiSource<S> {
     /// This will be very fast except maybe for raw sources.
     pub fn extract_feedback_address(&self) -> Option<MidiSourceAddress> {
@@ -294,70 +240,58 @@ impl<S: MidiSourceScript> MidiSource<S> {
             NoteVelocity {
                 channel: Some(ch),
                 key_number: Some(kn),
-            } => MidiSourceAddress::from_status_and_data_byte_1(RawShortMessage::note_on(
-                *ch,
-                *kn,
-                U7::MIN,
-            )),
+            } => MidiSourceAddress::Note {
+                channel: *ch,
+                key_number: *kn,
+            },
             PolyphonicKeyPressureAmount {
                 channel: Some(ch),
                 key_number: Some(kn),
-            } => MidiSourceAddress::from_status_and_data_byte_1(
-                RawShortMessage::polyphonic_key_pressure(*ch, *kn, U7::MIN),
-            ),
+            } => MidiSourceAddress::PolyphonicKeyPressure {
+                channel: *ch,
+                key_number: *kn,
+            },
             ControlChangeValue {
                 channel: Some(ch),
                 controller_number: Some(cn),
                 ..
-            } => MidiSourceAddress::from_status_and_data_byte_1(RawShortMessage::control_change(
-                *ch,
-                *cn,
-                U7::MIN,
-            )),
-            ProgramChangeNumber { channel: Some(ch) } => MidiSourceAddress::from_status_byte_only(
-                RawShortMessage::program_change(*ch, U7::MIN),
-            ),
-            ChannelPressureAmount { channel: Some(ch) } => {
-                MidiSourceAddress::from_status_byte_only(RawShortMessage::channel_pressure(
-                    *ch,
-                    U7::MIN,
-                ))
+            } => MidiSourceAddress::ControlChange {
+                channel: *ch,
+                controller_number: *cn,
+                is_14_bit: false,
+            },
+            ProgramChangeNumber { channel: Some(ch) } => {
+                MidiSourceAddress::ProgramChange { channel: *ch }
             }
-            PitchBendChangeValue { channel: Some(ch) } => MidiSourceAddress::from_status_byte_only(
-                RawShortMessage::pitch_bend_change(*ch, U14::MIN),
-            ),
+            ChannelPressureAmount { channel: Some(ch) } => {
+                MidiSourceAddress::ChannelPressure { channel: *ch }
+            }
+            PitchBendChangeValue { channel: Some(ch) } => {
+                MidiSourceAddress::PitchBendChange { channel: *ch }
+            }
             ControlChange14BitValue {
                 channel: Some(ch),
                 msb_controller_number: Some(cn),
                 ..
-            } => {
-                let msg = ControlChange14BitMessage::new(*ch, *cn, U14::MIN);
-                MidiSourceAddress::from_cc_14_bit_msg(msg)
-            }
+            } => MidiSourceAddress::ControlChange {
+                channel: *ch,
+                controller_number: *cn,
+                is_14_bit: true,
+            },
             ParameterNumberValue {
                 channel: Some(ch),
                 number: Some(n),
-                is_14_bit: Some(is_14_bit),
                 is_registered: Some(is_registered),
                 ..
-            } => {
-                let msg = if !*is_registered && !*is_14_bit {
-                    ParameterNumberMessage::non_registered_7_bit(*ch, *n, U7::MIN)
-                } else if !*is_registered && *is_14_bit {
-                    ParameterNumberMessage::non_registered_14_bit(*ch, *n, U14::MIN)
-                } else if *is_registered && !*is_14_bit {
-                    ParameterNumberMessage::registered_7_bit(*ch, *n, U7::MIN)
-                } else if *is_registered && *is_14_bit {
-                    ParameterNumberMessage::registered_14_bit(*ch, *n, U14::MIN)
-                } else {
-                    unreachable!()
-                };
-                MidiSourceAddress::from_parameter_number_msg(msg)
-            }
-            Raw { pattern, .. } => MidiSourceAddress::from_raw_pattern(pattern),
-            // TODO-high We need to sort this one out! Maybe we can go without heap space allocation
-            //  (Vec) by including the construction plan.
-            Display { .. } => return None,
+            } => MidiSourceAddress::ParameterNumber {
+                channel: *ch,
+                number: *n,
+                is_registered: *is_registered,
+            },
+            Display { spec } => MidiSourceAddress::Display { spec: *spec },
+            Raw { pattern, .. } => MidiSourceAddress::Raw {
+                pattern: pattern.clone(),
+            },
             // No static analysis possible
             Script { .. } => return None,
             // No feedback
@@ -377,8 +311,14 @@ impl<S: MidiSourceScript> MidiSource<S> {
         &self,
         value: &MidiSourceValue<RawShortMessage>,
     ) -> bool {
-        // TODO-high Create and compare addresses
-        false
+        if let (Some(addr1), Some(addr2)) = (
+            self.extract_feedback_address(),
+            value.extract_feedback_address(),
+        ) {
+            addr1 == addr2
+        } else {
+            false
+        }
     }
 
     /// Checks if this and the given source share the same address.
@@ -396,28 +336,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
     ///
     /// - Feedback diffing
     pub fn has_same_feedback_address_as_source(&self, other: &Self) -> bool {
-        // TODO-high Create and compare addresses
-        use MidiSource::*;
-        match (self, other) {
-            // Raw can only match Raw.
-            // TODO-high This is too strict. We should consider to match even if p1 has fixed bytes
-            //  and p2 has variable bytes (and vice versa).
-            (Raw { pattern: p1, .. }, Raw { pattern: p2, .. }) => p1 == p2,
-            (Raw { .. }, _) | (_, Raw { .. }) => false,
-            // Display can only match Display.
-            (Display { spec: s1 }, Display { spec: s2 }) => s1 == s2,
-            (Display { .. }, _) | (_, Display { .. }) => false,
-            // Script can never match.
-            (Script { .. }, _) | (_, Script { .. }) => false,
-            // Everything else should be fast enough to compare by creating and comparing addresses.
-            _ => {
-                let self_address = self.extract_feedback_address();
-                if self_address.is_none() {
-                    return false;
-                }
-                self_address == other.extract_feedback_address()
-            }
-        }
+        self.extract_feedback_address() == other.extract_feedback_address()
     }
 
     /// Used for scanning sources when learning.
@@ -446,8 +365,6 @@ impl<S: MidiSourceScript> MidiSource<S> {
             BorrowedSysEx(msg) => MidiSource::from_raw(msg),
             // Important (and working) for learning.
             Raw(events) => MidiSource::from_raw(events.first()?.bytes()),
-            // Display messages are never incoming, we only use them for output.
-            DisplaySpecific(_) => return None,
         };
         Some(source)
     }
