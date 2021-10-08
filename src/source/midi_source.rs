@@ -806,23 +806,25 @@ impl<S: MidiSourceScript> MidiSource<S> {
             S::Raw {
                 pattern,
                 custom_character,
-            } => match value {
-                BorrowedSysEx(bytes) => {
-                    let fraction = pattern.match_and_capture(bytes)?;
-                    if fraction.max_val() == 0 {
-                        // Fixed pattern with no variable parts. This should act like a trigger!
-                        Some(ControlValue::AbsoluteContinuous(UnitValue::MAX))
-                    } else {
-                        calc_control_value_from_n_bit_cc(
-                            *custom_character,
-                            fraction.actual(),
-                            pattern.resolution() as _,
-                        )
-                        .ok()
-                    }
+            } => {
+                let bytes = match value {
+                    Raw(event) => event.first()?.bytes(),
+                    BorrowedSysEx(bytes) => bytes,
+                    _ => return None,
+                };
+                let fraction = pattern.match_and_capture(bytes)?;
+                if fraction.max_val() == 0 {
+                    // Fixed pattern with no variable parts. This should act like a trigger!
+                    Some(ControlValue::AbsoluteContinuous(UnitValue::MAX))
+                } else {
+                    calc_control_value_from_n_bit_cc(
+                        *custom_character,
+                        fraction.actual(),
+                        pattern.resolution() as _,
+                    )
+                    .ok()
                 }
-                _ => None,
-            },
+            }
             // Feedback-only forever.
             S::Script { .. } | S::Display { .. } => None,
         }
