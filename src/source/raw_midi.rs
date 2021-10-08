@@ -1,7 +1,8 @@
-use crate::{AbsoluteValue, Fraction, RawMidiEvent, UnitValue};
+use crate::{AbsoluteValue, Fraction, PatternByte, RawMidiEvent, UnitValue};
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::{Display, Formatter, Write};
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
@@ -35,6 +36,25 @@ impl RawMidiPattern {
             entries,
             resolution: 0,
         }
+    }
+
+    pub fn variable_range(&self) -> Option<RangeInclusive<usize>> {
+        let left = self.entries().iter().position(|e| !e.is_fixed())?;
+        let right = self.entries().iter().rposition(|e| !e.is_fixed())?;
+        Some(left..=right)
+    }
+
+    pub fn to_pattern_bytes(&self) -> Vec<PatternByte> {
+        self.entries()
+            .iter()
+            .map(|e| {
+                if let Some(b) = e.byte_if_fixed() {
+                    PatternByte::Fixed(b)
+                } else {
+                    PatternByte::Variable
+                }
+            })
+            .collect()
     }
 
     pub fn entries(&self) -> &[RawMidiPatternEntry] {
@@ -200,6 +220,28 @@ impl BitPatternEntry {
 }
 
 impl RawMidiPatternEntry {
+    fn is_fixed(&self) -> bool {
+        // TODO-low This could be implemented better by transforming potentially variable
+        //  bytes that are not variable into fixed bytes in the first place!
+        self.byte_if_fixed().is_some()
+    }
+
+    fn byte_if_fixed(&self) -> Option<u8> {
+        use RawMidiPatternEntry::*;
+        match self {
+            FixedByte(b) => Some(*b),
+            PotentiallyVariableByte(p) => {
+                if p.contains_variable_portions() {
+                    None
+                } else {
+                    // Value parameter not important if pattern doesn't contain
+                    // variable portions.
+                    Some(p.to_byte(0))
+                }
+            }
+        }
+    }
+
     fn match_and_capture(&self, actual_byte: u8, current_value: u16) -> Option<u16> {
         use RawMidiPatternEntry::*;
         match self {

@@ -1,7 +1,8 @@
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
     ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction,
-    MidiSourceScript, MidiSourceValue, RawMidiEvent, RawMidiPattern, UnitValue,
+    MidiSourceScript, MidiSourceValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiPattern,
+    UnitValue,
 };
 use core::{fmt, iter};
 use derivative::Derivative;
@@ -119,13 +120,6 @@ impl From<MidiClockTransportMessage> for ShortMessageType {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub enum PatternByte {
-    Fixed(u8),
-    Variable,
-    None,
-}
-
 #[derive(Clone, Debug, Derivative)]
 #[derivative(PartialEq)]
 pub enum MidiSource<S: MidiSourceScript> {
@@ -228,8 +222,14 @@ pub enum MidiSourceAddress {
         spec: DisplaySpec,
     },
     Raw {
-        pattern: RawMidiPattern,
+        pattern: Vec<PatternByte>,
     },
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum PatternByte {
+    Fixed(u8),
+    Variable,
 }
 
 impl<S: MidiSourceScript> MidiSource<S> {
@@ -290,7 +290,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             },
             Display { spec } => MidiSourceAddress::Display { spec: *spec },
             Raw { pattern, .. } => MidiSourceAddress::Raw {
-                pattern: pattern.clone(),
+                pattern: pattern.to_pattern_bytes(),
             },
             // No static analysis possible
             Script { .. } => return None,
@@ -339,7 +339,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
         self.extract_feedback_address() == other.extract_feedback_address()
     }
 
-    /// Used for scanning sources when learning.
+    /// Used for creating sources when learning.
     ///
     /// Might allocate!
     pub fn from_source_value(
@@ -364,7 +364,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Plain(msg) => MidiSource::from_short_message(msg, custom_character_hint)?,
             BorrowedSysEx(msg) => MidiSource::from_raw(msg),
             // Important (and working) for learning.
-            Raw(events) => MidiSource::from_raw(events.first()?.bytes()),
+            Raw { events, .. } => MidiSource::from_raw(events.first()?.bytes()),
         };
         Some(source)
     }
@@ -717,7 +717,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 custom_character,
             } => {
                 let bytes = match value {
-                    Raw(event) => event.first()?.bytes(),
+                    Raw { events, .. } => events.first()?.bytes(),
                     BorrowedSysEx(bytes) => bytes,
                     _ => return None,
                 };
@@ -880,17 +880,28 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             Raw { pattern, .. } => {
                 let raw_midi_event = pattern.to_concrete_midi_event(feedback_value.to_numeric()?);
-                Some(V::Raw(vec![raw_midi_event]))
+                let address_info = RawFeedbackAddressInfo::Raw {
+                    variable_range: pattern.variable_range(),
+                };
+                let value = V::Raw {
+                    feedback_address_info: Some(address_info),
+                    events: vec![raw_midi_event],
+                };
+                Some(value)
             }
             Script { script } => {
                 let script = script.as_ref()?;
                 // TODO-medium Make textual value available
-                let raw_midi_event = script.execute(feedback_value.to_numeric()?).ok()?;
-                Some(V::Raw(raw_midi_event))
+                let events = script.execute(feedback_value.to_numeric()?).ok()?;
+                let value = V::Raw {
+                    feedback_address_info: None,
+                    events,
+                };
+                Some(value)
             }
             Display { spec } => {
                 let text = feedback_value.to_textual();
-                let raw_midi_events: Vec<_> = match spec {
+                let events: Vec<_> = match spec {
                     DisplaySpec::MackieLcd { scope } => {
                         let mut ascii_chars = text
                             .chars()
@@ -932,7 +943,12 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         vec![RawMidiEvent::try_from_iter(0, complete).ok()?]
                     }
                 };
-                Some(V::Raw(raw_midi_events))
+                let feedback_info = RawFeedbackAddressInfo::Display { spec: *spec };
+                let raw_value = V::Raw {
+                    feedback_address_info: Some(feedback_info),
+                    events,
+                };
+                Some(raw_value)
             }
             _ => None,
         }

@@ -1,10 +1,11 @@
-use crate::{MidiSourceAddress, UnitValue};
+use crate::{DisplaySpec, MidiSourceAddress, PatternByte, UnitValue};
 use derive_more::Display;
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, DataEntryByteOrder, ParameterNumberMessage, ShortMessage,
     ShortMessageFactory, StructuredShortMessage,
 };
 use std::convert::TryFrom;
+use std::ops::RangeInclusive;
 
 /// Incoming value which might be used to control something
 #[derive(Clone, PartialEq, Debug)]
@@ -14,8 +15,23 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
     ControlChange14Bit(ControlChange14BitMessage),
     Tempo(Bpm),
     /// We must take care not to allocate this in real-time thread!
-    Raw(Vec<RawMidiEvent>),
+    Raw {
+        feedback_address_info: Option<RawFeedbackAddressInfo>,
+        events: Vec<RawMidiEvent>,
+    },
     BorrowedSysEx(&'a [u8]),
+}
+
+/// For being able to reconstructing the source address for feedback purposes (in particular,
+/// source takeover).
+#[derive(Clone, PartialEq, Debug)]
+pub enum RawFeedbackAddressInfo {
+    Raw {
+        variable_range: Option<RangeInclusive<usize>>,
+    },
+    Display {
+        spec: DisplaySpec,
+    },
 }
 
 impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
@@ -75,8 +91,33 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                 controller_number: msg.msb_controller_number(),
                 is_14_bit: true,
             },
-            // TODO-high RAW
-            Raw(_) => return None,
+            Raw {
+                feedback_address_info,
+                events,
+            } => match feedback_address_info.as_ref()? {
+                RawFeedbackAddressInfo::Raw { variable_range } => MidiSourceAddress::Raw {
+                    pattern: events
+                        .first()?
+                        .bytes()
+                        .iter()
+                        .enumerate()
+                        .map(|(i, b)| {
+                            if let Some(vr) = variable_range {
+                                if vr.contains(&i) {
+                                    PatternByte::Variable
+                                } else {
+                                    PatternByte::Fixed(*b)
+                                }
+                            } else {
+                                PatternByte::Fixed(*b)
+                            }
+                        })
+                        .collect(),
+                },
+                RawFeedbackAddressInfo::Display { spec } => {
+                    MidiSourceAddress::Display { spec: *spec }
+                }
+            },
             // No feedback
             Tempo(_) | BorrowedSysEx(_) => return None,
         };
@@ -101,8 +142,17 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
             ParameterNumber(v) => ParameterNumber(v),
             ControlChange14Bit(v) => ControlChange14Bit(v),
             Tempo(v) => Tempo(v),
-            Raw(v) => Raw(v),
-            BorrowedSysEx(bytes) => Raw(vec![RawMidiEvent::try_from_slice(0, bytes)?]),
+            Raw {
+                feedback_address_info,
+                events,
+            } => Raw {
+                feedback_address_info,
+                events,
+            },
+            BorrowedSysEx(bytes) => Raw {
+                feedback_address_info: None,
+                events: vec![RawMidiEvent::try_from_slice(0, bytes)?],
+            },
         };
         Ok(res)
     }
@@ -110,7 +160,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
     pub fn into_garbage(self) -> Option<Vec<RawMidiEvent>> {
         use MidiSourceValue::*;
         match self {
-            Raw(events) => Some(events),
+            Raw { events, .. } => Some(events),
             _ => None,
         }
     }
@@ -119,7 +169,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
     pub fn to_raw(&self) -> Option<impl Iterator<Item = &RawMidiEvent>> {
         use MidiSourceValue::*;
         match self {
-            Raw(events) => Some(events.iter()),
+            Raw { events, .. } => Some(events.iter()),
             _ => None,
         }
     }
@@ -137,7 +187,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                 let inner_shorts = msg.to_short_messages();
                 [Some(inner_shorts[0]), Some(inner_shorts[1]), None, None]
             }
-            Tempo(_) | Raw(_) | BorrowedSysEx(_) => [None; 4],
+            Tempo(_) | Raw { .. } | BorrowedSysEx(_) => [None; 4],
         }
     }
 }
