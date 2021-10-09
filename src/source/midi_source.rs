@@ -1319,6 +1319,24 @@ pub enum DisplayType {
     MackieSevenSegmentDisplay,
 }
 
+impl DisplayType {
+    pub fn display_count(self) -> u32 {
+        use DisplayType::*;
+        match self {
+            MackieLcd => 8,
+            MackieSevenSegmentDisplay => 0,
+        }
+    }
+
+    pub fn line_count(self) -> u8 {
+        use DisplayType::*;
+        match self {
+            MackieLcd => 2,
+            MackieSevenSegmentDisplay => 1,
+        }
+    }
+}
+
 impl Default for DisplayType {
     fn default() -> Self {
         DisplayType::MackieLcd
@@ -1357,13 +1375,13 @@ pub enum MackieSevenSegmentDisplayScope {
     Assignment = 1,
     #[display(fmt = ".... Time code")]
     Tc = 2,
-    #[display(fmt = "........ Left 3 digits (hours/bars)")]
+    #[display(fmt = "........ Hours/bars (3)")]
     TcLeft3Digits = 3,
-    #[display(fmt = "........ Left 2 digits (minutes/beats)")]
+    #[display(fmt = "........ Minutes/beats (2)")]
     TcLeft2Digits = 4,
-    #[display(fmt = "........ Right 2 digits (seconds/sub)")]
+    #[display(fmt = "........ Seconds/sub (2)")]
     TcRight2Digits = 5,
-    #[display(fmt = "........ Right 3 digits (frames/ticks)")]
+    #[display(fmt = "........ Frames/ticks (3)")]
     TcRight3Digits = 6,
 }
 
@@ -1398,14 +1416,6 @@ pub struct MackieLcdScope {
 impl MackieLcdScope {
     pub fn new(channel: Option<u8>, line: Option<u8>) -> Self {
         Self { channel, line }
-    }
-
-    pub fn generate_all_combinations() -> Vec<MackieLcdScope> {
-        iter::once(Self::new(None, None))
-            .chain((0..2).map(|l| Self::new(None, Some(l))))
-            .chain((0..8).map(|ch| Self::new(Some(ch), None)))
-            .chain((0..8).flat_map(|ch| (0..2).map(move |l| Self::new(Some(ch), Some(l)))))
-            .collect()
     }
 
     pub fn lcd_portions(&self) -> LcdPortions {
