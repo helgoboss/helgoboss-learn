@@ -1425,19 +1425,19 @@ pub enum DisplaySpec {
 )]
 #[repr(usize)]
 pub enum MackieSevenSegmentDisplayScope {
-    #[display(fmt = "All")]
+    #[display(fmt = "<All>")]
     All = 0,
-    #[display(fmt = ".... Assignment")]
+    #[display(fmt = "Assignment")]
     Assignment = 1,
-    #[display(fmt = ".... Time code")]
+    #[display(fmt = "Time code")]
     Tc = 2,
-    #[display(fmt = "........ Hours/bars (3)")]
+    #[display(fmt = ".... Hours/bars (3)")]
     TcLeft3Digits = 3,
-    #[display(fmt = "........ Minutes/beats (2)")]
+    #[display(fmt = ".... Minutes/beats (2)")]
     TcLeft2Digits = 4,
-    #[display(fmt = "........ Seconds/sub (2)")]
+    #[display(fmt = ".... Seconds/sub (2)")]
     TcRight2Digits = 5,
-    #[display(fmt = "........ Frames/ticks (3)")]
+    #[display(fmt = ".... Frames/ticks (3)")]
     TcRight3Digits = 6,
 }
 
