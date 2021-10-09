@@ -524,11 +524,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 DetailedSourceCharacter::PressOnlyButton,
             ],
             // Usually a range control but could also be a velocity-sensitive button.
-            // Script source could be any source really.
-            PolyphonicKeyPressureAmount { .. }
-            | PitchBendChangeValue { .. }
-            | Script { .. }
-            | Display { .. } => {
+            PolyphonicKeyPressureAmount { .. } | PitchBendChangeValue { .. } => {
                 vec![
                     DetailedSourceCharacter::RangeControl,
                     DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
@@ -546,6 +542,17 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             // Special targets for which we can safely say it's a range.
             ClockTempo => vec![DetailedSourceCharacter::RangeControl],
+            // Feedback-only but characters also matter for feedback.
+            Script { .. } => {
+                vec![
+                    DetailedSourceCharacter::RangeControl,
+                    DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
+                    DetailedSourceCharacter::MomentaryOnOffButton,
+                    DetailedSourceCharacter::PressOnlyButton,
+                ]
+            }
+            // Feedback-only but characters also matter for feedback.
+            Display { .. } => vec![DetailedSourceCharacter::RangeControl],
         }
     }
 
