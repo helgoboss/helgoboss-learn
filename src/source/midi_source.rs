@@ -4,7 +4,7 @@ use crate::{
     MidiSourceScript, MidiSourceValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiPattern,
     UnitValue,
 };
-use core::{fmt, iter};
+use core::iter;
 use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -20,7 +20,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::convert::{TryFrom, TryInto};
-use std::fmt::{Display, Formatter};
 use std::ops::Range;
 
 #[derive(
@@ -910,10 +909,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 let text = feedback_value.to_textual();
                 let events: Vec<_> = match spec {
                     DisplaySpec::MackieLcd { scope } => {
-                        let mut ascii_chars = text
-                            .chars()
-                            .filter_map(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
-                            .fuse();
+                        let mut ascii_chars = filter_ascii_chars(&text);
                         scope
                             .lcd_portions()
                             .iter()
@@ -921,8 +917,27 @@ impl<S: MidiSourceScript> MidiSource<S> {
                                 let body = range
                                     .clone()
                                     .map(|_| ascii_chars.next().unwrap_or_default());
-                                let complete = mackie_lcd_sysex(0x14, range.start, body);
-                                RawMidiEvent::try_from_iter(0, complete).ok()
+                                let sysex = mackie_lcd_sysex(0x14, range.start, body);
+                                RawMidiEvent::try_from_iter(0, sysex).ok()
+                            })
+                            .collect()
+                    }
+                    DisplaySpec::SiniConE24 { scope } => {
+                        let mut ascii_chars = filter_ascii_chars(&text);
+                        scope
+                            .destinations()
+                            .iter()
+                            .filter_map(move |dest| {
+                                let line_len = 19;
+                                let body = iter::from_fn(|| ascii_chars.next()).take(line_len);
+                                let sysex = sinicon_e24_sysex(
+                                    1,
+                                    dest.cell_index,
+                                    dest.item_index,
+                                    (0x3A, 0x7F, 0x36),
+                                    body,
+                                );
+                                RawMidiEvent::try_from_iter(0, sysex).ok()
                             })
                             .collect()
                     }
@@ -1267,33 +1282,65 @@ fn extract_low_7_bit<T: Into<u32>>(value: T) -> U7 {
     U7::new((value.into() & 0x7f) as u8)
 }
 
-fn mackie_prefix(model_id: u8) -> impl Iterator<Item = u8> {
-    const MACKIE_PREFIX: [u8; 4] = [0xF0, 0x00, 0x00, 0x66];
-    MACKIE_PREFIX.iter().copied().chain(iter::once(model_id))
-}
-
-fn mackie_lcd_sysex_prefix(model_id: u8, display_offset: u8) -> impl Iterator<Item = u8> {
-    mackie_prefix(model_id)
-        .chain(iter::once(0x12))
-        .chain(iter::once(display_offset))
-}
-
 fn mackie_lcd_sysex(
     model_id: u8,
     display_offset: u8,
     body: impl Iterator<Item = u8>,
 ) -> impl Iterator<Item = u8> {
-    mackie_lcd_sysex_prefix(model_id, display_offset)
-        .chain(body)
-        .chain(mackie_sysex_suffix())
+    let start = it([0xF0, 0x00, 0x00, 0x66, model_id, 0x12, display_offset]);
+    start.chain(body).chain(end())
 }
 
-fn mackie_sysex_suffix() -> impl Iterator<Item = u8> {
+fn it<const N: usize>(arr: [u8; N]) -> impl Iterator<Item = u8> {
+    IntoIterator::into_iter(arr)
+}
+
+fn end() -> impl Iterator<Item = u8> {
     iter::once(0xF7)
+}
+
+fn sinicon_e24_sysex(
+    controller_number: u8,
+    cell_index: u8,
+    item_index: u8,
+    (r, g, b): (u8, u8, u8),
+    body: impl Iterator<Item = u8>,
+) -> impl Iterator<Item = u8> {
+    // Display type 1 (4 lines)
+    let display_type = 1;
+    // Item type 1 (text)
+    let item_type = 1;
+    // Item style 0 (?)
+    let item_style = 0;
+    // Wildcard (text color)
+    let wildcard = 0;
+    let start = it([
+        0xF0,
+        0x00,
+        0x02,
+        0x38,
+        controller_number,
+        cell_index + 1,
+        display_type,
+        item_index + 1,
+        item_type,
+        item_style,
+        wildcard,
+        r,
+        g,
+        b,
+    ]);
+    start.chain(body).chain(end())
 }
 
 fn mackie_7_segment_msg(body: impl Iterator<Item = u8>) -> impl Iterator<Item = u8> {
     iter::once(0xB0).chain(body)
+}
+
+fn filter_ascii_chars(text: &str) -> impl Iterator<Item = u8> + '_ {
+    text.chars()
+        .filter_map(|ch| if ch.is_ascii() { Some(ch as u8) } else { None })
+        .fuse()
 }
 
 #[derive(
@@ -1317,13 +1364,18 @@ pub enum DisplayType {
     #[cfg_attr(feature = "serde", serde(rename = "mackie-seven"))]
     #[display(fmt = "Mackie 7-segment display")]
     MackieSevenSegmentDisplay,
+    #[cfg_attr(feature = "serde", serde(rename = "sinicon-e24"))]
+    #[display(fmt = "SiniCon E24")]
+    SiniConE24,
 }
 
 impl DisplayType {
-    pub fn display_count(self) -> u32 {
+    pub fn display_count(self) -> u8 {
         use DisplayType::*;
         match self {
-            MackieLcd => 8,
+            MackieLcd => MackieLcdScope::CHANNEL_COUNT,
+            SiniConE24 => SiniConE24Scope::CELL_COUNT,
+            // Not handled in the usual way
             MackieSevenSegmentDisplay => 0,
         }
     }
@@ -1331,8 +1383,9 @@ impl DisplayType {
     pub fn line_count(self) -> u8 {
         use DisplayType::*;
         match self {
-            MackieLcd => 2,
+            MackieLcd => MackieLcdScope::LINE_COUNT,
             MackieSevenSegmentDisplay => 1,
+            SiniConE24 => SiniConE24Scope::ITEM_COUNT,
         }
     }
 }
@@ -1350,6 +1403,9 @@ pub enum DisplaySpec {
     },
     MackieSevenSegmentDisplay {
         scope: MackieSevenSegmentDisplayScope,
+    },
+    SiniConE24 {
+        scope: SiniConE24Scope,
     },
 }
 
@@ -1414,44 +1470,72 @@ pub struct MackieLcdScope {
 }
 
 impl MackieLcdScope {
+    const CHANNEL_LEN: u8 = 7;
+    const CHANNEL_COUNT: u8 = 8;
+    const LINE_COUNT: u8 = 2;
+    const LINE_LEN: u8 = Self::CHANNEL_COUNT * Self::CHANNEL_LEN;
+
     pub fn new(channel: Option<u8>, line: Option<u8>) -> Self {
-        Self { channel, line }
+        Self {
+            channel: channel.map(|ch| ch.min(Self::CHANNEL_COUNT - 1)),
+            line: line.map(|l| l.min(Self::LINE_COUNT - 1)),
+        }
     }
 
     pub fn lcd_portions(&self) -> LcdPortions {
-        const CHANNEL_LEN: u8 = 7;
-        const CHANNEL_COUNT: u8 = 8;
-        const LINE_COUNT: u8 = 2;
-        const LINE_LEN: u8 = CHANNEL_COUNT * CHANNEL_LEN;
         fn range(start: u8, len: u8) -> Range<u8> {
             start..(start + len)
         }
         let ranges = match (self.channel, self.line) {
-            (None, None) => vec![range(0, LINE_COUNT * LINE_LEN)],
-            (None, Some(l)) => vec![range(l * LINE_LEN, LINE_LEN)],
-            (Some(ch), None) => (0..LINE_COUNT)
-                .map(|l| range(l * LINE_LEN + ch * CHANNEL_LEN, CHANNEL_LEN))
+            (None, None) => vec![range(0, Self::LINE_COUNT * Self::LINE_LEN)],
+            (None, Some(l)) => vec![range(l * Self::LINE_LEN, Self::LINE_LEN)],
+            (Some(ch), None) => (0..Self::LINE_COUNT)
+                .map(|l| {
+                    range(
+                        l * Self::LINE_LEN + ch * Self::CHANNEL_LEN,
+                        Self::CHANNEL_LEN,
+                    )
+                })
                 .collect(),
-            (Some(ch), Some(l)) => vec![range(l * LINE_LEN + ch * CHANNEL_LEN, CHANNEL_LEN)],
+            (Some(ch), Some(l)) => vec![range(
+                l * Self::LINE_LEN + ch * Self::CHANNEL_LEN,
+                Self::CHANNEL_LEN,
+            )],
         };
         LcdPortions::new(ranges)
     }
 }
 
-impl Display for MackieLcdScope {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        if let Some(ch) = self.channel {
-            write!(f, "Channel {}", ch + 1)?;
-        } else {
-            f.write_str("All channels")?;
-        };
-        f.write_str(", ")?;
-        if let Some(l) = self.line {
-            write!(f, "line {}", l + 1)?;
-        } else {
-            f.write_str("multiline")?;
-        };
-        Ok(())
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct SiniConE24Scope {
+    pub cell_index: Option<u8>,
+    pub item_index: Option<u8>,
+}
+
+impl SiniConE24Scope {
+    const CELL_COUNT: u8 = 24;
+    const ITEM_COUNT: u8 = 4;
+
+    pub fn new(cell_index: Option<u8>, item_index: Option<u8>) -> Self {
+        Self {
+            cell_index: cell_index.map(|c| c.min(Self::CELL_COUNT - 1)),
+            item_index: item_index.map(|i| i.min(Self::ITEM_COUNT - 1)),
+        }
+    }
+
+    pub fn destinations(&self) -> Vec<SiniConE24Destination> {
+        match (self.cell_index, self.item_index) {
+            (None, None) => (0..Self::CELL_COUNT)
+                .flat_map(|c| (0..Self::ITEM_COUNT).map(move |i| SiniConE24Destination::new(c, i)))
+                .collect(),
+            (None, Some(i)) => (0..Self::CELL_COUNT)
+                .map(|c| SiniConE24Destination::new(c, i))
+                .collect(),
+            (Some(c), None) => (0..Self::ITEM_COUNT)
+                .map(|i| SiniConE24Destination::new(c, i))
+                .collect(),
+            (Some(c), Some(i)) => vec![SiniConE24Destination::new(c, i)],
+        }
     }
 }
 
@@ -1486,6 +1570,21 @@ impl LcdPortions {
 
     pub fn iter(&self) -> impl Iterator<Item = &Range<u8>> + '_ {
         self.ranges.iter()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SiniConE24Destination {
+    pub cell_index: u8,
+    pub item_index: u8,
+}
+
+impl SiniConE24Destination {
+    pub fn new(cell_index: u8, item_index: u8) -> Self {
+        Self {
+            cell_index,
+            item_index,
+        }
     }
 }
 
