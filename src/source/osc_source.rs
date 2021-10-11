@@ -170,6 +170,16 @@ impl OscTypeTag {
         vec[index as usize] = value;
         Some(vec)
     }
+
+    pub fn supports_control(self) -> bool {
+        use OscTypeTag::*;
+        matches!(self, Float | Double | Bool | Nil | Inf)
+    }
+
+    pub fn supports_feedback(self) -> bool {
+        use OscTypeTag::*;
+        matches!(self, Float | Double | Bool | Nil | Inf | String)
+    }
 }
 
 impl OscSource {
