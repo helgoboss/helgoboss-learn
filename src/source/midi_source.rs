@@ -928,13 +928,16 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             .destinations()
                             .iter()
                             .filter_map(move |dest| {
-                                let line_len = 19;
-                                let body = iter::from_fn(|| ascii_chars.next()).take(line_len);
+                                let line_length = dest.line_length();
+                                let body = (0..line_length)
+                                    .map(|_| ascii_chars.next().unwrap_or_default());
+                                let white = (0xFF, 0xFF, 0xFF);
                                 let sysex = sinicon_e24_sysex(
                                     1,
                                     dest.cell_index,
                                     dest.item_index,
-                                    (0x3A, 0x7F, 0x36),
+                                    line_length,
+                                    white,
                                     body,
                                 );
                                 RawMidiEvent::try_from_iter(0, sysex).ok()
@@ -1303,6 +1306,7 @@ fn sinicon_e24_sysex(
     controller_number: u8,
     cell_index: u8,
     item_index: u8,
+    line_length: u8,
     (r, g, b): (u8, u8, u8),
     body: impl Iterator<Item = u8>,
 ) -> impl Iterator<Item = u8> {
@@ -1310,8 +1314,8 @@ fn sinicon_e24_sysex(
     let display_type = 1;
     // Item type 1 (text)
     let item_type = 1;
-    // Item style 0 (?)
-    let item_style = 0;
+    // Item style (0 means background color, anything else means line length)
+    let item_style = line_length;
     // Wildcard (text color)
     let wildcard = 0;
     let start = it([
@@ -1584,6 +1588,14 @@ impl SiniConE24Destination {
         Self {
             cell_index,
             item_index,
+        }
+    }
+
+    pub fn line_length(&self) -> u8 {
+        match self.item_index {
+            0 | 1 | 2 => 16,
+            3 => 9,
+            _ => 0,
         }
     }
 }
