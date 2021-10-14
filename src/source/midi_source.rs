@@ -1445,13 +1445,13 @@ pub enum MackieSevenSegmentDisplayScope {
     #[display(fmt = "Time code")]
     Tc = 2,
     #[display(fmt = ".... Hours/bars (3)")]
-    TcLeft3Digits = 3,
+    TcHoursBars = 3,
     #[display(fmt = ".... Minutes/beats (2)")]
-    TcLeft2Digits = 4,
+    TcMinutesBeats = 4,
     #[display(fmt = ".... Seconds/sub (2)")]
-    TcRight2Digits = 5,
+    TcSecondsSub = 5,
     #[display(fmt = ".... Frames/ticks (3)")]
-    TcRight3Digits = 6,
+    TcFramesTicks = 6,
 }
 
 impl MackieSevenSegmentDisplayScope {
@@ -1461,10 +1461,10 @@ impl MackieSevenSegmentDisplayScope {
             All => vec![0x0B, 0x0A, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
             Assignment => vec![0x0B, 0x0A],
             Tc => vec![9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
-            TcLeft3Digits => vec![9, 8, 7],
-            TcLeft2Digits => vec![6, 5],
-            TcRight2Digits => vec![4, 3],
-            TcRight3Digits => vec![2, 1, 0],
+            TcHoursBars => vec![9, 8, 7],
+            TcMinutesBeats => vec![6, 5],
+            TcSecondsSub => vec![4, 3],
+            TcFramesTicks => vec![2, 1, 0],
         };
         DisplayPositions::new(positions)
     }
