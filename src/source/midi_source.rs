@@ -1314,22 +1314,31 @@ fn sinicon_e24_sysex(
     let display_type = 1;
     // Item type 1 (text)
     let item_type = 1;
-    // Item style (0 means background color, anything else means line length)
-    let item_style = line_length;
-    // Wildcard (text color)
-    let wildcard = 0;
+    // Item style
+    let item_style = 0;
+    // Wildcard (0 means background color, anything else means line length)
+    let wildcard = line_length;
     let start = it([
+        // 1
         0xF0,
         0x00,
         0x02,
         0x38,
+        // 5
         controller_number,
+        // 6
         cell_index + 1,
+        // 7
         display_type,
+        // 8
         item_index + 1,
+        // 9
         item_type,
+        // 10
         item_style,
+        // 11
         wildcard,
+        // 12
         r,
         g,
         b,
