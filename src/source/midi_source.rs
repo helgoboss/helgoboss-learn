@@ -1472,7 +1472,7 @@ impl MackieSevenSegmentDisplayScope {
 
 impl Default for MackieSevenSegmentDisplayScope {
     fn default() -> Self {
-        MackieSevenSegmentDisplayScope::All
+        MackieSevenSegmentDisplayScope::Assignment
     }
 }
 
