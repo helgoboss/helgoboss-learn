@@ -10,15 +10,18 @@ use std::ops::RangeInclusive;
 /// Incoming value which might be used to control something
 #[derive(Clone, PartialEq, Debug)]
 pub enum MidiSourceValue<'a, M: ShortMessage> {
+    // Feedback and control
     Plain(M),
     ParameterNumber(ParameterNumberMessage),
     ControlChange14Bit(ControlChange14BitMessage),
-    Tempo(Bpm),
     /// We must take care not to allocate this in real-time thread!
     Raw {
         feedback_address_info: Option<RawFeedbackAddressInfo>,
         events: Vec<RawMidiEvent>,
     },
+    // Control-only
+    Tempo(Bpm),
+    // Control-only
     BorrowedSysEx(&'a [u8]),
 }
 
