@@ -2,16 +2,17 @@ use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
     DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
-    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, Transformation,
-    UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
+    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue,
+    Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use regex::Captures;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -68,6 +69,34 @@ pub struct ModeSettings<T: Transformation> {
     pub target_value_sequence: ValueSequence,
     pub feedback_type: FeedbackType,
     pub textual_feedback_expression: String,
+    pub feedback_color: Option<VirtualColor>,
+    pub feedback_background_color: Option<VirtualColor>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum VirtualColor {
+    Rgb(RgbColor),
+    Prop {
+        #[serde(rename = "prop")]
+        prop: String,
+    },
+}
+
+impl VirtualColor {
+    fn resolve(&self, get_prop_value: impl Fn(&str) -> Option<PropValue>) -> Option<RgbColor> {
+        use VirtualColor::*;
+        match self {
+            Rgb(color) => Some(*color),
+            Prop { prop } => {
+                if let PropValue::Color(color) = get_prop_value(prop)? {
+                    Some(color)
+                } else {
+                    None
+                }
+            }
+        }
+    }
 }
 
 const ZERO_DURATION: Duration = Duration::from_millis(0);
@@ -101,6 +130,8 @@ impl<T: Transformation> Default for ModeSettings<T> {
             target_value_sequence: Default::default(),
             feedback_type: Default::default(),
             textual_feedback_expression: Default::default(),
+            feedback_color: None,
+            feedback_background_color: None,
         }
     }
 }
@@ -173,11 +204,15 @@ impl Default for AbsoluteMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
+)]
 #[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum FeedbackType {
+    #[display(fmt = "Numeric feedback: EEL transformation")]
     Numerical = 0,
+    #[display(fmt = "Textual feedback: Text expression")]
     Textual = 1,
 }
 
@@ -200,6 +235,8 @@ pub struct ModeGarbage<T> {
     _unpacked_target_value_sequence: Vec<UnitValue>,
     _unpacked_target_value_set: BTreeSet<UnitValue>,
     _textual_feedback_expression: String,
+    _feedback_color: Option<VirtualColor>,
+    _feedback_background_color: Option<VirtualColor>,
 }
 
 /// Human-readable numeric value (not normalized, not zero-rooted).
@@ -209,17 +246,19 @@ pub struct ModeGarbage<T> {
 /// way, which is especially important if we want to add "value formatters" to the textual feedback
 /// expressions in future. Numeric value formatters then should work on all numeric values in the
 /// same way, the sub type shouldn't make a difference.
+#[derive(Clone, PartialEq, Debug)]
 pub enum NumericValue {
     Decimal(f64),
     /// Not zero-rooted if it's a number that represents a position.
     Discrete(i32),
 }
 
+#[derive(Clone, PartialEq, Debug)]
 pub enum PropValue {
     /// Aka percentage.
     Normalized(UnitValue),
     /// Always a number that represents a position. Zero-rooted. So not human-friendly (which is
-    /// what it's different from `Numeric`! Important for users to know that such a type is
+    /// the difference to `Numeric`)! Important for users to know that such a type is
     /// returned because then they know that they just need to add a *one* in order to obtain a
     /// human-friendly position. We don't want to provide each prop value as both 0-rooted index and
     /// 1-rooted position.
@@ -228,6 +267,29 @@ pub enum PropValue {
     Numeric(NumericValue),
     /// Textual representation.
     Text(String),
+    /// Color.
+    Color(RgbColor),
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+pub struct RgbColor(u8, u8, u8);
+
+impl RgbColor {
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        RgbColor(r, g, b)
+    }
+
+    pub const fn r(&self) -> u8 {
+        self.0
+    }
+
+    pub const fn g(&self) -> u8 {
+        self.1
+    }
+
+    pub const fn b(&self) -> u8 {
+        self.2
+    }
 }
 
 impl Default for PropValue {
@@ -237,6 +299,15 @@ impl Default for PropValue {
 }
 
 impl PropValue {
+    pub fn to_percentage(&self) -> Option<AbsoluteValue> {
+        use PropValue::*;
+        if let Normalized(v) = self {
+            Some(AbsoluteValue::Continuous(*v))
+        } else {
+            None
+        }
+    }
+
     pub fn into_textual(self) -> String {
         use PropValue::*;
         match self {
@@ -244,6 +315,7 @@ impl PropValue {
             Numeric(v) => v.into_textual(),
             Index(i) => i.to_string(),
             Text(text) => text,
+            Color(color) => format!("{:?}", color),
         }
     }
 }
@@ -284,6 +356,8 @@ impl<T: Transformation> Mode<T> {
             _unpacked_target_value_sequence: self.state.unpacked_target_value_sequence,
             _unpacked_target_value_set: self.state.unpacked_target_value_set,
             _textual_feedback_expression: self.settings.textual_feedback_expression,
+            _feedback_color: self.settings.feedback_color,
+            _feedback_background_color: self.settings.feedback_background_color,
         }
     }
 
@@ -339,10 +413,10 @@ impl<T: Transformation> Mode<T> {
 
     pub fn query_textual_feedback(
         &self,
-        get_prop_value: impl Fn(&str) -> Option<PropValue>,
-    ) -> Cow<str> {
+        get_prop_value: &impl Fn(&str) -> Option<PropValue>,
+    ) -> TextualFeedbackValue {
         let expression_regex = regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#);
-        if self.settings.textual_feedback_expression.is_empty() {
+        let text = if self.settings.textual_feedback_expression.is_empty() {
             get_prop_value("target.text_value")
                 .unwrap_or_default()
                 .into_textual()
@@ -352,6 +426,19 @@ impl<T: Transformation> Mode<T> {
                 &self.settings.textual_feedback_expression,
                 |c: &Captures| get_prop_value(&c[1]).unwrap_or_default().into_textual(),
             )
+        };
+        TextualFeedbackValue {
+            color: self
+                .settings
+                .feedback_color
+                .as_ref()
+                .and_then(|c| c.resolve(get_prop_value)),
+            background_color: self
+                .settings
+                .feedback_background_color
+                .as_ref()
+                .and_then(|c| c.resolve(get_prop_value)),
+            text,
         }
     }
 

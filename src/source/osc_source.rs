@@ -162,7 +162,7 @@ impl OscTypeTag {
             Bool => OscType::Bool(v.to_numeric()?.is_on()),
             Nil => OscType::Nil,
             Inf => OscType::Inf,
-            String => OscType::String(v.to_textual().into_owned()),
+            String => OscType::String(v.to_textual().text.into_owned()),
             _ => return None,
         };
         // Send nil for all other elements

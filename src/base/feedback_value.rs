@@ -1,4 +1,4 @@
-use crate::{format_percentage_without_unit, AbsoluteValue, UnitValue};
+use crate::{format_percentage_without_unit, AbsoluteValue, RgbColor, UnitValue};
 use core::fmt;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
@@ -9,7 +9,14 @@ pub enum FeedbackValue<'a> {
     Numeric(AbsoluteValue),
     // This Cow is in case the producer of the feedback value can use the borrowed value. At the
     // moment this is not the case because the target API is designed to returns owned strings.
-    Textual(Cow<'a, str>),
+    Textual(TextualFeedbackValue<'a>),
+}
+
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct TextualFeedbackValue<'a> {
+    pub color: Option<RgbColor>,
+    pub background_color: Option<RgbColor>,
+    pub text: Cow<'a, str>,
 }
 
 impl<'a> FeedbackValue<'a> {
@@ -22,12 +29,19 @@ impl<'a> FeedbackValue<'a> {
         }
     }
 
-    pub fn to_textual(&self) -> Cow<str> {
+    pub fn to_textual(&self) -> TextualFeedbackValue {
         use FeedbackValue::*;
         match self {
-            Off => Cow::default(),
-            Numeric(v) => Cow::Owned(format_percentage_without_unit(v.to_unit_value().get())),
-            Textual(text) => Cow::Borrowed(text.as_ref()),
+            Off => Default::default(),
+            Numeric(v) => TextualFeedbackValue {
+                text: Cow::Owned(format_percentage_without_unit(v.to_unit_value().get())),
+                ..Default::default()
+            },
+            Textual(v) => TextualFeedbackValue {
+                color: v.color,
+                background_color: v.background_color,
+                text: Cow::Borrowed(v.text.as_ref()),
+            },
         }
     }
 
@@ -36,13 +50,20 @@ impl<'a> FeedbackValue<'a> {
         match self {
             Off => Off,
             Numeric(v) => Numeric(v),
-            Textual(v) => Textual(Cow::Owned(v.into_owned())),
+            Textual(v) => {
+                let new_v = TextualFeedbackValue {
+                    color: v.color,
+                    background_color: v.background_color,
+                    text: Cow::Owned(v.text.into_owned()),
+                };
+                FeedbackValue::Textual(new_v)
+            }
         }
     }
 }
 
 impl<'a> Display for FeedbackValue<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(self.to_textual().as_ref())
+        f.write_str(self.to_textual().text.as_ref())
     }
 }

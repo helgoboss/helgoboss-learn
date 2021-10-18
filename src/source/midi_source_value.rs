@@ -118,7 +118,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                         .collect(),
                 },
                 RawFeedbackAddressInfo::Display { spec } => {
-                    MidiSourceAddress::Display { spec: *spec }
+                    MidiSourceAddress::Display { spec: spec.clone() }
                 }
             },
             // No feedback

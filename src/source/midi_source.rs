@@ -2,13 +2,14 @@ use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
     ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction,
     MidiSourceScript, MidiSourceValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiPattern,
-    UnitValue,
+    RgbColor, UnitValue,
 };
 use core::iter;
 use derivative::Derivative;
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::cell::Cell;
 
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, ControllerNumber, DataType, KeyNumber,
@@ -287,7 +288,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 number: *n,
                 is_registered: *is_registered,
             },
-            Display { spec } => MidiSourceAddress::Display { spec: *spec },
+            Display { spec } => MidiSourceAddress::Display { spec: spec.clone() },
             Raw { pattern, .. } => MidiSourceAddress::Raw {
                 pattern: pattern.to_pattern_bytes(),
             },
@@ -906,10 +907,12 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Some(value)
             }
             Display { spec } => {
-                let text = feedback_value.to_textual();
+                let value = feedback_value.to_textual();
+                let color = value.color;
+                let background_color = value.background_color;
                 let events: Vec<_> = match spec {
                     DisplaySpec::MackieLcd { scope } => {
-                        let mut ascii_chars = filter_ascii_chars(&text);
+                        let mut ascii_chars = filter_ascii_chars(&value.text);
                         scope
                             .lcd_portions()
                             .iter()
@@ -922,31 +925,59 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             })
                             .collect()
                     }
-                    DisplaySpec::SiniConE24 { scope } => {
-                        let mut ascii_chars = filter_ascii_chars(&text);
+                    DisplaySpec::SiniConE24 {
+                        scope,
+                        last_sent_background_color: previous_background_color,
+                    } => {
+                        let controller_number = 1;
+                        let white = RgbColor::new(0xFF, 0xFF, 0xFF);
+                        let black = RgbColor::new(0x00, 0x00, 0x00);
+                        let color = color.unwrap_or(white);
+                        let background_color = background_color.unwrap_or(black);
+                        let previous_background_color =
+                            previous_background_color.replace(Some(background_color));
+                        let update_background = Some(background_color) != previous_background_color;
+                        let mut ascii_chars = filter_ascii_chars(&value.text);
                         scope
                             .destinations()
                             .iter()
-                            .filter_map(move |dest| {
-                                let line_length = dest.line_length();
-                                let body = (0..line_length)
-                                    .map(|_| ascii_chars.next().unwrap_or_default());
-                                let white = (0xFF, 0xFF, 0xFF);
-                                let sysex = sinicon_e24_sysex(
-                                    1,
-                                    dest.cell_index,
-                                    dest.item_index,
-                                    line_length,
-                                    white,
-                                    body,
-                                );
-                                RawMidiEvent::try_from_iter(0, sysex).ok()
+                            .flat_map(move |dest| {
+                                let background_event = if update_background {
+                                    let bg_update_sysex = sinicon_e24_sysex(
+                                        controller_number,
+                                        dest.cell_index,
+                                        dest.item_index,
+                                        // Line length of zero means setting the background color.
+                                        0,
+                                        background_color,
+                                        iter::empty(),
+                                    );
+                                    RawMidiEvent::try_from_iter(0, bg_update_sysex).ok()
+                                } else {
+                                    None
+                                };
+                                let text_event = {
+                                    let line_length = dest.line_length();
+                                    let body = (0..line_length)
+                                        .map(|_| ascii_chars.next().unwrap_or_default());
+                                    let text_sysex = sinicon_e24_sysex(
+                                        controller_number,
+                                        dest.cell_index,
+                                        dest.item_index,
+                                        line_length,
+                                        color,
+                                        body,
+                                    );
+                                    RawMidiEvent::try_from_iter(0, text_sysex).ok()
+                                };
+                                [background_event, text_event]
                             })
+                            .flatten()
                             .collect()
                     }
                     DisplaySpec::MackieSevenSegmentDisplay { scope } => {
                         // Reverse because we want right-aligned
-                        let mut peekable_chars = text.chars().rev().peekable();
+                        let mut peekable_chars = value.text.chars().rev().peekable();
                         let mut codes = iter::from_fn(|| {
                             let ch = peekable_chars.next()?;
                             let next_ch = peekable_chars.peek().copied();
@@ -968,7 +999,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         vec![RawMidiEvent::try_from_iter(0, complete).ok()?]
                     }
                 };
-                let feedback_info = RawFeedbackAddressInfo::Display { spec: *spec };
+                let feedback_info = RawFeedbackAddressInfo::Display { spec: spec.clone() };
                 let raw_value = V::Raw {
                     feedback_address_info: Some(feedback_info),
                     events,
@@ -1307,7 +1338,7 @@ fn sinicon_e24_sysex(
     cell_index: u8,
     item_index: u8,
     line_length: u8,
-    (r, g, b): (u8, u8, u8),
+    color: RgbColor,
     body: impl Iterator<Item = u8>,
 ) -> impl Iterator<Item = u8> {
     // Display type 1 (4 lines)
@@ -1339,9 +1370,9 @@ fn sinicon_e24_sysex(
         // 11
         wildcard,
         // 12
-        r,
-        g,
-        b,
+        color.r(),
+        color.g(),
+        color.b(),
     ]);
     start.chain(body).chain(end())
 }
@@ -1409,7 +1440,8 @@ impl Default for DisplayType {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(Eq, PartialEq, Hash)]
 pub enum DisplaySpec {
     MackieLcd {
         scope: MackieLcdScope,
@@ -1419,6 +1451,8 @@ pub enum DisplaySpec {
     },
     SiniConE24 {
         scope: SiniConE24Scope,
+        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        last_sent_background_color: Cell<Option<RgbColor>>,
     },
 }
 

@@ -95,8 +95,8 @@ pub enum ModeParameter {
     ButtonFilter,
     #[display(fmt = "Make absolute")]
     MakeAbsolute,
-    #[display(fmt = "Use textual feedback")]
-    UseTextualFeedback,
+    #[display(fmt = "Feedback type")]
+    FeedbackType,
     #[display(fmt = "Round target value")]
     RoundTargetValue,
     #[display(fmt = "Absolute mode")]
@@ -638,10 +638,10 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 HasNoEffect
             }
         }
-        UseTextualFeedback => {
+        FeedbackType => {
             if input.is_feedback {
                 MakesSense(
-                    "Switches to textual feedback (to be used with textual sources such as LCDs).",
+                    "Allows you to switch to textual feedback (to be used with textual sources such as LCDs).",
                 )
             } else {
                 HasNoEffect
