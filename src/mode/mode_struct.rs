@@ -275,6 +275,9 @@ pub enum PropValue {
 pub struct RgbColor(u8, u8, u8);
 
 impl RgbColor {
+    pub const BLACK: Self = Self::new(0x00, 0x00, 0x00);
+    pub const WHITE: Self = Self::new(0xFF, 0xFF, 0xFF);
+
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
         RgbColor(r, g, b)
     }

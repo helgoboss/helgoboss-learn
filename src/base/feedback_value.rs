@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Clone, PartialEq, Debug)]
 pub enum FeedbackValue<'a> {
     Off,
+    // TODO-high Include color info here as well!
     Numeric(AbsoluteValue),
     // This Cow is in case the producer of the feedback value can use the borrowed value. At the
     // moment this is not the case because the target API is designed to returns owned strings.

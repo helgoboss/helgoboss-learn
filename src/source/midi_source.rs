@@ -930,10 +930,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         last_sent_background_color: previous_background_color,
                     } => {
                         let controller_number = 1;
-                        let white = RgbColor::new(0xFF, 0xFF, 0xFF);
-                        let black = RgbColor::new(0x00, 0x00, 0x00);
-                        let color = color.unwrap_or(white);
-                        let background_color = background_color.unwrap_or(black);
+                        let color = color.unwrap_or(RgbColor::WHITE);
+                        let background_color = background_color.unwrap_or(RgbColor::BLACK);
                         let previous_background_color =
                             previous_background_color.replace(Some(background_color));
                         let update_background = Some(background_color) != previous_background_color;
@@ -997,6 +995,12 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         });
                         let complete = mackie_7_segment_msg(body);
                         vec![RawMidiEvent::try_from_iter(0, complete).ok()?]
+                    }
+                    DisplaySpec::LaunchpadProScrollingText => {
+                        let body = filter_ascii_chars(&value.text);
+                        let color = color.unwrap_or(RgbColor::WHITE);
+                        let sysex = launchpad_pro_scrolling_text_sysex(color, true, body);
+                        vec![RawMidiEvent::try_from_iter(0, sysex).ok()?]
                     }
                 };
                 let feedback_info = RawFeedbackAddressInfo::Display { spec: spec.clone() };
@@ -1377,6 +1381,27 @@ fn sinicon_e24_sysex(
     start.chain(body).chain(end())
 }
 
+fn launchpad_pro_scrolling_text_sysex(
+    color: RgbColor,
+    looped: bool,
+    body: impl Iterator<Item = u8>,
+) -> impl Iterator<Item = u8> {
+    let color_code =
+        find_closest_color_in_palette(color, &super::devices::launchpad::COLOR_PALETTE);
+    let start = it([
+        0xF0,
+        0x00,
+        0x20,
+        0x29,
+        0x02,
+        0x10,
+        0x14,
+        color_code,
+        if looped { 0x01 } else { 0x00 },
+    ]);
+    start.chain(body).chain(end())
+}
+
 fn mackie_7_segment_msg(body: impl Iterator<Item = u8>) -> impl Iterator<Item = u8> {
     iter::once(0xB0).chain(body)
 }
@@ -1411,6 +1436,9 @@ pub enum DisplayType {
     #[cfg_attr(feature = "serde", serde(rename = "sinicon-e24"))]
     #[display(fmt = "SiniCon E24")]
     SiniConE24,
+    #[cfg_attr(feature = "serde", serde(rename = "launchpad-pro-scrolling-text"))]
+    #[display(fmt = "Launchpad Pro - Scrolling Text")]
+    LaunchpadProScrollingText,
 }
 
 impl DisplayType {
@@ -1419,8 +1447,8 @@ impl DisplayType {
         match self {
             MackieLcd => MackieLcdScope::CHANNEL_COUNT,
             SiniConE24 => SiniConE24Scope::CELL_COUNT,
-            // Not handled in the usual way
-            MackieSevenSegmentDisplay => 0,
+            // Not applicable
+            MackieSevenSegmentDisplay | LaunchpadProScrollingText => 0,
         }
     }
 
@@ -1428,8 +1456,9 @@ impl DisplayType {
         use DisplayType::*;
         match self {
             MackieLcd => MackieLcdScope::LINE_COUNT,
-            MackieSevenSegmentDisplay => 1,
             SiniConE24 => SiniConE24Scope::ITEM_COUNT,
+            // Not applicable
+            MackieSevenSegmentDisplay | LaunchpadProScrollingText => 1,
         }
     }
 }
@@ -1454,6 +1483,7 @@ pub enum DisplaySpec {
         #[derivative(PartialEq = "ignore", Hash = "ignore")]
         last_sent_background_color: Cell<Option<RgbColor>>,
     },
+    LaunchpadProScrollingText,
 }
 
 #[derive(
@@ -1690,6 +1720,26 @@ fn convert_to_7_segment_code(ch: char, next_ch: Option<char>, reverse: bool) -> 
 struct ConversionResult {
     code: Option<u8>,
     consumed_one_more: bool,
+}
+// Initially taken from https://github.com/jamesmunns/launch-rs/blob/master/lib/src/color.rs
+fn find_closest_color_in_palette(color: RgbColor, palette: &[RgbColor]) -> u8 {
+    let (red, green, blue) = (color.r(), color.g(), color.b());
+    let mut ifurthest = 0usize;
+    let mut furthest = 3 * (255 as i32).pow(2) + 1;
+    for (i, c) in palette.iter().enumerate() {
+        if red == c.r() && green == c.g() && blue == c.b() {
+            // Exact match
+            return i as u8;
+        }
+        let distance = (red as i32 - c.r() as i32).pow(2)
+            + (green as i32 - c.g() as i32).pow(2)
+            + (blue as i32 - c.b() as i32).pow(2);
+        if distance < furthest {
+            furthest = distance;
+            ifurthest = i;
+        }
+    }
+    ifurthest as u8
 }
 
 #[cfg(test)]

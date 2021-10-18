@@ -15,3 +15,5 @@ pub use midi_source_script::*;
 
 #[cfg(test)]
 mod test_util;
+
+mod devices;
