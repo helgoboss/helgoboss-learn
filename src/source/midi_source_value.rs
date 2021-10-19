@@ -1,4 +1,4 @@
-use crate::{DisplaySpec, MidiSourceAddress, PatternByte, UnitValue};
+use crate::{DisplaySpecAddress, MidiSourceAddress, PatternByte, UnitValue};
 use derive_more::Display;
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, DataEntryByteOrder, ParameterNumberMessage, ShortMessage,
@@ -33,7 +33,7 @@ pub enum RawFeedbackAddressInfo {
         variable_range: Option<RangeInclusive<usize>>,
     },
     Display {
-        spec: DisplaySpec,
+        spec: DisplaySpecAddress,
     },
 }
 

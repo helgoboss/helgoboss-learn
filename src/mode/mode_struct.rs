@@ -1,7 +1,7 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
-    DiscreteValue, EncoderUsage, FireMode, Fraction, Interval, MinIsMaxBehavior,
+    DiscreteValue, EncoderUsage, FeedbackStyle, FireMode, Fraction, Interval, MinIsMaxBehavior,
     OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue,
     Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
@@ -210,7 +210,7 @@ impl Default for AbsoluteMode {
 #[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum FeedbackType {
-    #[display(fmt = "Numeric feedback: EEL transformation")]
+    #[display(fmt = "Numeric feedback: Transformation (EEL)")]
     Numerical = 0,
     #[display(fmt = "Textual feedback: Text expression")]
     Textual = 1,
@@ -430,7 +430,14 @@ impl<T: Transformation> Mode<T> {
                 |c: &Captures| get_prop_value(&c[1]).unwrap_or_default().into_textual(),
             )
         };
-        TextualFeedbackValue {
+        TextualFeedbackValue::new(self.feedback_style(get_prop_value), text)
+    }
+
+    pub fn feedback_style(
+        &self,
+        get_prop_value: &impl Fn(&str) -> Option<PropValue>,
+    ) -> FeedbackStyle {
+        FeedbackStyle {
             color: self
                 .settings
                 .feedback_color
@@ -441,7 +448,6 @@ impl<T: Transformation> Mode<T> {
                 .feedback_background_color
                 .as_ref()
                 .and_then(|c| c.resolve(get_prop_value)),
-            text,
         }
     }
 

@@ -219,7 +219,7 @@ pub enum MidiSourceAddress {
         is_registered: bool,
     },
     Display {
-        spec: DisplaySpec,
+        spec: DisplaySpecAddress,
     },
     Raw {
         pattern: Vec<PatternByte>,
@@ -288,7 +288,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 number: *n,
                 is_registered: *is_registered,
             },
-            Display { spec } => MidiSourceAddress::Display { spec: spec.clone() },
+            Display { spec } => MidiSourceAddress::Display {
+                spec: spec.clone().into(),
+            },
             Raw { pattern, .. } => MidiSourceAddress::Raw {
                 pattern: pattern.to_pattern_bytes(),
             },
@@ -804,11 +806,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::Plain(M::note_on(
                 *ch,
                 *kn,
-                denormalize_7_bit(feedback_value.to_numeric()?),
+                denormalize_7_bit(feedback_value.to_numeric()?.value),
             ))),
             NoteKeyNumber { channel: Some(ch) } => Some(V::Plain(M::note_on(
                 *ch,
-                denormalize_7_bit(feedback_value.to_numeric()?),
+                denormalize_7_bit(feedback_value.to_numeric()?.value),
                 U7::MAX,
             ))),
             PolyphonicKeyPressureAmount {
@@ -817,7 +819,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::Plain(M::polyphonic_key_pressure(
                 *ch,
                 *kn,
-                denormalize_7_bit(feedback_value.to_numeric()?),
+                denormalize_7_bit(feedback_value.to_numeric()?.value),
             ))),
             ControlChangeValue {
                 channel: Some(ch),
@@ -826,19 +828,19 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::Plain(M::control_change(
                 *ch,
                 *cn,
-                denormalize_7_bit(feedback_value.to_numeric()?),
+                denormalize_7_bit(feedback_value.to_numeric()?.value),
             ))),
             ProgramChangeNumber { channel: Some(ch) } => Some(V::Plain(M::program_change(
                 *ch,
-                denormalize_7_bit(feedback_value.to_numeric()?),
+                denormalize_7_bit(feedback_value.to_numeric()?.value),
             ))),
             ChannelPressureAmount { channel: Some(ch) } => Some(V::Plain(M::channel_pressure(
                 *ch,
-                denormalize_7_bit(feedback_value.to_numeric()?),
+                denormalize_7_bit(feedback_value.to_numeric()?.value),
             ))),
             PitchBendChangeValue { channel: Some(ch) } => Some(V::Plain(M::pitch_bend_change(
                 *ch,
-                denormalize_14_bit_centered(feedback_value.to_numeric()?),
+                denormalize_14_bit_centered(feedback_value.to_numeric()?.value),
             ))),
             ControlChange14BitValue {
                 channel: Some(ch),
@@ -847,7 +849,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             } => Some(V::ControlChange14Bit(ControlChange14BitMessage::new(
                 *ch,
                 *mcn,
-                denormalize_14_bit(feedback_value.to_numeric()?),
+                denormalize_14_bit(feedback_value.to_numeric()?.value),
             ))),
             ParameterNumberValue {
                 channel: Some(ch),
@@ -860,25 +862,25 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     ParameterNumberMessage::non_registered_7_bit(
                         *ch,
                         *n,
-                        denormalize_7_bit(feedback_value.to_numeric()?),
+                        denormalize_7_bit(feedback_value.to_numeric()?.value),
                     )
                 } else if !*is_registered && *is_14_bit {
                     ParameterNumberMessage::non_registered_14_bit(
                         *ch,
                         *n,
-                        denormalize_14_bit(feedback_value.to_numeric()?),
+                        denormalize_14_bit(feedback_value.to_numeric()?.value),
                     )
                 } else if *is_registered && !*is_14_bit {
                     ParameterNumberMessage::registered_7_bit(
                         *ch,
                         *n,
-                        denormalize_7_bit(feedback_value.to_numeric()?),
+                        denormalize_7_bit(feedback_value.to_numeric()?.value),
                     )
                 } else if *is_registered && *is_14_bit {
                     ParameterNumberMessage::registered_14_bit(
                         *ch,
                         *n,
-                        denormalize_14_bit(feedback_value.to_numeric()?),
+                        denormalize_14_bit(feedback_value.to_numeric()?.value),
                     )
                 } else {
                     unreachable!()
@@ -886,7 +888,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Some(V::ParameterNumber(n))
             }
             Raw { pattern, .. } => {
-                let raw_midi_event = pattern.to_concrete_midi_event(feedback_value.to_numeric()?);
+                let raw_midi_event =
+                    pattern.to_concrete_midi_event(feedback_value.to_numeric()?.value);
                 let address_info = RawFeedbackAddressInfo::Raw {
                     variable_range: pattern.variable_range(),
                 };
@@ -899,7 +902,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Script { script } => {
                 let script = script.as_ref()?;
                 // TODO-medium Make textual value available
-                let events = script.execute(feedback_value.to_numeric()?).ok()?;
+                let events = script.execute(feedback_value.to_numeric()?.value).ok()?;
                 let value = V::Raw {
                     feedback_address_info: None,
                     events,
@@ -908,8 +911,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             Display { spec } => {
                 let value = feedback_value.to_textual();
-                let color = value.color;
-                let background_color = value.background_color;
+                let style = value.style;
                 let events: Vec<_> = match spec {
                     DisplaySpec::MackieLcd { scope } => {
                         let mut ascii_chars = filter_ascii_chars(&value.text);
@@ -930,8 +932,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         last_sent_background_color: previous_background_color,
                     } => {
                         let controller_number = 1;
-                        let color = color.unwrap_or(RgbColor::WHITE);
-                        let background_color = background_color.unwrap_or(RgbColor::BLACK);
+                        let color = style.color.unwrap_or(RgbColor::WHITE);
+                        let background_color = style.background_color.unwrap_or(RgbColor::BLACK);
                         let previous_background_color =
                             previous_background_color.replace(Some(background_color));
                         let update_background = Some(background_color) != previous_background_color;
@@ -998,12 +1000,14 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     }
                     DisplaySpec::LaunchpadProScrollingText => {
                         let body = filter_ascii_chars(&value.text);
-                        let color = color.unwrap_or(RgbColor::WHITE);
+                        let color = style.color.unwrap_or(RgbColor::WHITE);
                         let sysex = launchpad_pro_scrolling_text_sysex(color, true, body);
                         vec![RawMidiEvent::try_from_iter(0, sysex).ok()?]
                     }
                 };
-                let feedback_info = RawFeedbackAddressInfo::Display { spec: spec.clone() };
+                let feedback_info = RawFeedbackAddressInfo::Display {
+                    spec: spec.clone().into(),
+                };
                 let raw_value = V::Raw {
                     feedback_address_info: Some(feedback_info),
                     events,
@@ -1437,7 +1441,7 @@ pub enum DisplayType {
     #[display(fmt = "SiniCon E24")]
     SiniConE24,
     #[cfg_attr(feature = "serde", serde(rename = "launchpad-pro-scrolling-text"))]
-    #[display(fmt = "Launchpad Pro - Scrolling Text")]
+    #[display(fmt = "Launchpad Pro - Scrolling text")]
     LaunchpadProScrollingText,
 }
 
@@ -1470,7 +1474,7 @@ impl Default for DisplayType {
 }
 
 #[derive(Clone, Debug, Derivative)]
-#[derivative(Eq, PartialEq, Hash)]
+#[derivative(PartialEq)]
 pub enum DisplaySpec {
     MackieLcd {
         scope: MackieLcdScope,
@@ -1480,10 +1484,36 @@ pub enum DisplaySpec {
     },
     SiniConE24 {
         scope: SiniConE24Scope,
-        #[derivative(PartialEq = "ignore", Hash = "ignore")]
+        #[derivative(PartialEq = "ignore")]
         last_sent_background_color: Cell<Option<RgbColor>>,
     },
     LaunchpadProScrollingText,
+}
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub enum DisplaySpecAddress {
+    MackieLcd {
+        scope: MackieLcdScope,
+    },
+    MackieSevenSegmentDisplay {
+        scope: MackieSevenSegmentDisplayScope,
+    },
+    SiniConE24 {
+        scope: SiniConE24Scope,
+    },
+    LaunchpadProScrollingText,
+}
+
+impl From<DisplaySpec> for DisplaySpecAddress {
+    fn from(spec: DisplaySpec) -> Self {
+        use DisplaySpec::*;
+        match spec {
+            MackieLcd { scope } => Self::MackieLcd { scope },
+            MackieSevenSegmentDisplay { scope } => Self::MackieSevenSegmentDisplay { scope },
+            SiniConE24 { scope, .. } => Self::SiniConE24 { scope },
+            LaunchpadProScrollingText => Self::LaunchpadProScrollingText,
+        }
+    }
 }
 
 #[derive(
@@ -1725,7 +1755,7 @@ struct ConversionResult {
 fn find_closest_color_in_palette(color: RgbColor, palette: &[RgbColor]) -> u8 {
     let (red, green, blue) = (color.r(), color.g(), color.b());
     let mut ifurthest = 0usize;
-    let mut furthest = 3 * (255 as i32).pow(2) + 1;
+    let mut furthest = 3 * 255_i32.pow(2) + 1;
     for (i, c) in palette.iter().enumerate() {
         if red == c.r() && green == c.g() && blue == c.b() {
             // Exact match
@@ -1746,6 +1776,7 @@ fn find_closest_color_in_palette(color: RgbColor, palette: &[RgbColor]) -> u8 {
 mod tests {
     use super::*;
     use crate::source::test_util::TestMidiSourceScript;
+    use crate::NumericFeedbackValue;
     use approx::*;
     use helgoboss_midi::test_util::{channel as ch, controller_number as cn, key_number as kn, *};
     use helgoboss_midi::RawShortMessage;
@@ -3006,7 +3037,10 @@ mod tests {
     }
 
     fn fv(value: f64) -> FeedbackValue<'static> {
-        FeedbackValue::Numeric(AbsoluteValue::Continuous(UnitValue::new(value)))
+        FeedbackValue::Numeric(NumericFeedbackValue::new(
+            Default::default(),
+            AbsoluteValue::Continuous(UnitValue::new(value)),
+        ))
     }
 
     fn tempo(bpm: f64) -> MidiSourceValue<'static, RawShortMessage> {

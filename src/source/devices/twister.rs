@@ -1,5 +1,6 @@
 use crate::RgbColor;
 
+#[allow(dead_code)]
 // Initially taken from here:
 // https://github.com/dozius/TwisterSister/blob/main/src/main/java/io/github/dozius/twister/TwisterColors.java
 pub const COLOR_PALETTE: [RgbColor; 128] = [
