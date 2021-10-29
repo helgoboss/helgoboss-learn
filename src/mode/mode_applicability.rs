@@ -115,7 +115,7 @@ pub enum ModeApplicability {
     HasNoEffect,
     /// Makes no sense but not ignored. A sensible "no-op" default should be used.
     MakesNoSenseUseDefault,
-    /// Doesn't make sense. Used for variants of an enum (e.g. AbsoluteMode "Toggle buttons") to
+    /// Doesn't make sense. Used for variants of an enum (e.g. AbsoluteMode "Toggle button") to
     /// document that the applicability check of the enum itself (e.g. AbsoluteMode) will take care
     /// of choosing the correct default.
     MakesNoSenseParentTakesCareOfDefault,
@@ -210,10 +210,10 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             crate::AbsoluteMode::Normal => MakesSense(
                                 "If enabled, switches the target off when pressed and on when released.",
                             ),
-                            crate::AbsoluteMode::IncrementalButtons => MakesSense(
+                            crate::AbsoluteMode::IncrementalButton => MakesSense(
                                 "If enabled, decreases the target value on press instead of increasing it.",
                             ),
-                            crate::AbsoluteMode::ToggleButtons => MakesNoSenseUseDefault,
+                            crate::AbsoluteMode::ToggleButton => MakesNoSenseUseDefault,
                         }
                     }
                     RangeControl | Relative => {
@@ -427,7 +427,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 use DetailedSourceCharacter::*;
                 match input.source_character {
                     MomentaryOnOffButton | PressOnlyButton | MomentaryVelocitySensitiveButton => {
-                        if input.absolute_mode == crate::AbsoluteMode::IncrementalButtons {
+                        if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
                             if input.source_character == MomentaryVelocitySensitiveButton {
                                 if input.mode_parameter == StepSizeMin {
                                     MakesSense(
@@ -483,7 +483,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     RangeControl => HasNoEffect,
                     MomentaryOnOffButton | PressOnlyButton => MakesNoSenseUseDefault,
                     MomentaryVelocitySensitiveButton => {
-                        if input.absolute_mode == crate::AbsoluteMode::IncrementalButtons {
+                        if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
                             if input.mode_parameter == StepSizeMax {
                                 MakesSense(
                                     "Sets the target value change amount when button pressed with highest velocity.",
@@ -533,7 +533,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 use DetailedSourceCharacter::*;
                 match input.source_character {
                     MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
-                        if input.absolute_mode == crate::AbsoluteMode::IncrementalButtons {
+                        if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
                             MakesSense(
                                 "If enabled, jumps from max target value to min target value (or opposite if reverse enabled). Was called \"Rotate\" before.",
                             )
@@ -629,7 +629,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             if input.is_feedback {
                 HasNoEffect
             } else if input.source_character == DetailedSourceCharacter::Relative
-                || input.absolute_mode == crate::AbsoluteMode::IncrementalButtons
+                || input.absolute_mode == crate::AbsoluteMode::IncrementalButton
             {
                 MakesSense(
                         "Converts relative increments/decrements into an absolute value. This allows you to use control transformation and discontinuous target value sequences but comes with the disadvantage of parameter jumps (which can be mitigated using the jump settings).",
@@ -698,7 +698,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                     )
                                 }
                             }
-                            IncrementalButtons => {
+                            IncrementalButton => {
                                 if input.source_character == MomentaryVelocitySensitiveButton {
                                     MakesSense(
                                         "Increases the target value with each button press with the defined step size range, taking the velocity of the button press into account.",
@@ -709,7 +709,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                     )
                                 }
                             }
-                            ToggleButtons => MakesSense(
+                            ToggleButton => MakesSense(
                                 "Switches the target value between its minimum and maximum on each button press.",
                             ),
                         }

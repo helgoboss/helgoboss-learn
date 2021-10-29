@@ -192,10 +192,10 @@ struct ModeState {
 pub enum AbsoluteMode {
     #[display(fmt = "Normal")]
     Normal = 0,
-    #[display(fmt = "Incremental buttons")]
-    IncrementalButtons = 1,
-    #[display(fmt = "Toggle buttons")]
-    ToggleButtons = 2,
+    #[display(fmt = "Incremental button")]
+    IncrementalButton = 1,
+    #[display(fmt = "Toggle button")]
+    ToggleButton = 2,
 }
 
 impl Default for AbsoluteMode {
@@ -623,13 +623,13 @@ impl<T: Transformation> Mode<T> {
                 self.control_absolute_normal(v, target, context)?
                     .map(ControlValue::from_absolute),
             ),
-            IncrementalButtons => self.control_absolute_incremental_buttons(
+            IncrementalButton => self.control_absolute_incremental_buttons(
                 v.to_unit_value(),
                 target,
                 context,
                 options,
             ),
-            ToggleButtons => Some(
+            ToggleButton => Some(
                 self.control_absolute_toggle_buttons(v, target, context)?
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             ),
@@ -693,7 +693,7 @@ impl<T: Transformation> Mode<T> {
         )
     }
 
-    /// "Incremental buttons" mode (convert absolute button presses to relative increments)
+    /// "Incremental button" mode (convert absolute button presses to relative increments)
     fn control_absolute_incremental_buttons<'a, C: Copy>(
         &mut self,
         control_value: UnitValue,
@@ -5083,7 +5083,7 @@ mod tests {
         fn absolute_value_target_off() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
             let target = TestTarget {
@@ -5111,7 +5111,7 @@ mod tests {
         fn absolute_value_target_on() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
             let target = TestTarget {
@@ -5139,7 +5139,7 @@ mod tests {
         fn absolute_value_target_rather_off() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
             let target = TestTarget {
@@ -5167,7 +5167,7 @@ mod tests {
         fn absolute_value_target_rather_on() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
             let target = TestTarget {
@@ -5195,7 +5195,7 @@ mod tests {
         fn absolute_value_target_interval_target_off() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             });
@@ -5224,7 +5224,7 @@ mod tests {
         fn absolute_value_target_interval_target_on() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             });
@@ -5253,7 +5253,7 @@ mod tests {
         fn absolute_value_target_interval_target_rather_off() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             });
@@ -5282,7 +5282,7 @@ mod tests {
         fn absolute_value_target_interval_target_rather_on() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             });
@@ -5311,7 +5311,7 @@ mod tests {
         fn absolute_value_target_interval_target_too_off() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             });
@@ -5340,7 +5340,7 @@ mod tests {
         fn absolute_value_target_interval_target_too_on() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             });
@@ -5369,7 +5369,7 @@ mod tests {
         fn feedback() {
             // Given
             let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
             // When
@@ -5383,7 +5383,7 @@ mod tests {
         fn feedback_target_interval() {
             // Given
             let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                absolute_mode: AbsoluteMode::ToggleButtons,
+                absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
             });
@@ -7024,7 +7024,7 @@ mod tests {
             fn default_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -7048,7 +7048,7 @@ mod tests {
             fn default_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -7066,7 +7066,7 @@ mod tests {
             fn min_step_size_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -7095,7 +7095,7 @@ mod tests {
             fn min_step_size_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -7114,7 +7114,7 @@ mod tests {
             fn max_step_size_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -7147,7 +7147,7 @@ mod tests {
             fn max_step_size_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -7166,7 +7166,7 @@ mod tests {
             fn source_interval() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 });
@@ -7196,7 +7196,7 @@ mod tests {
             fn source_interval_step_interval() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_size_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
@@ -7227,7 +7227,7 @@ mod tests {
             fn reverse_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
                 });
@@ -7246,7 +7246,7 @@ mod tests {
             fn reverse_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
                 });
@@ -7275,7 +7275,7 @@ mod tests {
             fn rotate_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
                 });
@@ -7304,7 +7304,7 @@ mod tests {
             fn rotate_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
                 });
@@ -7333,7 +7333,7 @@ mod tests {
             fn rotate_3_almost_max() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
                 });
@@ -7362,7 +7362,7 @@ mod tests {
             fn reverse_and_rotate_almost_min() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     reverse: true,
                     ..Default::default()
@@ -7384,7 +7384,7 @@ mod tests {
             fn reverse_and_rotate_min() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     reverse: true,
                     ..Default::default()
@@ -7406,7 +7406,7 @@ mod tests {
             fn target_interval_min() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -7435,7 +7435,7 @@ mod tests {
             fn target_interval_max() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -7455,7 +7455,7 @@ mod tests {
             fn target_interval_current_target_value_out_of_range() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -7484,7 +7484,7 @@ mod tests {
             fn target_interval_min_rotate() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -7514,7 +7514,7 @@ mod tests {
             fn target_interval_max_rotate() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -7544,7 +7544,7 @@ mod tests {
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -7574,7 +7574,7 @@ mod tests {
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -7606,7 +7606,7 @@ mod tests {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
                     convert_relative_to_absolute: true,
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -7640,7 +7640,7 @@ mod tests {
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
                     // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -7665,7 +7665,7 @@ mod tests {
             fn default_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -7695,7 +7695,7 @@ mod tests {
             fn default_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -7716,7 +7716,7 @@ mod tests {
             fn min_step_count_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 });
@@ -7747,7 +7747,7 @@ mod tests {
             fn min_step_count_throttle() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(-4, -4),
                     ..Default::default()
                 });
@@ -7778,7 +7778,7 @@ mod tests {
             fn min_step_count_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 });
@@ -7800,7 +7800,7 @@ mod tests {
             fn max_step_count_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 8),
                     ..Default::default()
                 });
@@ -7831,7 +7831,7 @@ mod tests {
             fn max_step_count_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 });
@@ -7855,7 +7855,7 @@ mod tests {
             fn source_interval() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 });
@@ -7887,7 +7887,7 @@ mod tests {
             fn source_interval_step_interval() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -7920,7 +7920,7 @@ mod tests {
             fn reverse() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
                 });
@@ -7942,7 +7942,7 @@ mod tests {
             fn rotate_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
                 });
@@ -7973,7 +7973,7 @@ mod tests {
             fn rotate_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
                 });
@@ -8004,7 +8004,7 @@ mod tests {
             fn target_interval_min() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -8035,7 +8035,7 @@ mod tests {
             fn target_interval_max() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -8057,7 +8057,7 @@ mod tests {
             fn target_interval_current_target_value_out_of_range() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -8088,7 +8088,7 @@ mod tests {
             fn step_count_interval_exceeded() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     ..Default::default()
                 });
@@ -8119,7 +8119,7 @@ mod tests {
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -8151,7 +8151,7 @@ mod tests {
             fn target_interval_min_rotate() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -8183,7 +8183,7 @@ mod tests {
             fn target_interval_max_rotate() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -8215,7 +8215,7 @@ mod tests {
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -8247,7 +8247,7 @@ mod tests {
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
                     rotate: true,
@@ -8284,7 +8284,7 @@ mod tests {
             fn default() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -8303,7 +8303,7 @@ mod tests {
             fn min_step_count() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(2, 8),
                     ..Default::default()
                 });
@@ -8323,7 +8323,7 @@ mod tests {
             fn max_step_count() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 });
@@ -8343,7 +8343,7 @@ mod tests {
             fn source_interval() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
                 });
@@ -8363,7 +8363,7 @@ mod tests {
             fn source_interval_step_interval() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -8384,7 +8384,7 @@ mod tests {
             fn reverse() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
                 });
@@ -8408,7 +8408,7 @@ mod tests {
             fn default() {
                 // Given
                 let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
                 // When
@@ -8422,7 +8422,7 @@ mod tests {
             fn reverse() {
                 // Given
                 let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
                 });
@@ -8437,7 +8437,7 @@ mod tests {
             fn source_and_target_interval() {
                 // Given
                 let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    absolute_mode: AbsoluteMode::IncrementalButtons,
+                    absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
                     target_value_interval: create_unit_value_interval(0.4, 1.0),
                     ..Default::default()
