@@ -904,6 +904,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 // TODO-medium Make textual value available
                 let events = script.execute(feedback_value.to_numeric()?.value).ok()?;
                 let value = V::Raw {
+                    // We can't provide a sensible feedback address here! The script source is
+                    // not going to work well with feedback relay.
                     feedback_address_info: None,
                     events,
                 };

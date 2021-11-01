@@ -81,6 +81,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                     PitchBendChange { channel, .. } => {
                         MidiSourceAddress::PitchBendChange { channel }
                     }
+                    // No feedback supported for other types of MIDI messages
                     _ => return None,
                 }
             }
@@ -138,6 +139,9 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
     }
 
     /// Might allocate!
+    ///
+    /// Not usable for producing feedback output that should participate in feedback relay
+    /// (since BorrowedSysEx doesn't contain a feedback address).
     pub fn try_into_owned(self) -> Result<MidiSourceValue<'static, M>, &'static str> {
         use MidiSourceValue::*;
         let res = match self {
@@ -153,6 +157,9 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                 events,
             },
             BorrowedSysEx(bytes) => Raw {
+                // Situations where we convert a borrowed message into an owned are not
+                // situations in which we want to send a feedback value. So it's not bad that
+                // we can't provide a feedback address here.
                 feedback_address_info: None,
                 events: vec![RawMidiEvent::try_from_slice(0, bytes)?],
             },
