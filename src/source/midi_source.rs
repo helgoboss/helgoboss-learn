@@ -725,12 +725,16 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 pattern,
                 custom_character,
             } => {
-                let bytes = match value {
-                    Raw { events, .. } => events.first()?.bytes(),
-                    BorrowedSysEx(bytes) => bytes,
+                let fraction = match value {
+                    Raw { events, .. } => pattern.match_and_capture(events.first()?.bytes())?,
+                    BorrowedSysEx(bytes) => pattern.match_and_capture(bytes)?,
+                    Plain(msg) => {
+                        let (b1, b2, b3) = msg.to_bytes();
+                        let bytes = [b1, b2.get(), b3.get()];
+                        pattern.match_and_capture(&bytes)?
+                    }
                     _ => return None,
                 };
-                let fraction = pattern.match_and_capture(bytes)?;
                 if fraction.max_val() == 0 {
                     // Fixed pattern with no variable parts. This should act like a trigger!
                     Some(ControlValue::AbsoluteContinuous(UnitValue::MAX))
