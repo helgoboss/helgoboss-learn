@@ -156,7 +156,7 @@ impl OscTypeTag {
 
     pub fn to_concrete_args(self, index: u32, v: FeedbackValue) -> Option<Vec<OscType>> {
         use OscTypeTag::*;
-        // TODO-high What's the usual way to transmit colored text?
+        // TODO-medium What's the usual way to transmit colored text?
         let value = match self {
             Float => OscType::Float(v.to_numeric()?.value.to_unit_value().get() as _),
             Double => OscType::Double(v.to_numeric()?.value.to_unit_value().get()),

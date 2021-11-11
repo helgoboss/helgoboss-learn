@@ -20,6 +20,13 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
         Interval { min, max }
     }
 
+    pub fn try_new(min: T, max: T) -> Result<Interval<T>, String> {
+        if min > max {
+            return Err(format!("min = {:?} is greater than max = {:?}", min, max));
+        }
+        Ok(Interval { min, max })
+    }
+
     pub fn new_auto(bound_1: T, bound_2: T) -> Interval<T> {
         Interval {
             min: if bound_1 <= bound_2 { bound_1 } else { bound_2 },
