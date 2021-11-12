@@ -744,7 +744,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 match i {
                     None => MakesSense("Other mappings in the same group will not be touched."),
                     SameControl => {
-                        MakesSense("Other non-virtual mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete tuning section of the other mapping.")
+                        MakesSense("Other non-virtual mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete glue section of the other mapping.")
                     }
                     SameTargetValue => {
                         MakesSense(
@@ -752,7 +752,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                         )
                     }
                     InverseControl => {
-                        MakesSense("Other non-virtual mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete tuning section of the other mapping.")
+                        MakesSense("Other non-virtual mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete glue section of the other mapping.")
                     }
                     InverseTargetValue => {
                         use DetailedSourceCharacter::*;
