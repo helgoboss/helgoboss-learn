@@ -99,6 +99,14 @@ pub enum AbsoluteValue {
 }
 
 impl AbsoluteValue {
+    pub fn from_bool(on: bool) -> Self {
+        if on {
+            AbsoluteValue::Continuous(UnitValue::MAX)
+        } else {
+            AbsoluteValue::Continuous(UnitValue::MIN)
+        }
+    }
+
     pub fn is_on(&self) -> bool {
         !self.is_zero()
     }

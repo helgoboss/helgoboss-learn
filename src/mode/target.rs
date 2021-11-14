@@ -2,7 +2,8 @@ use crate::{AbsoluteValue, UnitValue};
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ControlType {
-    /// Targets which don't have a step size.
+    /// Targets which don't have a step size, targets that have just on/off states and trigger
+    /// targets.
     AbsoluteContinuous,
     /// The only difference to AbsoluteContinuous is that it gets retriggered even it already has
     /// the desired target value.
@@ -10,8 +11,10 @@ pub enum ControlType {
     /// Imagine a "tempo" target: Musical tempo is continuous in nature and still you might want to
     /// offer the possibility to round on fraction-less bpm values. Discrete and continuous at the
     /// same time.
+    ///
+    /// In more recent versions, the same can be achieved using target value sequences.
     AbsoluteContinuousRoundable { rounding_step_size: UnitValue },
-    /// Targets which have a grid of discrete values.
+    /// Targets which have a grid of discrete values (and therefore a step size).
     AbsoluteDiscrete { atomic_step_size: UnitValue },
     /// If target wants to be controlled via relative increments.
     Relative,
