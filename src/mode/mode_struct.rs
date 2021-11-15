@@ -13,7 +13,7 @@ use regex::Captures;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -182,6 +182,8 @@ struct ModeState {
     unpacked_target_value_sequence: Vec<UnitValue>,
     // For relative control
     unpacked_target_value_set: BTreeSet<UnitValue>,
+    // For textual feedback
+    textual_feedback_props: HashSet<String>,
 }
 
 #[derive(
@@ -237,6 +239,7 @@ pub struct ModeGarbage<T> {
     _textual_feedback_expression: String,
     _feedback_color: Option<VirtualColor>,
     _feedback_background_color: Option<VirtualColor>,
+    _textual_feedback_props: HashSet<String>,
 }
 
 /// Human-readable numeric value (not normalized, not zero-rooted).
@@ -361,6 +364,7 @@ impl<T: Transformation> Mode<T> {
             _textual_feedback_expression: self.settings.textual_feedback_expression,
             _feedback_color: self.settings.feedback_color,
             _feedback_background_color: self.settings.feedback_background_color,
+            _textual_feedback_props: self.state.textual_feedback_props,
         }
     }
 
@@ -412,6 +416,10 @@ impl<T: Transformation> Mode<T> {
 
     pub fn wants_textual_feedback(&self) -> bool {
         self.settings.feedback_type.is_textual()
+    }
+
+    pub fn textual_feedback_props(&self) -> &HashSet<String> {
+        &self.state.textual_feedback_props
     }
 
     pub fn query_textual_feedback(
