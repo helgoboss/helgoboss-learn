@@ -344,6 +344,12 @@ impl<T: Transformation> Mode<T> {
                 settings.press_duration_interval,
                 settings.turbo_rate,
             ),
+            textual_feedback_props: {
+                textual_feedback_expression_regex()
+                    .captures_iter(&settings.textual_feedback_expression)
+                    .map(|cap| cap[1].to_string())
+                    .collect()
+            },
             ..Default::default()
         };
         Mode { settings, state }
@@ -426,14 +432,13 @@ impl<T: Transformation> Mode<T> {
         &self,
         get_prop_value: &impl Fn(&str) -> Option<PropValue>,
     ) -> TextualFeedbackValue {
-        let expression_regex = regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#);
         let text = if self.settings.textual_feedback_expression.is_empty() {
             get_prop_value("target.text_value")
                 .unwrap_or_default()
                 .into_textual()
                 .into()
         } else {
-            expression_regex.replace_all(
+            textual_feedback_expression_regex().replace_all(
                 &self.settings.textual_feedback_expression,
                 |c: &Captures| get_prop_value(&c[1]).unwrap_or_default().into_textual(),
             )
@@ -8563,4 +8568,8 @@ impl<T> From<ModeControlResult<T>> for Option<T> {
 
 fn full_discrete_interval() -> Interval<u32> {
     Interval::new(0, u32::MAX)
+}
+
+fn textual_feedback_expression_regex() -> &'static regex::Regex {
+    regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#)
 }
