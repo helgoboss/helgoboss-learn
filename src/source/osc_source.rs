@@ -6,7 +6,7 @@ use crate::{
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use rosc::{OscMessage, OscType};
+use rosc::{OscColor, OscMessage, OscType};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
@@ -119,7 +119,7 @@ pub enum OscTypeTag {
     Long,
     #[display(fmt = "Char (ignored)")]
     Char,
-    #[display(fmt = "Color (ignored)")]
+    #[display(fmt = "Color (feedback only)")]
     Color,
     #[display(fmt = "MIDI (ignored)")]
     Midi,
@@ -156,7 +156,6 @@ impl OscTypeTag {
 
     pub fn to_concrete_args(self, index: u32, v: FeedbackValue) -> Option<Vec<OscType>> {
         use OscTypeTag::*;
-        // TODO-medium What's the usual way to transmit colored text?
         let value = match self {
             Float => OscType::Float(v.to_numeric()?.value.to_unit_value().get() as _),
             Double => OscType::Double(v.to_numeric()?.value.to_unit_value().get()),
@@ -164,6 +163,23 @@ impl OscTypeTag {
             Nil => OscType::Nil,
             Inf => OscType::Inf,
             String => OscType::String(v.to_textual().text.into_owned()),
+            Color => {
+                let color = match v {
+                    FeedbackValue::Off => None,
+                    FeedbackValue::Numeric(v) => v.style.color,
+                    FeedbackValue::Textual(v) => v.style.color,
+                };
+                match color {
+                    // Nil is hopefully interpreted as "Default color".
+                    None => OscType::Nil,
+                    Some(c) => OscType::Color(OscColor {
+                        red: c.r(),
+                        green: c.g(),
+                        blue: c.b(),
+                        alpha: 255,
+                    }),
+                }
+            }
             _ => return None,
         };
         // Send nil for all other elements
@@ -179,7 +195,7 @@ impl OscTypeTag {
 
     pub fn supports_feedback(self) -> bool {
         use OscTypeTag::*;
-        matches!(self, Float | Double | Bool | Nil | Inf | String)
+        matches!(self, Float | Double | Bool | Nil | Inf | String | Color)
     }
 }
 
