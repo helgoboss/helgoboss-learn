@@ -84,14 +84,6 @@ pub enum VirtualColor {
 }
 
 impl VirtualColor {
-    fn prop(&self) -> Option<&String> {
-        use VirtualColor::*;
-        match self {
-            Rgb(_) => None,
-            Prop { prop } => Some(prop),
-        }
-    }
-
     fn resolve(&self, get_prop_value: impl Fn(&str) -> Option<PropValue>) -> Option<RgbColor> {
         use VirtualColor::*;
         match self {
@@ -353,22 +345,27 @@ impl<T: Transformation> Mode<T> {
                 settings.turbo_rate,
             ),
             feedback_props_in_use: {
-                textual_feedback_expression_regex()
-                    .captures_iter(&settings.textual_feedback_expression)
-                    .map(|cap| cap[1].to_string())
-                    .chain(
-                        settings
-                            .feedback_color
-                            .iter()
-                            .filter_map(|p| p.prop().cloned()),
-                    )
-                    .chain(
-                        settings
-                            .feedback_background_color
-                            .iter()
-                            .filter_map(|p| p.prop().cloned()),
-                    )
-                    .collect()
+                let mut set = HashSet::new();
+                if settings.feedback_type.is_textual() {
+                    if settings.textual_feedback_expression.is_empty() {
+                        set.insert(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY.to_string());
+                    } else {
+                        set.extend(
+                            textual_feedback_expression_regex()
+                                .captures_iter(&settings.textual_feedback_expression)
+                                .map(|cap| cap[1].to_string()),
+                        );
+                    }
+                }
+                if let Some(VirtualColor::Prop { prop }) = settings.feedback_color.as_ref() {
+                    set.insert(prop.to_string());
+                }
+                if let Some(VirtualColor::Prop { prop }) =
+                    settings.feedback_background_color.as_ref()
+                {
+                    set.insert(prop.to_string());
+                }
+                set
             },
             ..Default::default()
         };
@@ -453,7 +450,7 @@ impl<T: Transformation> Mode<T> {
         get_prop_value: &impl Fn(&str) -> Option<PropValue>,
     ) -> TextualFeedbackValue {
         let text = if self.settings.textual_feedback_expression.is_empty() {
-            get_prop_value("target.text_value")
+            get_prop_value(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY)
                 .unwrap_or_default()
                 .into_textual()
                 .into()
@@ -8593,3 +8590,5 @@ fn full_discrete_interval() -> Interval<u32> {
 fn textual_feedback_expression_regex() -> &'static regex::Regex {
     regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#)
 }
+
+const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
