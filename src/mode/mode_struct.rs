@@ -84,6 +84,14 @@ pub enum VirtualColor {
 }
 
 impl VirtualColor {
+    fn prop(&self) -> Option<&String> {
+        use VirtualColor::*;
+        match self {
+            Rgb(_) => None,
+            Prop { prop } => Some(prop),
+        }
+    }
+
     fn resolve(&self, get_prop_value: impl Fn(&str) -> Option<PropValue>) -> Option<RgbColor> {
         use VirtualColor::*;
         match self {
@@ -183,7 +191,7 @@ struct ModeState {
     // For relative control
     unpacked_target_value_set: BTreeSet<UnitValue>,
     // For textual feedback
-    textual_feedback_props: HashSet<String>,
+    feedback_props_in_use: HashSet<String>,
 }
 
 #[derive(
@@ -239,7 +247,7 @@ pub struct ModeGarbage<T> {
     _textual_feedback_expression: String,
     _feedback_color: Option<VirtualColor>,
     _feedback_background_color: Option<VirtualColor>,
-    _textual_feedback_props: HashSet<String>,
+    _feedback_props_in_use: HashSet<String>,
 }
 
 /// Human-readable numeric value (not normalized, not zero-rooted).
@@ -344,10 +352,22 @@ impl<T: Transformation> Mode<T> {
                 settings.press_duration_interval,
                 settings.turbo_rate,
             ),
-            textual_feedback_props: {
+            feedback_props_in_use: {
                 textual_feedback_expression_regex()
                     .captures_iter(&settings.textual_feedback_expression)
                     .map(|cap| cap[1].to_string())
+                    .chain(
+                        settings
+                            .feedback_color
+                            .iter()
+                            .filter_map(|p| p.prop().cloned()),
+                    )
+                    .chain(
+                        settings
+                            .feedback_background_color
+                            .iter()
+                            .filter_map(|p| p.prop().cloned()),
+                    )
                     .collect()
             },
             ..Default::default()
@@ -370,7 +390,7 @@ impl<T: Transformation> Mode<T> {
             _textual_feedback_expression: self.settings.textual_feedback_expression,
             _feedback_color: self.settings.feedback_color,
             _feedback_background_color: self.settings.feedback_background_color,
-            _textual_feedback_props: self.state.textual_feedback_props,
+            _feedback_props_in_use: self.state.feedback_props_in_use,
         }
     }
 
@@ -424,8 +444,8 @@ impl<T: Transformation> Mode<T> {
         self.settings.feedback_type.is_textual()
     }
 
-    pub fn textual_feedback_props(&self) -> &HashSet<String> {
-        &self.state.textual_feedback_props
+    pub fn feedback_props_in_use(&self) -> &HashSet<String> {
+        &self.state.feedback_props_in_use
     }
 
     pub fn query_textual_feedback(
