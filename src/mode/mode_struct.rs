@@ -409,10 +409,10 @@ impl<T: Transformation> Mode<T> {
     ///
     /// `None` either means ignored or target value already has desired value.
     #[cfg(test)]
-    fn control<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
+    fn control<'a, C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>, TC>(
         &mut self,
         control_value: ControlValue,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ControlValue> {
         self.control_with_options(
@@ -428,10 +428,14 @@ impl<T: Transformation> Mode<T> {
     ///
     /// `None` means the incoming source control value doesn't reach the target because it's
     /// filtered out (e.g. because of button filter "Press only").
-    pub fn control_with_options<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
+    pub fn control_with_options<
+        'a,
+        C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
+        TC,
+    >(
         &mut self,
         control_value: ControlValue,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
@@ -593,9 +597,9 @@ impl<T: Transformation> Mode<T> {
     /// This function should be called regularly if the features are needed that are driven by a
     /// timer (fire on length min, turbo, etc.). Returns a target control value whenever it's time
     /// to fire.
-    pub fn poll<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
+    pub fn poll<'a, C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>, TC>(
         &mut self,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ModeControlResult<ControlValue>> {
         let control_value = self.state.press_duration_processor.poll()?;
@@ -610,13 +614,13 @@ impl<T: Transformation> Mode<T> {
 
     /// Gives the mode the opportunity to update internal state when it's being connected to a
     /// target (either initial target resolve or refreshing target resolve).  
-    pub fn update_from_target<'a, C: Copy>(
+    pub fn update_from_target<'a, C: Copy + Into<TC>, TC>(
         &mut self,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
     ) {
         let default_step_size = target
-            .control_type(context)
+            .control_type(context.into())
             .step_size()
             .unwrap_or_else(|| UnitValue::new(DEFAULT_STEP_SIZE));
         let unpacked_sequence = self
@@ -627,10 +631,14 @@ impl<T: Transformation> Mode<T> {
         self.state.unpacked_target_value_sequence = unpacked_sequence;
     }
 
-    fn control_relative<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
+    fn control_relative<
+        'a,
+        C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
+        TC,
+    >(
         &mut self,
         i: DiscreteIncrement,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
@@ -649,10 +657,14 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
-    fn control_absolute<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
+    fn control_absolute<
+        'a,
+        C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
+        TC,
+    >(
         &mut self,
         v: AbsoluteValue,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         consider_press_duration: bool,
         options: ModeControlOptions,
@@ -693,10 +705,14 @@ impl<T: Transformation> Mode<T> {
 
     /// Processes the given control value in absolute mode and maybe returns an appropriate target
     /// value.
-    fn control_absolute_normal<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
+    fn control_absolute_normal<
+        'a,
+        C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
+        TC,
+    >(
         &mut self,
         control_value: AbsoluteValue,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         // Memorize as previous value for next control cycle.
@@ -719,8 +735,8 @@ impl<T: Transformation> Mode<T> {
             )?
         };
         // Control value is within source value interval
-        let current_target_value = target.current_value(context);
-        let control_type = target.control_type(context);
+        let current_target_value = target.current_value(context.into());
+        let control_type = target.control_type(context.into());
         // 1. Apply source interval
         let source_normalized_control_value = source_bound_value.normalize(
             &self.settings.source_value_interval,
@@ -752,11 +768,12 @@ impl<T: Transformation> Mode<T> {
     /// "Incremental button" mode (convert absolute button presses to relative increments)
     fn control_absolute_incremental_buttons<
         'a,
-        C: Copy + TransformationInputProvider<T::AdditionalInput>,
+        C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
+        TC,
     >(
         &mut self,
         control_value: UnitValue,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
@@ -786,10 +803,10 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
-    fn control_absolute_incremental_buttons_normal<'a, C: Copy>(
+    fn control_absolute_incremental_buttons_normal<'a, C: Copy + Into<TC>, TC>(
         &mut self,
         control_value: UnitValue,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
@@ -803,7 +820,7 @@ impl<T: Transformation> Mode<T> {
             );
         }
         use ControlType::*;
-        let control_type = target.control_type(context);
+        let control_type = target.control_type(context.into());
         match control_type {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
@@ -830,7 +847,7 @@ impl<T: Transformation> Mode<T> {
                 self.hit_target_absolutely_with_unit_increment(
                     step_size_increment,
                     self.settings.step_size_interval.min_val(),
-                    target.current_value(context)?.to_unit_value(),
+                    target.current_value(context.into())?.to_unit_value(),
                     options,
                 )
             }
@@ -845,7 +862,7 @@ impl<T: Transformation> Mode<T> {
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
                 self.hit_discrete_target_absolutely(discrete_increment, atomic_step_size, options, control_type, || {
-                    target.current_value(context)
+                    target.current_value(context.into())
                 })
             }
             Relative
@@ -873,10 +890,10 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
-    fn control_absolute_toggle_buttons<'a, C: Copy>(
+    fn control_absolute_toggle_buttons<'a, C: Copy + Into<TC>, TC>(
         &mut self,
         control_value: AbsoluteValue,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         // TODO-high-discrete In discrete processing, don't interpret current target value as
@@ -886,7 +903,7 @@ impl<T: Transformation> Mode<T> {
         }
         // Nothing we can do if we can't get the current target value. This shouldn't happen
         // usually because virtual targets are not supposed to be used with toggle mode.
-        let current_target_value = target.current_value(context)?;
+        let current_target_value = target.current_value(context.into())?;
         let desired_target_value = if self.settings.target_value_interval.min_is_max(BASE_EPSILON) {
             // Special case #452 (target min == target max).
             // Make it usable for exclusive toggle buttons.
@@ -919,7 +936,7 @@ impl<T: Transformation> Mode<T> {
         // already has that value.
         let final_absolute_value = self.get_final_absolute_value(
             AbsoluteValue::Continuous(desired_target_value),
-            target.control_type(context),
+            target.control_type(context.into()),
         );
         Some(ModeControlResult::hit_target(final_absolute_value))
     }
@@ -933,11 +950,12 @@ impl<T: Transformation> Mode<T> {
     /// - Wrap (rotate)
     fn control_relative_to_absolute<
         'a,
-        C: Copy + TransformationInputProvider<T::AdditionalInput>,
+        C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
+        TC,
     >(
         &mut self,
         discrete_increment: DiscreteIncrement,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
@@ -964,10 +982,10 @@ impl<T: Transformation> Mode<T> {
     // We don't need source min/max config in this case. At least I can't think of a use case
     // where one would like to totally ignore especially slow or especially fast encoder movements,
     // I guess that possibility would rather cause irritation.
-    fn control_relative_normal<'a, C: Copy>(
+    fn control_relative_normal<'a, C: Copy + Into<TC>, TC>(
         &mut self,
         discrete_increment: DiscreteIncrement,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
@@ -981,7 +999,7 @@ impl<T: Transformation> Mode<T> {
             );
         }
         use ControlType::*;
-        let control_type = target.control_type(context);
+        let control_type = target.control_type(context.into());
         match control_type {
             AbsoluteContinuous
             | AbsoluteContinuousRoundable { .. }
@@ -1007,7 +1025,7 @@ impl<T: Transformation> Mode<T> {
                 self.hit_target_absolutely_with_unit_increment(
                     clamped_unit_increment,
                     self.settings.step_size_interval.min_val(),
-                    target.current_value(context)?.to_unit_value(),
+                    target.current_value(context.into())?.to_unit_value(),
                     options,
                 )
             }
@@ -1022,7 +1040,7 @@ impl<T: Transformation> Mode<T> {
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
                 self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, options, control_type, || {
-                    target.current_value(context)
+                    target.current_value(context.into())
                 })
             }
             Relative | VirtualMulti => {
@@ -1047,15 +1065,15 @@ impl<T: Transformation> Mode<T> {
     ///
     /// - Target value set
     /// - Wrap (rotate)
-    fn control_relative_target_value_set<'a, C: Copy>(
+    fn control_relative_target_value_set<'a, C: Copy + Into<TC>, TC>(
         &mut self,
         discrete_increment: DiscreteIncrement,
-        target: &impl Target<'a, Context = C>,
+        target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         // Determine next value in target value set
-        let current = target.current_value(context)?.to_unit_value();
+        let current = target.current_value(context.into())?.to_unit_value();
         let target_value_set = &self.state.unpacked_target_value_set;
         use std::ops::Bound::*;
         let mut v = current;
