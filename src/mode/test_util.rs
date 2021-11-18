@@ -32,7 +32,9 @@ impl TestTransformation {
 }
 
 impl Transformation for TestTransformation {
-    fn transform(&self, input_value: f64, _: f64) -> Result<f64, &'static str> {
+    type AdditionalInput = ();
+
+    fn transform(&self, input_value: f64, _: f64, _: ()) -> Result<f64, &'static str> {
         (self.transformer)(input_value)
     }
 }

@@ -260,6 +260,7 @@ impl AbsoluteValue {
         transformation: &T,
         current_target_value: Option<AbsoluteValue>,
         is_discrete_mode: bool,
+        additional_input: T::AdditionalInput,
     ) -> Result<Self, &'static str> {
         use AbsoluteValue::*;
         match self {
@@ -268,7 +269,11 @@ impl AbsoluteValue {
                 let current_target_value = current_target_value
                     .map(|t| t.to_unit_value())
                     .unwrap_or_default();
-                let res = transformation.transform_continuous(v, current_target_value)?;
+                let res = transformation.transform_continuous(
+                    v,
+                    current_target_value,
+                    additional_input,
+                )?;
                 Ok(Continuous(res))
             }
             Discrete(v) => {
@@ -278,7 +283,11 @@ impl AbsoluteValue {
                 match current_target_value {
                     Continuous(t) => {
                         // Target value is continuous.
-                        let res = transformation.transform_continuous(v.to_unit_value(), t)?;
+                        let res = transformation.transform_continuous(
+                            v.to_unit_value(),
+                            t,
+                            additional_input,
+                        )?;
                         Ok(Continuous(res))
                     }
                     Discrete(t) => {
@@ -286,14 +295,17 @@ impl AbsoluteValue {
                         if is_discrete_mode {
                             // Discrete mode.
                             // Transform using non-normalized rounded floating point values.
-                            let res = transformation.transform_discrete(v, t)?;
+                            let res = transformation.transform_discrete(v, t, additional_input)?;
                             Ok(Discrete(res))
                         } else {
                             // Continuous mode.
                             // Transform using normalized floating point values, thereby destroying
                             // the value's discreteness.
-                            let res = transformation
-                                .transform_continuous(v.to_unit_value(), t.to_unit_value())?;
+                            let res = transformation.transform_continuous(
+                                v.to_unit_value(),
+                                t.to_unit_value(),
+                                additional_input,
+                            )?;
                             Ok(Continuous(res))
                         }
                     }

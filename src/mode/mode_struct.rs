@@ -33,6 +33,20 @@ pub struct ModeControlOptions {
     pub enforce_rotate: bool,
 }
 
+pub trait TransformationInputProvider<T> {
+    fn additional_input(&self) -> T;
+}
+
+// It's quite practical and makes sense to let the unit control context (basically a control context
+// that is empty) to always create the default transformation input. It also saves some plumbing
+// because we couldn't implement TransformationInputProvider for () in other crates. We need to do
+// it here. Otherwise we would have
+impl<T: Default> TransformationInputProvider<T> for () {
+    fn additional_input(&self) -> T {
+        Default::default()
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct ModeFeedbackOptions {
     pub source_is_virtual: bool,
@@ -395,7 +409,7 @@ impl<T: Transformation> Mode<T> {
     ///
     /// `None` either means ignored or target value already has desired value.
     #[cfg(test)]
-    fn control<'a, C: Copy>(
+    fn control<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
         &mut self,
         control_value: ControlValue,
         target: &impl Target<'a, Context = C>,
@@ -414,7 +428,7 @@ impl<T: Transformation> Mode<T> {
     ///
     /// `None` means the incoming source control value doesn't reach the target because it's
     /// filtered out (e.g. because of button filter "Press only").
-    pub fn control_with_options<'a, C: Copy>(
+    pub fn control_with_options<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
         &mut self,
         control_value: ControlValue,
         target: &impl Target<'a, Context = C>,
@@ -430,11 +444,6 @@ impl<T: Transformation> Mode<T> {
                 self.control_absolute(AbsoluteValue::Discrete(v), target, context, true, options)
             }
         }
-    }
-
-    #[cfg(test)]
-    fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
-        self.feedback_with_options(target_value, ModeFeedbackOptions::default())
     }
 
     pub fn wants_textual_feedback(&self) -> bool {
@@ -481,12 +490,27 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
-    /// Takes a target value, interprets and transforms it conforming to mode rules and
-    /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback_with_options(
+    #[cfg(test)]
+    fn feedback(&self, target_value: AbsoluteValue) -> Option<AbsoluteValue> {
+        self.feedback_with_options(target_value, ModeFeedbackOptions::default())
+    }
+
+    #[cfg(test)]
+    fn feedback_with_options(
         &self,
         target_value: AbsoluteValue,
         options: ModeFeedbackOptions,
+    ) -> Option<AbsoluteValue> {
+        self.feedback_with_options_detail(target_value, options, Default::default())
+    }
+
+    /// Takes a target value, interprets and transforms it conforming to mode rules and
+    /// maybe returns an appropriate source value that should be sent to the source.
+    pub fn feedback_with_options_detail(
+        &self,
+        target_value: AbsoluteValue,
+        options: ModeFeedbackOptions,
+        additional_transformation_input: T::AdditionalInput,
     ) -> Option<AbsoluteValue> {
         let v = target_value;
         // 4. Filter and Apply target interval (normalize)
@@ -538,6 +562,7 @@ impl<T: Transformation> Mode<T> {
                 transformation,
                 Some(v),
                 self.settings.use_discrete_processing,
+                additional_transformation_input,
             ) {
                 v = res;
             }
@@ -568,7 +593,7 @@ impl<T: Transformation> Mode<T> {
     /// This function should be called regularly if the features are needed that are driven by a
     /// timer (fire on length min, turbo, etc.). Returns a target control value whenever it's time
     /// to fire.
-    pub fn poll<'a, C: Copy>(
+    pub fn poll<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
         &mut self,
         target: &impl Target<'a, Context = C>,
         context: C,
@@ -602,7 +627,7 @@ impl<T: Transformation> Mode<T> {
         self.state.unpacked_target_value_sequence = unpacked_sequence;
     }
 
-    fn control_relative<'a, C: Copy>(
+    fn control_relative<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
         &mut self,
         i: DiscreteIncrement,
         target: &impl Target<'a, Context = C>,
@@ -624,7 +649,7 @@ impl<T: Transformation> Mode<T> {
         }
     }
 
-    fn control_absolute<'a, C: Copy>(
+    fn control_absolute<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
         &mut self,
         v: AbsoluteValue,
         target: &impl Target<'a, Context = C>,
@@ -668,7 +693,7 @@ impl<T: Transformation> Mode<T> {
 
     /// Processes the given control value in absolute mode and maybe returns an appropriate target
     /// value.
-    fn control_absolute_normal<'a, C: Copy>(
+    fn control_absolute_normal<'a, C: Copy + TransformationInputProvider<T::AdditionalInput>>(
         &mut self,
         control_value: AbsoluteValue,
         target: &impl Target<'a, Context = C>,
@@ -713,6 +738,7 @@ impl<T: Transformation> Mode<T> {
             source_normalized_control_value,
             control_type,
             current_target_value,
+            context.additional_input(),
         );
         self.hitting_target_considering_max_jump(
             pepped_up_control_value,
@@ -724,7 +750,10 @@ impl<T: Transformation> Mode<T> {
     }
 
     /// "Incremental button" mode (convert absolute button presses to relative increments)
-    fn control_absolute_incremental_buttons<'a, C: Copy>(
+    fn control_absolute_incremental_buttons<
+        'a,
+        C: Copy + TransformationInputProvider<T::AdditionalInput>,
+    >(
         &mut self,
         control_value: UnitValue,
         target: &impl Target<'a, Context = C>,
@@ -902,7 +931,10 @@ impl<T: Transformation> Mode<T> {
     /// - Conversion to absolute value
     /// - Step size interval
     /// - Wrap (rotate)
-    fn control_relative_to_absolute<'a, C: Copy>(
+    fn control_relative_to_absolute<
+        'a,
+        C: Copy + TransformationInputProvider<T::AdditionalInput>,
+    >(
         &mut self,
         discrete_increment: DiscreteIncrement,
         target: &impl Target<'a, Context = C>,
@@ -1070,6 +1102,7 @@ impl<T: Transformation> Mode<T> {
         source_normalized_control_value: AbsoluteValue,
         control_type: ControlType,
         current_target_value: Option<AbsoluteValue>,
+        additional_transformation_input: T::AdditionalInput,
     ) -> AbsoluteValue {
         let mut v = source_normalized_control_value;
         // 2. Apply transformation
@@ -1078,6 +1111,7 @@ impl<T: Transformation> Mode<T> {
                 transformation,
                 current_target_value,
                 self.settings.use_discrete_processing,
+                additional_transformation_input,
             ) {
                 v = res;
             }
