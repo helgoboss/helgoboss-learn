@@ -1294,6 +1294,13 @@ impl<T: Transformation> Mode<T> {
         );
         println!("result of in_sync: {}", in_sync);
 
+        // Check for controller jumps. For fast movements, the time won't be expired between messages.
+        // For slow movements, the delta between the previous and current values will be under Jump Max.
+        let control_has_jumped = time_expired &&
+            (pepped_up_control_value.to_unit_value().get() -
+             previous_pepped_up_control_value.to_unit_value().get()).abs() >
+            self.settings.jump_interval.max_val().get();
+
         // Remember time and sync
         self.state.previous_control_value_time = Some(Instant::now());
         self.state.takeover_in_sync = in_sync;
@@ -1311,7 +1318,12 @@ impl<T: Transformation> Mode<T> {
                 }
                 Parallel => {
                     // TODO-high-discrete Implement advanced takeover modes for discrete values, too
-                    if let Some(prev) = prev_source_normalized_control_value {
+                    if control_has_jumped {
+                        // If an absolute control is pointed to a different target, physically moved, then pointed
+                        // back to this target, it may be in a completely different place. Ignore the first message
+                        // and wait until we can establish direction again.
+                        None
+                    } else if let Some(prev) = prev_source_normalized_control_value {
                         let relative_increment =
                             source_normalized_control_value.to_unit_value() - prev.to_unit_value();
                         if relative_increment == 0.0 {
@@ -1362,7 +1374,9 @@ impl<T: Transformation> Mode<T> {
                     )
                 }
                 CatchUp => {
-                    if let Some(prev) = prev_source_normalized_control_value {
+                    if control_has_jumped {
+                        None
+                    } else if let Some(prev) = prev_source_normalized_control_value {
                         let prev = prev.to_unit_value();
                         let relative_increment =
                             source_normalized_control_value.to_unit_value() - prev;
