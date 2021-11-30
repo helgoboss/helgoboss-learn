@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::{BTreeSet, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// When interpreting target value, make only 4 fractional digits matter.
 ///
@@ -27,6 +27,9 @@ pub const FEEDBACK_EPSILON: f64 = BASE_EPSILON;
 
 /// 0.01 has been chosen as default minimum step size because it corresponds to 1%.
 pub const DEFAULT_STEP_SIZE: f64 = 0.01;
+
+// Time in ms between CC messages to assume they are part of the one motion
+pub const CONTROL_MOVE_TIMEOUT: u128 = 100;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct ModeControlOptions {
@@ -192,6 +195,10 @@ struct ModeState {
     /// previous one.
     previous_absolute_control_value: Option<UnitValue>,
     discrete_previous_absolute_control_value: Option<u32>,
+    /// Used in absolute control for takeover modes to "hold on" during continuous movements
+    takeover_in_sync: bool,
+    previous_control_value_time: Option<std::time::Instant>,
+    previous_pepped_up_control_value: Option<AbsoluteValue>,
     // For absolute control
     unpacked_target_value_sequence: Vec<UnitValue>,
     // For relative control
@@ -629,6 +636,8 @@ impl<T: Transformation> Mode<T> {
             .unpack(default_step_size);
         self.state.unpacked_target_value_set = unpacked_sequence.iter().copied().collect();
         self.state.unpacked_target_value_sequence = unpacked_sequence;
+        self.state.takeover_in_sync = false;
+        self.state.previous_control_value_time = Some(Instant::now());
     }
 
     fn control_relative<
@@ -1183,6 +1192,53 @@ impl<T: Transformation> Mode<T> {
         v
     }
 
+    fn is_in_sync(
+        &self,
+        jump_max: UnitValue,
+        time_expired: bool,
+        prev_value: UnitValue,
+        current_value: UnitValue,
+        target_value: UnitValue,
+        in_sync: bool,
+    ) -> bool {
+
+        let current_distance: f64 = current_value.get() - target_value.get();
+        let prev_distance: f64 = prev_value.get() - target_value.get();
+        let same_side: bool = (current_distance < 0.0 && prev_distance < 0.0) ||
+                              (current_distance > 0.0 && prev_distance > 0.0);
+        let approaching_target: bool = same_side && (current_distance.abs() < prev_distance.abs());
+
+        // If we were in sync less than CONTROL_MOVE_TIMEOUT ms ago, stay in sync
+	    if in_sync && !time_expired {
+            println!("Already in sync");
+            return true;
+        }
+
+        // New takeover logic. Goals:
+        //
+        // 1) Avoid awkward "backwards" jumps when approaching the target.
+        // 2) Ensure that we pick up fast movements that *pass through* the target, even if
+        //    the individual controller values never actually fall inside the Jump Max range.
+        // 3) Enable a typical "set and forget" Jump Max of 3% or less without sync loss.
+        //
+        // Approaching is detected by either a quick movement from outside Jump Max to
+        // inside it (both on the same side of the target), OR a slow movement (whose step
+        // timings may exceed TIMEOUT due to coarse 0-127 resolution) within Jump Max.
+        //
+        // Inspired by controllers/softtakeover.cpp in the Mixxx DJ project.
+
+        println!("cd {} pd {} ss {} at {} te {}", current_distance, prev_distance, same_side, approaching_target, time_expired);
+
+        if current_distance.abs() <= jump_max.get() && !approaching_target {
+            return true;
+        } else if !same_side && !time_expired {
+            return true;
+        }
+
+	return false;
+
+    }
+
     fn hitting_target_considering_max_jump(
         &mut self,
         pepped_up_control_value: AbsoluteValue,
@@ -1215,10 +1271,37 @@ impl<T: Transformation> Mode<T> {
         } else {
             pepped_up_control_value.calc_distance_from(current_target_value.to_continuous_value())
         };
+
+        // If there is no previous pepped-up control value, set one
+        let previous_pepped_up_control_value = match self.state.previous_pepped_up_control_value {
+            None => pepped_up_control_value,
+            Some(value) => value,
+        };
+        self.state.previous_pepped_up_control_value = Some(pepped_up_control_value);
+
+        let time_expired = match self.state.previous_control_value_time {
+            None => true,
+            Some(time) => time.elapsed().as_millis() > CONTROL_MOVE_TIMEOUT,
+        };
+
+        let in_sync = self.is_in_sync(
+            self.settings.jump_interval.max_val(),
+            time_expired,
+            previous_pepped_up_control_value.to_unit_value(),
+            pepped_up_control_value.to_unit_value(),
+            current_target_value.to_unit_value(),
+            self.state.takeover_in_sync,
+        );
+        println!("result of in_sync: {}", in_sync);
+
+        // Remember time and sync
+        self.state.previous_control_value_time = Some(Instant::now());
+        self.state.takeover_in_sync = in_sync;
+
         if distance.is_greater_than(
             self.settings.jump_interval.max_val(),
             self.settings.discrete_jump_interval.max_val(),
-        ) {
+        ) && (!in_sync) {
             // Distance is too large
             use TakeoverMode::*;
             return match self.settings.takeover_mode {
@@ -1338,6 +1421,10 @@ impl<T: Transformation> Mode<T> {
             self.settings.jump_interval.min_val(),
             self.settings.discrete_jump_interval.min_val(),
         ) {
+            return None;
+        }
+        // Need to be in sync
+        if !in_sync {
             return None;
         }
         // Distance is also not too small
