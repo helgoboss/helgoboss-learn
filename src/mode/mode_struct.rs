@@ -1210,7 +1210,6 @@ impl<T: Transformation> Mode<T> {
 
         // If we were in sync less than CONTROL_MOVE_TIMEOUT ms ago, stay in sync
 	    if in_sync && !time_expired {
-            println!("Already in sync");
             return true;
         }
 
@@ -1226,8 +1225,6 @@ impl<T: Transformation> Mode<T> {
         // timings may exceed TIMEOUT due to coarse 0-127 resolution) within Jump Max.
         //
         // Inspired by controllers/softtakeover.cpp in the Mixxx DJ project.
-
-        println!("cd {} pd {} ss {} at {} te {}", current_distance, prev_distance, same_side, approaching_target, time_expired);
 
         if current_distance.abs() <= jump_max.get() && !approaching_target {
             return true;
@@ -1292,7 +1289,6 @@ impl<T: Transformation> Mode<T> {
             current_target_value.to_unit_value(),
             self.state.takeover_in_sync,
         );
-        println!("result of in_sync: {}", in_sync);
 
         // Check for controller jumps. For fast movements, the time won't be expired between messages.
         // For slow movements, the delta between the previous and current values will be under Jump Max.
