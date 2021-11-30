@@ -1220,10 +1220,6 @@ impl<T: Transformation> Mode<T> {
         //    the individual controller values never actually fall inside the Jump Max range.
         // 3) Enable a typical "set and forget" Jump Max of 3% or less without sync loss.
         //
-        // Approaching is detected by either a quick movement from outside Jump Max to
-        // inside it (both on the same side of the target), OR a slow movement (whose step
-        // timings may exceed TIMEOUT due to coarse 0-127 resolution) within Jump Max.
-        //
         // Inspired by controllers/softtakeover.cpp in the Mixxx DJ project.
 
         if current_distance.abs() <= jump_max.get() && !approaching_target {
