@@ -1213,6 +1213,12 @@ impl<T: Transformation> Mode<T> {
             return true;
         }
 
+        // If Jump Max = 100% then we are in sync by definition. (movements less than Jump
+        // Min will be handled downstream of this)
+        if jump_max.is_one() {
+            return true;
+        }
+
         // New takeover logic. Goals:
         //
         // 1) Avoid awkward "backwards" jumps when approaching the target.
