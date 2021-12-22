@@ -997,12 +997,15 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         .fuse();
                         // Reverse because we want right-aligned
                         let positions = scope.positions();
-                        let body = positions.iter().rev().flat_map(|pos| {
-                            iter::once(0x40u8 + pos)
-                                .chain(iter::once(codes.next().unwrap_or_default()))
-                        });
-                        let complete = mackie_7_segment_msg(body);
-                        vec![RawMidiEvent::try_from_iter(0, complete).ok()?]
+                        positions
+                            .iter()
+                            .rev()
+                            .map(|pos| {
+                                let bytes =
+                                    it([0xB0, 0x40 + pos, codes.next().unwrap_or_default()]);
+                                RawMidiEvent::try_from_iter(0, bytes).unwrap()
+                            })
+                            .collect()
                     }
                     DisplaySpec::LaunchpadProScrollingText => {
                         let body = filter_ascii_chars(&value.text);
@@ -1410,10 +1413,6 @@ fn launchpad_pro_scrolling_text_sysex(
         if looped { 0x01 } else { 0x00 },
     ]);
     start.chain(body).chain(end())
-}
-
-fn mackie_7_segment_msg(body: impl Iterator<Item = u8>) -> impl Iterator<Item = u8> {
-    iter::once(0xB0).chain(body)
 }
 
 fn filter_ascii_chars(text: &str) -> impl Iterator<Item = u8> + '_ {
