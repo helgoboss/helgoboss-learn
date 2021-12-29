@@ -1777,7 +1777,7 @@ fn find_closest_color_in_palette(color: RgbColor, palette: &[RgbColor]) -> u8 {
     ifurthest as u8
 }
 
-const ASCII_SPACE: u8 = ' ' as u8;
+const ASCII_SPACE: u8 = b' ';
 
 #[cfg(test)]
 mod tests {
