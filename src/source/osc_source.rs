@@ -1,7 +1,9 @@
 use crate::DetailedSourceCharacter::PressOnlyButton;
+
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, SourceCharacter, UnitValue,
+    DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, RgbColor, SourceCharacter,
+    UnitValue,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -9,7 +11,10 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rosc::{OscColor, OscMessage, OscType};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "serde_with")]
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
+use strum_macros::EnumString;
 
 /// With OSC it's easy: The source address is the address!
 pub type OscSourceAddress = String;
@@ -20,6 +25,46 @@ pub struct OscSource {
     address_pattern: String,
     /// To process a value (not just trigger).
     arg_descriptor: Option<OscArgDescriptor>,
+    /// If non-empty, these are used for mapping feedback data to arguments.
+    feedback_args: Vec<OscFeedbackProp>,
+}
+
+#[derive(Copy, Clone, PartialEq, Debug, EnumString, strum_macros::Display)]
+#[cfg_attr(feature = "serde_with", derive(SerializeDisplay, DeserializeFromStr))]
+pub enum OscFeedbackProp {
+    // Floats
+    #[strum(serialize = "value.float")]
+    ValueAsFloat,
+    // Doubles
+    #[strum(serialize = "value.double")]
+    ValueAsDouble,
+    // Bools
+    #[strum(serialize = "value.bool")]
+    ValueAsBool,
+    // Nil
+    #[strum(serialize = "nil")]
+    Nil,
+    // Inf
+    #[strum(serialize = "inf")]
+    Inf,
+    // Strings
+    #[strum(serialize = "value.string")]
+    ValueAsString,
+    #[strum(serialize = "style.color.rrggbb")]
+    ColorRrggbb,
+    #[strum(serialize = "style.background_color.rrggbb")]
+    BackgroundColorRrggbb,
+    // Colors
+    #[strum(serialize = "style.color")]
+    Color,
+    #[strum(serialize = "style.backround_color")]
+    BackgroundColor,
+}
+
+impl Default for OscFeedbackProp {
+    fn default() -> Self {
+        Self::Nil
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -157,29 +202,13 @@ impl OscTypeTag {
     pub fn to_concrete_args(self, index: u32, v: FeedbackValue) -> Option<Vec<OscType>> {
         use OscTypeTag::*;
         let value = match self {
-            Float => OscType::Float(v.to_numeric()?.value.to_unit_value().get() as _),
-            Double => OscType::Double(v.to_numeric()?.value.to_unit_value().get()),
-            Bool => OscType::Bool(v.to_numeric()?.value.is_on()),
+            Float => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsFloat, &v)?,
+            Double => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsDouble, &v)?,
+            Bool => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsBool, &v)?,
             Nil => OscType::Nil,
             Inf => OscType::Inf,
-            String => OscType::String(v.to_textual().text.into_owned()),
-            Color => {
-                let color = match v {
-                    FeedbackValue::Off => None,
-                    FeedbackValue::Numeric(v) => v.style.color,
-                    FeedbackValue::Textual(v) => v.style.color,
-                };
-                match color {
-                    // Nil is hopefully interpreted as "Default color".
-                    None => OscType::Nil,
-                    Some(c) => OscType::Color(OscColor {
-                        red: c.r(),
-                        green: c.g(),
-                        blue: c.b(),
-                        alpha: 255,
-                    }),
-                }
-            }
+            String => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsString, &v)?,
+            Color => convert_feedback_prop_to_arg(OscFeedbackProp::Color, &v)?,
             _ => return None,
         };
         // Send nil for all other elements
@@ -222,16 +251,21 @@ impl OscSource {
         self.address_pattern == other.address_pattern
     }
 
-    pub fn new(address_pattern: String, arg_descriptor: Option<OscArgDescriptor>) -> Self {
+    pub fn new(
+        address_pattern: String,
+        arg_descriptor: Option<OscArgDescriptor>,
+        feedback_args: Vec<OscFeedbackProp>,
+    ) -> Self {
         Self {
             address_pattern,
             arg_descriptor,
+            feedback_args,
         }
     }
 
     pub fn from_source_value(msg: OscMessage, arg_index_hint: Option<u32>) -> OscSource {
         let arg_descriptor = OscArgDescriptor::from_msg(&msg, arg_index_hint.unwrap_or(0));
-        OscSource::new(msg.addr, arg_descriptor)
+        OscSource::new(msg.addr, arg_descriptor, vec![])
     }
 
     pub fn address_pattern(&self) -> &str {
@@ -334,7 +368,14 @@ impl OscSource {
     pub fn feedback(&self, feedback_value: FeedbackValue) -> Option<OscMessage> {
         let msg = OscMessage {
             addr: self.address_pattern.clone(),
-            args: if let Some(desc) = self.arg_descriptor {
+            args: if !self.feedback_args.is_empty() {
+                self.feedback_args
+                    .iter()
+                    .map(|prop| {
+                        convert_feedback_prop_to_arg(*prop, &feedback_value).unwrap_or(OscType::Nil)
+                    })
+                    .collect()
+            } else if let Some(desc) = self.arg_descriptor {
                 desc.to_concrete_args(feedback_value)?
             } else {
                 // No arguments shall be sent.
@@ -342,5 +383,46 @@ impl OscSource {
             },
         };
         Some(msg)
+    }
+}
+
+fn convert_feedback_prop_to_arg(prop: OscFeedbackProp, v: &FeedbackValue) -> Option<OscType> {
+    use OscFeedbackProp::*;
+    let arg = match prop {
+        ValueAsFloat => OscType::Float(v.to_numeric()?.value.to_unit_value().get() as _),
+        ValueAsDouble => OscType::Double(v.to_numeric()?.value.to_unit_value().get()),
+        ValueAsBool => OscType::Bool(v.to_numeric()?.value.is_on()),
+        Nil => OscType::Nil,
+        Inf => OscType::Inf,
+        ValueAsString => OscType::String(v.to_textual().text.into_owned()),
+        ColorRrggbb => convert_color_to_rrggbb_string_arg(v.color()),
+        BackgroundColorRrggbb => convert_color_to_rrggbb_string_arg(v.background_color()),
+        Color => convert_color_to_native_color_arg(v.color()),
+        BackgroundColor => convert_color_to_native_color_arg(v.background_color()),
+    };
+    Some(arg)
+}
+
+fn convert_color_to_rrggbb_string_arg(v: Option<RgbColor>) -> OscType {
+    match v {
+        // Nil is hopefully interpreted as "Default color".
+        None => OscType::Nil,
+        Some(c) => {
+            let color_string = format!("{:02X}{:02X}{:02X}", c.r(), c.g(), c.b());
+            OscType::String(color_string)
+        }
+    }
+}
+
+fn convert_color_to_native_color_arg(v: Option<RgbColor>) -> OscType {
+    match v {
+        // Nil is hopefully interpreted as "Default color".
+        None => OscType::Nil,
+        Some(c) => OscType::Color(OscColor {
+            red: c.r(),
+            green: c.g(),
+            blue: c.b(),
+            alpha: 255,
+        }),
     }
 }

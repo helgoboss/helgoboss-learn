@@ -80,6 +80,24 @@ impl<'a> FeedbackValue<'a> {
             }
         }
     }
+
+    pub fn color(&self) -> Option<RgbColor> {
+        use FeedbackValue::*;
+        match self {
+            Off => None,
+            Numeric(v) => v.style.color,
+            Textual(v) => v.style.color,
+        }
+    }
+
+    pub fn background_color(&self) -> Option<RgbColor> {
+        use FeedbackValue::*;
+        match self {
+            Off => None,
+            Numeric(v) => v.style.background_color,
+            Textual(v) => v.style.background_color,
+        }
+    }
 }
 
 impl<'a> Display for FeedbackValue<'a> {
