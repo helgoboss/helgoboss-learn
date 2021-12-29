@@ -927,7 +927,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             .filter_map(|range| {
                                 let body = range
                                     .clone()
-                                    .map(|_| ascii_chars.next().unwrap_or_default());
+                                    .map(|_| ascii_chars.next().unwrap_or(ASCII_SPACE));
                                 let sysex = mackie_lcd_sysex(0x14, range.start, body);
                                 RawMidiEvent::try_from_iter(0, sysex).ok()
                             })
@@ -1002,7 +1002,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             .rev()
                             .map(|pos| {
                                 let bytes =
-                                    it([0xB0, 0x40 + pos, codes.next().unwrap_or_default()]);
+                                    it([0xB0, 0x40 + pos, codes.next().unwrap_or(ASCII_SPACE)]);
                                 RawMidiEvent::try_from_iter(0, bytes).unwrap()
                             })
                             .collect()
@@ -1776,6 +1776,8 @@ fn find_closest_color_in_palette(color: RgbColor, palette: &[RgbColor]) -> u8 {
     }
     ifurthest as u8
 }
+
+const ASCII_SPACE: u8 = ' ' as u8;
 
 #[cfg(test)]
 mod tests {
