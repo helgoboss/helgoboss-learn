@@ -594,6 +594,11 @@ impl<T: Transformation> Mode<T> {
         self.state.press_duration_processor.wants_to_be_polled()
     }
 
+    /// Should be called when the mapping gets deactivated.
+    pub fn mapping_deactivated(&mut self) {
+        self.state.press_duration_processor.mapping_deactivated();
+    }
+
     /// This function should be called regularly if the features are needed that are driven by a
     /// timer (fire on length min, turbo, etc.). Returns a target control value whenever it's time
     /// to fire.
