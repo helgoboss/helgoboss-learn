@@ -276,12 +276,4 @@ impl PressDurationProcessor {
             }
         }
     }
-
-    pub fn mapping_deactivated(&mut self) {
-        // TODO-high The clean solution to this problem would be to interpret a
-        //  mapping deactivation as a button release. That would make the single press
-        //  fire as expected and reset. Better than ignoring the release after a certain
-        //  time - existing mappings could depend on high release times.
-        self.last_button_press = None;
-    }
 }

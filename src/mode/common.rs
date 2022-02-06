@@ -263,6 +263,11 @@ impl Default for GroupInteraction {
 }
 
 impl GroupInteraction {
+    pub fn is_target_based(&self) -> bool {
+        use GroupInteraction::*;
+        matches!(self, SameTargetValue | InverseTargetValue)
+    }
+
     pub fn is_inverse(self) -> bool {
         use GroupInteraction::*;
         matches!(
