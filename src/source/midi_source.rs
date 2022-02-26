@@ -1001,9 +1001,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             .iter()
                             .rev()
                             .map(|pos| {
-                                let bytes =
-                                    it([0xB0, 0x40 + pos, codes.next().unwrap_or(ASCII_SPACE)]);
-                                RawMidiEvent::try_from_iter(0, bytes).unwrap()
+                                let bytes = [0xB0, 0x40 + pos, codes.next().unwrap_or(ASCII_SPACE)];
+                                RawMidiEvent::try_from_iter(0, bytes.into_iter()).unwrap()
                             })
                             .collect()
                     }
@@ -1338,12 +1337,8 @@ fn mackie_lcd_sysex(
     display_offset: u8,
     body: impl Iterator<Item = u8>,
 ) -> impl Iterator<Item = u8> {
-    let start = it([0xF0, 0x00, 0x00, 0x66, model_id, 0x12, display_offset]);
-    start.chain(body).chain(end())
-}
-
-fn it<const N: usize>(arr: [u8; N]) -> impl Iterator<Item = u8> {
-    IntoIterator::into_iter(arr)
+    let start = [0xF0, 0x00, 0x00, 0x66, model_id, 0x12, display_offset];
+    start.into_iter().chain(body).chain(end())
 }
 
 fn end() -> impl Iterator<Item = u8> {
@@ -1366,7 +1361,7 @@ fn sinicon_e24_sysex(
     let item_style = 0;
     // Wildcard (0 means background color, anything else means line length)
     let wildcard = line_length;
-    let start = it([
+    let start = [
         // 1
         0xF0,
         0x00,
@@ -1390,8 +1385,8 @@ fn sinicon_e24_sysex(
         color.r(),
         color.g(),
         color.b(),
-    ]);
-    start.chain(body).chain(end())
+    ];
+    start.into_iter().chain(body).chain(end())
 }
 
 fn launchpad_pro_scrolling_text_sysex(
@@ -1401,7 +1396,7 @@ fn launchpad_pro_scrolling_text_sysex(
 ) -> impl Iterator<Item = u8> {
     let color_code =
         find_closest_color_in_palette(color, &super::devices::launchpad::COLOR_PALETTE);
-    let start = it([
+    let start = [
         0xF0,
         0x00,
         0x20,
@@ -1411,8 +1406,8 @@ fn launchpad_pro_scrolling_text_sysex(
         0x14,
         color_code,
         if looped { 0x01 } else { 0x00 },
-    ]);
-    start.chain(body).chain(end())
+    ];
+    start.into_iter().chain(body).chain(end())
 }
 
 fn filter_ascii_chars(text: &str) -> impl Iterator<Item = u8> + '_ {
