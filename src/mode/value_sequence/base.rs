@@ -67,8 +67,7 @@ impl ValueSequence {
     pub fn unpack(&self, default_step_size: UnitValue) -> Vec<UnitValue> {
         self.entries
             .iter()
-            .map(|e| WithDefaultStepSize::new(e, default_step_size))
-            .flatten()
+            .flat_map(|e| WithDefaultStepSize::new(e, default_step_size))
             .collect()
     }
 }
