@@ -180,7 +180,7 @@ struct ModeState {
     press_duration_processor: PressDurationProcessor,
     /// For relative-to-absolute mode
     current_absolute_value: UnitValue,
-    discrete_current_absolute_value: u32,
+    _discrete_current_absolute_value: u32,
     /// Counter for implementing throttling.
     ///
     /// Throttling is implemented by spitting out control values only every nth time. The counter
@@ -191,7 +191,7 @@ struct ModeState {
     /// Used in absolute control for certain takeover modes to calculate the next value based on the
     /// previous one.
     previous_absolute_control_value: Option<UnitValue>,
-    discrete_previous_absolute_control_value: Option<u32>,
+    _discrete_previous_absolute_control_value: Option<u32>,
     // For absolute control
     unpacked_target_value_sequence: Vec<UnitValue>,
     // For relative control
