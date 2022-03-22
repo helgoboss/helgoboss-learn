@@ -2,10 +2,10 @@ pub fn format_percentage_without_unit(value: f64) -> String {
     let percentage = value * 100.0;
     if (percentage - percentage.round()).abs() < 0.001 {
         // No fraction. Omit zeros after dot.
-        format!("{:.0}", percentage)
+        format!("{:.4}", percentage)
     } else {
         // Has fraction. We want to display these.
-        format!("{:.2}", percentage)
+        format!("{:.4}", percentage)
     }
 }
 
