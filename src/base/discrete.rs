@@ -3,6 +3,7 @@ use derive_more::Display;
 use helgoboss_midi::U7;
 use std::cmp;
 use std::convert::TryFrom;
+use std::fmt::{Display, Formatter};
 use std::ops::Sub;
 
 /// A positive discrete number most likely representing a step count.
@@ -65,6 +66,12 @@ impl Sub for DiscreteValue {
 /// be an increment after all).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DiscreteIncrement(i32);
+
+impl Display for DiscreteIncrement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:+}", self.0)
+    }
+}
 
 impl DiscreteIncrement {
     /// Creates the discrete increment. Panics if the given number is 0.

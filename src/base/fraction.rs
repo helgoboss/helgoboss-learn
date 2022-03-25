@@ -1,4 +1,5 @@
 use crate::{DiscreteIncrement, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Fraction {
@@ -7,6 +8,12 @@ pub struct Fraction {
     /// Soft maximum value: Good to know in order to be able to instantly convert to a UnitValue
     /// whenever we want to go absolute-continuous.
     max: u32,
+}
+
+impl Display for Fraction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.actual, self.max)
+    }
 }
 
 impl Fraction {

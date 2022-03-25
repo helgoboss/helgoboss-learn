@@ -2,6 +2,7 @@ use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
     Transformation, UnitValue, BASE_EPSILON,
 };
+use std::fmt::{Display, Formatter};
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -16,6 +17,16 @@ pub enum ControlValue {
     AbsoluteDiscrete(Fraction),
     /// Relative increment (e.g. encoder movement)
     Relative(DiscreteIncrement),
+}
+
+impl Display for ControlValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ControlValue::AbsoluteContinuous(v) => v.fmt(f),
+            ControlValue::AbsoluteDiscrete(v) => v.fmt(f),
+            ControlValue::Relative(v) => v.fmt(f),
+        }
+    }
 }
 
 impl ControlValue {
