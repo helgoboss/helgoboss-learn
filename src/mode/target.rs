@@ -15,7 +15,10 @@ pub enum ControlType {
     /// In more recent versions, the same can be achieved using target value sequences.
     AbsoluteContinuousRoundable { rounding_step_size: UnitValue },
     /// Targets which have a grid of discrete values (and therefore a step size).
-    AbsoluteDiscrete { atomic_step_size: UnitValue },
+    AbsoluteDiscrete {
+        atomic_step_size: UnitValue,
+        is_retriggerable: bool,
+    },
     /// If target wants to be controlled via relative increments.
     Relative,
     /// For virtual continuous targets (that don't know about the nature of the real target).
@@ -30,14 +33,23 @@ impl ControlType {
     }
 
     pub fn is_retriggerable(&self) -> bool {
-        matches!(self, ControlType::AbsoluteContinuousRetriggerable)
+        matches!(
+            self,
+            ControlType::AbsoluteContinuousRetriggerable
+                | ControlType::AbsoluteDiscrete {
+                    is_retriggerable: true,
+                    ..
+                }
+        )
     }
 
     pub fn step_size(&self) -> Option<UnitValue> {
         use ControlType::*;
         match self {
             AbsoluteContinuousRoundable { rounding_step_size } => Some(*rounding_step_size),
-            AbsoluteDiscrete { atomic_step_size } => Some(*atomic_step_size),
+            AbsoluteDiscrete {
+                atomic_step_size, ..
+            } => Some(*atomic_step_size),
             _ => None,
         }
     }

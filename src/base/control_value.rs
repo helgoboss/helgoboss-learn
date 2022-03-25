@@ -490,7 +490,9 @@ fn round_to_nearest_discrete_value(
     use ControlType::*;
     let step_size = match control_type {
         AbsoluteContinuousRoundable { rounding_step_size } => rounding_step_size,
-        AbsoluteDiscrete { atomic_step_size } => atomic_step_size,
+        AbsoluteDiscrete {
+            atomic_step_size, ..
+        } => atomic_step_size,
         AbsoluteContinuousRetriggerable
         | AbsoluteContinuous
         | Relative
