@@ -6,6 +6,9 @@ use helgoboss_midi::{
 };
 use std::convert::TryFrom;
 use std::ops::RangeInclusive;
+use tinyvec::TinyVec;
+
+pub type RawMidiEvents = TinyVec<[RawMidiEvent; 1]>;
 
 /// Incoming value which might be used to control something
 #[derive(Clone, PartialEq, Debug)]
@@ -17,7 +20,7 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
     /// We must take care not to allocate this in real-time thread!
     Raw {
         feedback_address_info: Option<RawFeedbackAddressInfo>,
-        events: Vec<RawMidiEvent>,
+        events: RawMidiEvents,
     },
     // Control-only
     Tempo(Bpm),
@@ -35,6 +38,24 @@ pub enum RawFeedbackAddressInfo {
     Display {
         spec: DisplaySpecAddress,
     },
+}
+
+impl<'a, M: ShortMessage> MidiSourceValue<'a, M> {
+    pub fn single_raw(
+        feedback_address_info: Option<RawFeedbackAddressInfo>,
+        event: RawMidiEvent,
+    ) -> Self {
+        Self::Raw {
+            feedback_address_info,
+            events: create_raw_midi_events_singleton(event),
+        }
+    }
+}
+
+pub fn create_raw_midi_events_singleton(event: RawMidiEvent) -> RawMidiEvents {
+    let mut vec = TinyVec::new();
+    vec.push(event);
+    vec
 }
 
 impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
@@ -156,18 +177,19 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                 feedback_address_info,
                 events,
             },
-            BorrowedSysEx(bytes) => Raw {
+            BorrowedSysEx(bytes) => {
                 // Situations where we convert a borrowed message into an owned are not
                 // situations in which we want to send a feedback value. So it's not bad that
                 // we can't provide a feedback address here.
-                feedback_address_info: None,
-                events: vec![RawMidiEvent::try_from_slice(0, bytes)?],
-            },
+                let feedback_address_info = None;
+                let event = RawMidiEvent::try_from_slice(0, bytes)?;
+                MidiSourceValue::single_raw(feedback_address_info, event)
+            }
         };
         Ok(res)
     }
 
-    pub fn into_garbage(self) -> Option<Vec<RawMidiEvent>> {
+    pub fn into_garbage(self) -> Option<RawMidiEvents> {
         use MidiSourceValue::*;
         match self {
             Raw { events, .. } => Some(events),
@@ -288,6 +310,16 @@ pub struct RawMidiEvent {
     frame_offset: i32,
     size: i32,
     midi_message: [u8; RawMidiEvent::MAX_LENGTH],
+}
+
+impl Default for RawMidiEvent {
+    fn default() -> Self {
+        Self {
+            frame_offset: 0,
+            size: 0,
+            midi_message: [0; RawMidiEvent::MAX_LENGTH],
+        }
+    }
 }
 
 impl RawMidiEvent {

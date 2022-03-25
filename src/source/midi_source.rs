@@ -1,8 +1,8 @@
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, Bpm,
-    ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction,
-    MidiSourceScript, MidiSourceValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiPattern,
-    RgbColor, UnitValue,
+    create_raw_midi_events_singleton, format_percentage_without_unit,
+    parse_percentage_without_unit, AbsoluteValue, Bpm, ControlValue, DetailedSourceCharacter,
+    DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
+    RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents, RawMidiPattern, RgbColor, UnitValue,
 };
 use core::iter;
 use derivative::Derivative;
@@ -897,10 +897,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 let address_info = RawFeedbackAddressInfo::Raw {
                     variable_range: pattern.variable_range(),
                 };
-                let value = V::Raw {
-                    feedback_address_info: Some(address_info),
-                    events: vec![raw_midi_event],
-                };
+                let value = V::single_raw(Some(address_info), raw_midi_event);
                 Some(value)
             }
             Script { script } => {
@@ -918,7 +915,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Display { spec } => {
                 let value = feedback_value.to_textual();
                 let style = value.style;
-                let events: Vec<_> = match spec {
+                let events: RawMidiEvents = match spec {
                     DisplaySpec::MackieLcd { scope } => {
                         let mut ascii_chars = filter_ascii_chars(&value.text);
                         scope
@@ -1010,7 +1007,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         let body = filter_ascii_chars(&value.text);
                         let color = style.color.unwrap_or(RgbColor::WHITE);
                         let sysex = launchpad_pro_scrolling_text_sysex(color, true, body);
-                        vec![RawMidiEvent::try_from_iter(0, sysex).ok()?]
+                        let event = RawMidiEvent::try_from_iter(0, sysex).ok()?;
+                        create_raw_midi_events_singleton(event)
                     }
                 };
                 let feedback_info = RawFeedbackAddressInfo::Display {
