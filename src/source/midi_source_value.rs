@@ -6,9 +6,8 @@ use helgoboss_midi::{
 };
 use std::convert::TryFrom;
 use std::ops::RangeInclusive;
-use tinyvec::TinyVec;
 
-pub type RawMidiEvents = TinyVec<[RawMidiEvent; 1]>;
+pub type RawMidiEvents = Vec<RawMidiEvent>;
 
 /// Incoming value which might be used to control something
 #[derive(Clone, PartialEq, Debug)]
@@ -53,9 +52,7 @@ impl<'a, M: ShortMessage> MidiSourceValue<'a, M> {
 }
 
 pub fn create_raw_midi_events_singleton(event: RawMidiEvent) -> RawMidiEvents {
-    let mut vec = TinyVec::new();
-    vec.push(event);
-    vec
+    vec![event]
 }
 
 impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
