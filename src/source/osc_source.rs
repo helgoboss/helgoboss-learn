@@ -277,6 +277,16 @@ impl OscTypeTag {
             Float | Double | Bool | Nil | Inf | Int | String | Long | Color
         )
     }
+
+    pub fn supports_value_range(self) -> bool {
+        use OscTypeTag::*;
+        matches!(self, Float | Double | Int | Long)
+    }
+
+    pub fn is_discrete(self) -> bool {
+        use OscTypeTag::*;
+        matches!(self, Int | Long)
+    }
 }
 
 impl OscSource {
