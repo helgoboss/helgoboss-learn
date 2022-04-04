@@ -8,6 +8,8 @@ pub struct Interval<T: PartialOrd + Copy + Sub + Debug> {
     max: T,
 }
 
+pub const UNIT_INTERVAL: Interval<f64> = Interval { min: 0.0, max: 1.0 };
+
 impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     /// Creates an interval. Panics if `min` is greater than `max`.
     pub fn new(min: T, max: T) -> Interval<T> {

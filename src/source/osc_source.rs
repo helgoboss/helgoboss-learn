@@ -1,9 +1,10 @@
 use crate::DetailedSourceCharacter::PressOnlyButton;
+use std::cmp;
 
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, RgbColor, SourceCharacter,
-    UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, ControlValue,
+    DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction, Interval, RgbColor,
+    SourceCharacter, UnitValue, UNIT_INTERVAL,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -47,9 +48,15 @@ pub enum OscFeedbackProp {
     // Inf
     #[strum(serialize = "inf")]
     Inf,
+    // Integers
+    #[strum(serialize = "value.int")]
+    ValueAsInt,
     // Strings
     #[strum(serialize = "value.string")]
     ValueAsString,
+    // Longs
+    #[strum(serialize = "value.long")]
+    ValueAsLong,
     #[strum(serialize = "style.color.rrggbb")]
     ColorRrggbb,
     #[strum(serialize = "style.background_color.rrggbb")]
@@ -67,7 +74,7 @@ impl Default for OscFeedbackProp {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct OscArgDescriptor {
     /// To select the correct value.
     index: u32,
@@ -75,14 +82,22 @@ pub struct OscArgDescriptor {
     type_tag: OscTypeTag,
     /// Interpret 1 values as increments and 0 values as decrements.
     is_relative: bool,
+    /// Value range for all range types (double, float, int, long).
+    value_range: Interval<f64>,
 }
 
 impl OscArgDescriptor {
-    pub fn new(index: u32, type_tag: OscTypeTag, is_relative: bool) -> Self {
+    pub fn new(
+        index: u32,
+        type_tag: OscTypeTag,
+        is_relative: bool,
+        value_range: Interval<f64>,
+    ) -> Self {
         Self {
             index,
             type_tag,
             is_relative,
+            value_range,
         }
     }
 
@@ -98,6 +113,10 @@ impl OscArgDescriptor {
         self.is_relative
     }
 
+    pub fn value_range(&self) -> Interval<f64> {
+        self.value_range
+    }
+
     pub fn from_msg(msg: &OscMessage, arg_index_hint: u32) -> Option<Self> {
         let desc = if let Some(hinted_arg) = msg.args.get(arg_index_hint as usize) {
             Self::from_arg(arg_index_hint, hinted_arg)
@@ -109,7 +128,8 @@ impl OscArgDescriptor {
     }
 
     pub fn to_concrete_args(self, value: FeedbackValue) -> Option<Vec<OscType>> {
-        self.type_tag.to_concrete_args(self.index, value)
+        self.type_tag
+            .to_concrete_args(self.index, value, self.value_range)
     }
 
     fn from_arg(index: u32, arg: &OscType) -> Self {
@@ -118,7 +138,24 @@ impl OscArgDescriptor {
             type_tag: OscTypeTag::from_arg(arg),
             // Relative is the exception, so we reset it when learning.
             is_relative: false,
+            value_range: match get_range_value(arg) {
+                None => DEFAULT_OSC_ARG_VALUE_RANGE,
+                Some(v) => Interval::new_auto(0.0, v),
+            },
         }
+    }
+}
+
+pub const DEFAULT_OSC_ARG_VALUE_RANGE: Interval<f64> = UNIT_INTERVAL;
+
+fn get_range_value(arg: &OscType) -> Option<f64> {
+    use OscType::*;
+    match arg {
+        Int(v) => Some(*v as f64),
+        Float(v) => Some(*v as f64),
+        Long(v) => Some(*v as f64),
+        Double(v) => Some(*v),
+        _ => None,
     }
 }
 
@@ -152,7 +189,7 @@ pub enum OscTypeTag {
     Nil,
     #[display(fmt = "Infinitum (trigger only)")]
     Inf,
-    #[display(fmt = "Int (ignored)")]
+    #[display(fmt = "Int")]
     Int,
     #[display(fmt = "String (feedback only)")]
     String,
@@ -160,7 +197,7 @@ pub enum OscTypeTag {
     Blob,
     #[display(fmt = "Time (ignored)")]
     Time,
-    #[display(fmt = "Long (ignored)")]
+    #[display(fmt = "Long")]
     Long,
     #[display(fmt = "Char (ignored)")]
     Char,
@@ -199,16 +236,27 @@ impl OscTypeTag {
         }
     }
 
-    pub fn to_concrete_args(self, index: u32, v: FeedbackValue) -> Option<Vec<OscType>> {
+    pub fn to_concrete_args(
+        self,
+        index: u32,
+        v: FeedbackValue,
+        value_range: Interval<f64>,
+    ) -> Option<Vec<OscType>> {
         use OscTypeTag::*;
         let value = match self {
-            Float => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsFloat, &v)?,
-            Double => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsDouble, &v)?,
-            Bool => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsBool, &v)?,
+            Float => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsFloat, &v, value_range)?,
+            Double => {
+                convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsDouble, &v, value_range)?
+            }
+            Bool => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsBool, &v, value_range)?,
             Nil => OscType::Nil,
             Inf => OscType::Inf,
-            String => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsString, &v)?,
-            Color => convert_feedback_prop_to_arg(OscFeedbackProp::Color, &v)?,
+            Int => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsInt, &v, value_range)?,
+            String => {
+                convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsString, &v, value_range)?
+            }
+            Long => convert_feedback_prop_to_arg(OscFeedbackProp::ValueAsLong, &v, value_range)?,
+            Color => convert_feedback_prop_to_arg(OscFeedbackProp::Color, &v, value_range)?,
             _ => return None,
         };
         // Send nil for all other elements
@@ -219,12 +267,15 @@ impl OscTypeTag {
 
     pub fn supports_control(self) -> bool {
         use OscTypeTag::*;
-        matches!(self, Float | Double | Bool | Nil | Inf)
+        matches!(self, Float | Double | Bool | Nil | Inf | Int | Long)
     }
 
     pub fn supports_feedback(self) -> bool {
         use OscTypeTag::*;
-        matches!(self, Float | Double | Bool | Nil | Inf | String | Color)
+        matches!(
+            self,
+            Float | Double | Bool | Nil | Inf | Int | String | Long | Color
+        )
     }
 }
 
@@ -277,28 +328,44 @@ impl OscSource {
     }
 
     pub fn control(&self, msg: &OscMessage) -> Option<ControlValue> {
-        let (unit_value, is_relative) = {
+        let (absolute_value, is_relative) = {
             if msg.addr != self.address_pattern {
                 return None;
             }
             if let Some(desc) = self.arg_descriptor {
                 if let Some(arg) = msg.args.get(desc.index as usize) {
                     use OscType::*;
-                    let v = match arg {
-                        Float(f) => UnitValue::new_clamped(*f as _),
-                        Double(d) => UnitValue::new(*d),
-                        Bool(on) => {
-                            if *on {
+                    let v =
+                        match arg {
+                            Float(f) => AbsoluteValue::Continuous(
+                                map_continuous_from_range_to_unit(*f as f64, desc.value_range),
+                            ),
+                            Double(d) => AbsoluteValue::Continuous(
+                                map_continuous_from_range_to_unit(*d, desc.value_range),
+                            ),
+                            Bool(on) => AbsoluteValue::Continuous(if *on {
                                 UnitValue::MAX
                             } else {
                                 UnitValue::MIN
+                            }),
+                            // Infinity/impulse or nil/null - act like a trigger.
+                            Inf | Nil => AbsoluteValue::Continuous(UnitValue::MAX),
+                            Int(i) => AbsoluteValue::Discrete(map_discrete_from_range_to_positive(
+                                *i,
+                                desc.value_range,
+                            )),
+                            Long(l) => {
+                                // TODO-low-discrete Maybe increase fraction integers to 64-bit? Right now
+                                //  we don't really take advantage of fractions, so we emit continuous control
+                                //  values as long as this doesn't change.
+                                AbsoluteValue::Continuous(map_continuous_from_range_to_unit(
+                                    *l as f64,
+                                    desc.value_range,
+                                ))
                             }
-                        }
-                        // Inifity/impulse or nil/null - act like a trigger.
-                        Inf | Nil => UnitValue::MAX,
-                        Int(_) | String(_) | Blob(_) | Time(_) | Long(_) | Char(_) | Color(_)
-                        | Midi(_) | Array(_) => return None,
-                    };
+                            String(_) | Blob(_) | Time(_) | Char(_) | Color(_) | Midi(_)
+                            | Array(_) => return None,
+                        };
                     (v, desc.is_relative)
                 } else {
                     // Argument not found. Don't do anything.
@@ -306,14 +373,14 @@ impl OscSource {
                 }
             } else {
                 // Source shall not look at any argument. Act like a trigger.
-                (UnitValue::MAX, false)
+                (AbsoluteValue::Continuous(UnitValue::MAX), false)
             }
         };
         let control_value = if is_relative {
-            let inc = if unit_value.get() > 0.0 { 1 } else { -1 };
+            let inc = if absolute_value.is_on() { 1 } else { -1 };
             ControlValue::Relative(DiscreteIncrement::new(inc))
         } else {
-            ControlValue::AbsoluteContinuous(unit_value)
+            ControlValue::from_absolute(absolute_value)
         };
         Some(control_value)
     }
@@ -332,7 +399,7 @@ impl OscSource {
         if let Some(desc) = self.arg_descriptor {
             use OscTypeTag::*;
             match desc.type_tag {
-                Float | Double => RangeElement,
+                Float | Double | Int | Long => RangeElement,
                 Bool | Nil | Inf => MomentaryButton,
                 _ => MomentaryButton,
             }
@@ -348,7 +415,7 @@ impl OscSource {
             } else {
                 use OscTypeTag::*;
                 match desc.type_tag {
-                    Float | Double => vec![
+                    Float | Double | Int | Long => vec![
                         DetailedSourceCharacter::RangeControl,
                         DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
                         DetailedSourceCharacter::MomentaryOnOffButton,
@@ -369,13 +436,20 @@ impl OscSource {
         let msg = OscMessage {
             addr: self.address_pattern.clone(),
             args: if !self.feedback_args.is_empty() {
+                // Explicit feedback args given.
+                let value_range = self
+                    .arg_descriptor
+                    .map(|desc| desc.value_range)
+                    .unwrap_or(DEFAULT_OSC_ARG_VALUE_RANGE);
                 self.feedback_args
                     .iter()
                     .map(|prop| {
-                        convert_feedback_prop_to_arg(*prop, &feedback_value).unwrap_or(OscType::Nil)
+                        convert_feedback_prop_to_arg(*prop, &feedback_value, value_range)
+                            .unwrap_or(OscType::Nil)
                     })
                     .collect()
             } else if let Some(desc) = self.arg_descriptor {
+                // No explicit feedback args given. Just derive from argument descriptor.
                 desc.to_concrete_args(feedback_value)?
             } else {
                 // No arguments shall be sent.
@@ -386,14 +460,37 @@ impl OscSource {
     }
 }
 
-fn convert_feedback_prop_to_arg(prop: OscFeedbackProp, v: &FeedbackValue) -> Option<OscType> {
+fn convert_feedback_prop_to_arg(
+    prop: OscFeedbackProp,
+    v: &FeedbackValue,
+    value_range: Interval<f64>,
+) -> Option<OscType> {
     use OscFeedbackProp::*;
     let arg = match prop {
-        ValueAsFloat => OscType::Float(v.to_numeric()?.value.to_unit_value().get() as _),
-        ValueAsDouble => OscType::Double(v.to_numeric()?.value.to_unit_value().get()),
+        ValueAsFloat | ValueAsDouble | ValueAsLong => {
+            let unit_value = v.to_numeric()?.value.to_unit_value();
+            let range_value = map_continuous_from_unit_to_range(unit_value, value_range);
+            match prop {
+                ValueAsFloat => OscType::Float(range_value as _),
+                ValueAsDouble => OscType::Double(range_value),
+                ValueAsLong => OscType::Long(range_value.round() as i64),
+                _ => unreachable!(),
+            }
+        }
         ValueAsBool => OscType::Bool(v.to_numeric()?.value.is_on()),
         Nil => OscType::Nil,
         Inf => OscType::Inf,
+        ValueAsInt => {
+            let range_value = match v.to_numeric()?.value {
+                AbsoluteValue::Continuous(uv) => {
+                    map_continuous_from_unit_to_range(uv, value_range).round() as i32
+                }
+                AbsoluteValue::Discrete(f) => {
+                    map_discrete_from_positive_to_range(f.actual(), value_range)
+                }
+            };
+            OscType::Int(range_value)
+        }
         ValueAsString => OscType::String(v.to_textual().text.into_owned()),
         ColorRrggbb => convert_color_to_rrggbb_string_arg(v.color()),
         BackgroundColorRrggbb => convert_color_to_rrggbb_string_arg(v.background_color()),
@@ -425,4 +522,41 @@ fn convert_color_to_native_color_arg(v: Option<RgbColor>) -> OscType {
             alpha: 255,
         }),
     }
+}
+
+fn map_continuous_from_range_to_unit(x: f64, value_range: Interval<f64>) -> UnitValue {
+    // y = (x - min) / span
+    let y = (x - value_range.min_val()) / value_range.span();
+    UnitValue::new_clamped(y)
+}
+
+fn map_continuous_from_unit_to_range(y: UnitValue, value_range: Interval<f64>) -> f64 {
+    // y = (x - min) / span
+    // y * span = x - min
+    // x = y * span + min
+    y.get() * value_range.span() + value_range.min_val()
+}
+
+fn map_discrete_from_range_to_positive(x: i32, value_range: Interval<f64>) -> Fraction {
+    let rounded_range = round_value_range(value_range);
+    Fraction::new(
+        clamp_to_positive(x - rounded_range.min_val()),
+        clamp_to_positive(rounded_range.span()),
+    )
+}
+
+fn map_discrete_from_positive_to_range(y: u32, value_range: Interval<f64>) -> i32 {
+    let rounded_range = round_value_range(value_range);
+    y as i32 + rounded_range.min_val()
+}
+
+fn round_value_range(value_range: Interval<f64>) -> Interval<i32> {
+    Interval::new(
+        value_range.min_val().round() as i32,
+        value_range.max_val().round() as i32,
+    )
+}
+
+fn clamp_to_positive(v: i32) -> u32 {
+    cmp::max(0, v) as u32
 }
