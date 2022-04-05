@@ -3,16 +3,19 @@ use std::ops::{RangeInclusive, Sub};
 
 /// An interval which has an inclusive min and inclusive max value.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
-pub struct Interval<T: PartialOrd + Copy + Sub + Debug> {
+pub struct Interval<T> {
     min: T,
     max: T,
 }
 
 pub const UNIT_INTERVAL: Interval<f64> = Interval { min: 0.0, max: 1.0 };
 
-impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
+impl<T: PartialOrd + Copy> Interval<T> {
     /// Creates an interval. Panics if `min` is greater than `max`.
-    pub fn new(min: T, max: T) -> Interval<T> {
+    pub fn new(min: T, max: T) -> Interval<T>
+    where
+        T: Debug,
+    {
         assert!(
             min <= max,
             "min = {:?} is greater than max = {:?}",
@@ -22,7 +25,10 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
         Interval { min, max }
     }
 
-    pub fn try_new(min: T, max: T) -> Result<Interval<T>, String> {
+    pub fn try_new(min: T, max: T) -> Result<Interval<T>, String>
+    where
+        T: Debug,
+    {
         if min > max {
             return Err(format!("min = {:?} is greater than max = {:?}", min, max));
         }
@@ -91,7 +97,10 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     ///
     /// If the given minimum is greater than the current maximum, the maximum will be set to given
     /// minimum.
-    pub fn with_min(&self, min: T) -> Interval<T> {
+    pub fn with_min(&self, min: T) -> Interval<T>
+    where
+        T: Debug,
+    {
         Interval::new(min, if min <= self.max { self.max } else { min })
     }
 
@@ -104,7 +113,10 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     ///
     /// If the given maximum is lower than the current minimum, the minimum will be set to the given
     /// maximum.
-    pub fn with_max(&self, max: T) -> Interval<T> {
+    pub fn with_max(&self, max: T) -> Interval<T>
+    where
+        T: Debug,
+    {
         Interval::new(if self.min <= max { self.min } else { max }, max)
     }
 
@@ -114,14 +126,17 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
     }
 
     /// Returns the distance between the low and high bound of this interval.
-    pub fn span(&self) -> T::Output {
+    pub fn span(&self) -> T::Output
+    where
+        T: Sub,
+    {
         self.max - self.min
     }
 
     /// If there's no intersection, a zero interval (with default values) will be returned.
     pub fn intersect(&self, other: &Interval<T>) -> Interval<T>
     where
-        T: Default,
+        T: Default + Debug,
     {
         let greatest_min = partial_min_max::max(self.min, other.min);
         let lowest_max = partial_min_max::min(self.max, other.max);
@@ -134,7 +149,7 @@ impl<T: PartialOrd + Copy + Sub + Debug> Interval<T> {
 
     pub fn union(&self, other: &Interval<T>) -> Interval<T>
     where
-        T: Default,
+        T: Default + Debug,
     {
         let lowest_min = partial_min_max::min(self.min, other.min);
         let greatest_max = partial_min_max::max(self.max, other.max);
