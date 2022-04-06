@@ -1,6 +1,6 @@
 use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
-    Transformation, UnitValue, BASE_EPSILON,
+    Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use std::fmt::{Display, Formatter};
 
@@ -15,8 +15,10 @@ pub enum ControlValue {
     /// note number, without immediately converting it into a UnitValue and thereby losing that
     /// information - which is important for the new "Discrete" mode.
     AbsoluteDiscrete(Fraction),
-    /// Relative increment (e.g. encoder movement)
-    Relative(DiscreteIncrement),
+    /// Relative increment that represents a continuous adjustment.
+    RelativeContinuous(UnitIncrement),
+    /// Relative increment that represents a number of increments/decrements.
+    RelativeDiscrete(DiscreteIncrement),
 }
 
 impl Display for ControlValue {
@@ -24,7 +26,8 @@ impl Display for ControlValue {
         match self {
             ControlValue::AbsoluteContinuous(v) => v.fmt(f),
             ControlValue::AbsoluteDiscrete(v) => v.fmt(f),
-            ControlValue::Relative(v) => v.fmt(f),
+            ControlValue::RelativeContinuous(v) => v.fmt(f),
+            ControlValue::RelativeDiscrete(v) => v.fmt(f),
         }
     }
 }
@@ -42,13 +45,20 @@ impl ControlValue {
 
     /// Convenience method for creating a relative control value
     pub fn relative(increment: i32) -> ControlValue {
-        ControlValue::Relative(DiscreteIncrement::new(increment))
+        ControlValue::RelativeDiscrete(DiscreteIncrement::new(increment))
     }
 
     pub fn from_absolute(value: AbsoluteValue) -> ControlValue {
         match value {
             AbsoluteValue::Continuous(v) => Self::AbsoluteContinuous(v),
             AbsoluteValue::Discrete(f) => Self::AbsoluteDiscrete(f),
+        }
+    }
+
+    pub fn from_relative(increment: Increment) -> ControlValue {
+        match increment {
+            Increment::Continuous(i) => Self::RelativeContinuous(i),
+            Increment::Discrete(i) => Self::RelativeDiscrete(i),
         }
     }
 
@@ -73,7 +83,7 @@ impl ControlValue {
     /// Extracts the discrete increment if this is a relative control value.
     pub fn as_discrete_increment(self) -> Result<DiscreteIncrement, &'static str> {
         match self {
-            ControlValue::Relative(v) => Ok(v),
+            ControlValue::RelativeDiscrete(v) => Ok(v),
             _ => Err("control value is not relative"),
         }
     }
@@ -81,7 +91,8 @@ impl ControlValue {
     pub fn inverse(self) -> ControlValue {
         match self {
             ControlValue::AbsoluteContinuous(v) => ControlValue::AbsoluteContinuous(v.inverse()),
-            ControlValue::Relative(v) => ControlValue::Relative(v.inverse()),
+            ControlValue::RelativeDiscrete(v) => ControlValue::RelativeDiscrete(v.inverse()),
+            ControlValue::RelativeContinuous(v) => ControlValue::RelativeContinuous(v.inverse()),
             ControlValue::AbsoluteDiscrete(v) => ControlValue::AbsoluteDiscrete(v.inverse()),
         }
     }
@@ -89,9 +100,11 @@ impl ControlValue {
     pub fn to_absolute_continuous(self) -> Result<ControlValue, &'static str> {
         match self {
             ControlValue::AbsoluteContinuous(v) => Ok(ControlValue::AbsoluteContinuous(v)),
-            ControlValue::Relative(_) => Err("relative value can't be normalized"),
             ControlValue::AbsoluteDiscrete(v) => {
                 Ok(ControlValue::AbsoluteContinuous(v.to_unit_value()))
+            }
+            ControlValue::RelativeContinuous(_) | ControlValue::RelativeDiscrete(_) => {
+                Err("relative values can't be normalized")
             }
         }
     }
@@ -120,6 +133,20 @@ impl AbsoluteValue {
 
     pub fn is_on(&self) -> bool {
         !self.is_zero()
+    }
+
+    pub fn continuous_value(self) -> Option<UnitValue> {
+        match self {
+            AbsoluteValue::Continuous(v) => Some(v),
+            AbsoluteValue::Discrete(_) => None,
+        }
+    }
+
+    pub fn discrete_value(self) -> Option<Fraction> {
+        match self {
+            AbsoluteValue::Continuous(_) => None,
+            AbsoluteValue::Discrete(f) => Some(f),
+        }
     }
 
     pub fn to_unit_value(self) -> UnitValue {
@@ -404,6 +431,54 @@ impl AbsoluteValue {
 impl Default for AbsoluteValue {
     fn default() -> Self {
         Self::Continuous(Default::default())
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum Increment {
+    Continuous(UnitIncrement),
+    Discrete(DiscreteIncrement),
+}
+
+impl Increment {
+    pub fn is_positive(&self) -> bool {
+        match self {
+            Increment::Continuous(i) => i.is_positive(),
+            Increment::Discrete(i) => i.is_positive(),
+        }
+    }
+
+    /// Returns a unit increment.
+    ///
+    /// For continuous increments, this just returns the contained value.
+    ///
+    /// For discrete increments, the atomic unit value is used to convert the integer into
+    /// a unit increment. Return `None` if the result would be zero (non-increment).
+    pub fn to_unit_increment(&self, atomic_unit_value: UnitValue) -> Option<UnitIncrement> {
+        match self {
+            Increment::Continuous(i) => Some(*i),
+            Increment::Discrete(i) => i.to_unit_increment(atomic_unit_value),
+        }
+    }
+
+    /// Returns a discrete increment.
+    ///
+    /// For discrete increments, this just returns the contained value.
+    ///
+    /// For continuous increments, this returns a +1 or -1 depending on the direction of the
+    /// increment. The actual amount is ignored.
+    pub fn to_discrete_increment(&self) -> DiscreteIncrement {
+        match self {
+            Increment::Continuous(i) => i.to_discrete_increment(),
+            Increment::Discrete(i) => *i,
+        }
+    }
+
+    pub fn inverse(&self) -> Increment {
+        match self {
+            Increment::Continuous(i) => Increment::Continuous(i.inverse()),
+            Increment::Discrete(i) => Increment::Discrete(i.inverse()),
+        }
     }
 }
 

@@ -220,9 +220,10 @@ impl DiscreteIncrement {
         }
     }
 
-    /// Returns a unit increment or None in case of 0.0. The unit increment is built by creating a
-    /// multiple of the given atomic unit value (= minimum step size) and clamping the result if it
-    /// exceeds the unit interval.
+    /// Returns a unit increment or None in case of 0.0.
+    ///
+    /// The unit increment is built by creating a multiple of the given atomic unit value (= minimum
+    /// step size) and clamping the result if it exceeds the unit interval.
     pub fn to_unit_increment(self, atomic_unit_value: UnitValue) -> Option<UnitIncrement> {
         let positive_large = self.to_value().get() as f64 * atomic_unit_value.get();
         let unit_value = UnitValue::new(num::clamp(positive_large, 0.0, 1.0));

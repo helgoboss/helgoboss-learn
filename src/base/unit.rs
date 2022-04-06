@@ -4,7 +4,7 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Sub};
 
 /// A number that is primarily within the negative and positive unit interval `(-1.0..=1.0)` but
@@ -473,6 +473,23 @@ pub fn create_unit_value_interval(min: f64, max: f64) -> Interval<UnitValue> {
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct UnitIncrement(f64);
 
+impl TryFrom<f64> for UnitIncrement {
+    type Error = &'static str;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        if !Self::is_valid(value) {
+            return Err("not a valid unit increment");
+        }
+        Ok(Self::new(value))
+    }
+}
+
+impl Display for UnitIncrement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:+}", self.0)
+    }
+}
+
 impl UnitIncrement {
     pub fn is_valid(number: f64) -> bool {
         number != 0.0 && (-1.0..=1.0).contains(&number)
@@ -533,6 +550,15 @@ impl UnitIncrement {
         self.0 >= 0.0
     }
 
+    /// Returns a +1 or -1 depending on the direction of the increment. The actual amount is ignored.
+    pub fn to_discrete_increment(&self) -> DiscreteIncrement {
+        if self.is_positive() {
+            DiscreteIncrement::new(1)
+        } else {
+            DiscreteIncrement::new(-1)
+        }
+    }
+
     /// Returns the signum (-1 if it's a negative increment, otherwise +1).
     pub fn signum(&self) -> i32 {
         if self.is_positive() {
@@ -551,6 +577,10 @@ impl UnitIncrement {
     pub fn clamp_to_interval(&self, interval: &Interval<UnitValue>) -> Option<UnitIncrement> {
         let clamped_value = self.to_value().clamp_to_interval(interval);
         clamped_value.to_increment(self.signum())
+    }
+
+    pub fn inverse(&self) -> Self {
+        Self(-self.0)
     }
 }
 

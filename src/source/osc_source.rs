@@ -388,7 +388,7 @@ impl OscSource {
         };
         let control_value = if is_relative {
             let inc = if absolute_value.is_on() { 1 } else { -1 };
-            ControlValue::Relative(DiscreteIncrement::new(inc))
+            ControlValue::RelativeDiscrete(DiscreteIncrement::new(inc))
         } else {
             ControlValue::from_absolute(absolute_value)
         };

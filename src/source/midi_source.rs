@@ -1323,7 +1323,7 @@ const fn abs(value: Fraction) -> ControlValue {
 }
 
 const fn rel(increment: DiscreteIncrement) -> ControlValue {
-    ControlValue::Relative(increment)
+    ControlValue::RelativeDiscrete(increment)
 }
 
 fn extract_low_7_bit<T: Into<u32>>(value: T) -> U7 {

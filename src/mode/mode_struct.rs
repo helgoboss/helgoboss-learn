@@ -1,9 +1,9 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, ButtonUsage, ControlType, ControlValue, DiscreteIncrement,
-    DiscreteValue, EncoderUsage, FeedbackStyle, FireMode, Fraction, Interval, MinIsMaxBehavior,
-    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue,
-    Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
+    DiscreteValue, EncoderUsage, FeedbackStyle, FireMode, Fraction, Increment, Interval,
+    MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target,
+    TextualFeedbackValue, Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -75,7 +75,9 @@ pub struct ModeSettings<T: Transformation> {
     pub out_of_range_behavior: OutOfRangeBehavior,
     pub control_transformation: Option<T>,
     pub feedback_transformation: Option<T>,
-    pub convert_relative_to_absolute: bool,
+    /// Converts incoming relative messages to absolute ones.
+    pub make_absolute: bool,
+    /// Not in use at the moment, should always be `false`.
     pub use_discrete_processing: bool,
     pub fire_mode: FireMode,
     pub press_duration_interval: Interval<Duration>,
@@ -136,7 +138,7 @@ impl<T: Transformation> Default for ModeSettings<T> {
             control_transformation: None,
             feedback_transformation: None,
             rotate: false,
-            convert_relative_to_absolute: false,
+            make_absolute: false,
             use_discrete_processing: false,
             fire_mode: FireMode::WhenButtonReleased,
             press_duration_interval: Interval::new(ZERO_DURATION, ZERO_DURATION),
@@ -189,11 +191,9 @@ struct ModeState {
     /// when the last change was a positive increment and negative when the last change was a
     /// negative increment.
     increment_counter: i32,
-    /// Used in absolute control for certain takeover modes to calculate the next value based on the
-    /// previous one.
-    previous_absolute_control_value: Option<UnitValue>,
-    #[allow(dead_code)]
-    discrete_previous_absolute_control_value: Option<u32>,
+    /// Used in absolute control for "make relative" and certain takeover modes to calculate the
+    /// next value based on the previous one.
+    previous_absolute_control_value: Option<AbsoluteValue>,
     // For absolute control
     unpacked_target_value_sequence: Vec<UnitValue>,
     // For relative control
@@ -214,6 +214,8 @@ pub enum AbsoluteMode {
     IncrementalButton = 1,
     #[display(fmt = "Toggle button")]
     ToggleButton = 2,
+    #[display(fmt = "Make relative")]
+    MakeRelative = 3,
 }
 
 impl Default for AbsoluteMode {
@@ -442,12 +444,17 @@ impl<T: Transformation> Mode<T> {
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         match control_value {
-            ControlValue::Relative(i) => self.control_relative(i, target, context, options),
             ControlValue::AbsoluteContinuous(v) => {
                 self.control_absolute(AbsoluteValue::Continuous(v), target, context, true, options)
             }
             ControlValue::AbsoluteDiscrete(v) => {
                 self.control_absolute(AbsoluteValue::Discrete(v), target, context, true, options)
+            }
+            ControlValue::RelativeDiscrete(i) => {
+                self.control_relative(Increment::Discrete(i), target, context, options)
+            }
+            ControlValue::RelativeContinuous(i) => {
+                self.control_relative(Increment::Continuous(i), target, context, options)
             }
         }
     }
@@ -639,7 +646,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        i: DiscreteIncrement,
+        i: Increment,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
@@ -649,7 +656,7 @@ impl<T: Transformation> Mode<T> {
             EncoderUsage::DecrementOnly if i.is_positive() => return None,
             _ => {}
         };
-        if self.settings.convert_relative_to_absolute {
+        if self.settings.make_absolute {
             Some(
                 self.control_relative_to_absolute(i, target, context, options)?
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
@@ -702,6 +709,7 @@ impl<T: Transformation> Mode<T> {
                 self.control_absolute_toggle_buttons(v, target, context)?
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             ),
+            MakeRelative => self.control_absolute_to_relative(v, target, context, options),
         }
     }
 
@@ -717,7 +725,28 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
-        // Memorize as previous value for next control cycle.
+        let res = self.pre_process_absolute_value(control_value)?;
+        let current_target_value = target.current_value(context.into());
+        let control_type = target.control_type(context.into());
+        let pepped_up_control_value = self.pep_up_absolute_value(
+            res.source_normalized_control_value,
+            control_type,
+            current_target_value,
+            context.additional_input(),
+        );
+        self.hitting_target_considering_max_jump(
+            pepped_up_control_value,
+            current_target_value,
+            control_type,
+            res.source_normalized_control_value,
+            res.prev_source_normalized_control_value,
+        )
+    }
+
+    fn pre_process_absolute_value(
+        &mut self,
+        control_value: AbsoluteValue,
+    ) -> Option<AbsolutePreProcessingResult> {
         let interval_match_result = control_value.matches_tolerant(
             &self.settings.source_value_interval,
             &self.settings.discrete_source_value_interval,
@@ -729,6 +758,15 @@ impl<T: Transformation> Mode<T> {
             (control_value, MinIsMaxBehavior::PreferOne)
         } else {
             // Control value is outside source value interval
+            // TODO-high Check if the lack of `use_discrete_processing` is a problem here (that
+            //  we use the discrete interval although it's not currently set). It shouldn't
+            //  cause an issue because it only has an effect if source min/max are non-default
+            //  and then this will be normalized to 0.0 or 1.0 anyway in the next step.
+            //  However, we should make this more clear.
+            // TODO-high Having all the dead code for the discrete processing logic is not good.
+            //  That code needs to grow with the rest. Idea: Unlock discrete processing at first
+            //  with only a few very simple operators. Hide the rest.
+            //  Unlock more complicated ones later if necessary.
             self.settings.out_of_range_behavior.process(
                 control_value,
                 interval_match_result,
@@ -737,8 +775,6 @@ impl<T: Transformation> Mode<T> {
             )?
         };
         // Control value is within source value interval
-        let current_target_value = target.current_value(context.into());
-        let control_type = target.control_type(context.into());
         // 1. Apply source interval
         let source_normalized_control_value = source_bound_value.normalize(
             &self.settings.source_value_interval,
@@ -747,24 +783,16 @@ impl<T: Transformation> Mode<T> {
             self.settings.use_discrete_processing,
             BASE_EPSILON,
         );
+        // Memorize as previous value for next control cycle.
         let prev_source_normalized_control_value = self
             .state
             .previous_absolute_control_value
-            .replace(source_normalized_control_value.to_unit_value())
-            .map(AbsoluteValue::Continuous);
-        let pepped_up_control_value = self.pep_up_control_value(
-            source_normalized_control_value,
-            control_type,
-            current_target_value,
-            context.additional_input(),
-        );
-        self.hitting_target_considering_max_jump(
-            pepped_up_control_value,
-            current_target_value,
-            control_type,
+            .replace(source_normalized_control_value);
+        let res = AbsolutePreProcessingResult {
             source_normalized_control_value,
             prev_source_normalized_control_value,
-        )
+        };
+        Some(res)
     }
 
     /// "Incremental button" mode (convert absolute button presses to relative increments)
@@ -789,11 +817,17 @@ impl<T: Transformation> Mode<T> {
         {
             return None;
         }
-        if self.settings.convert_relative_to_absolute {
+        if self.settings.make_absolute {
+            // TODO-high CONTINUE Here we can probably convert absolute continuous to relative continuous!
             let discrete_increment = self.convert_to_discrete_increment(control_value)?;
             Some(
-                self.control_relative_to_absolute(discrete_increment, target, context, options)?
-                    .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
+                self.control_relative_to_absolute(
+                    Increment::Discrete(discrete_increment),
+                    target,
+                    context,
+                    options,
+                )?
+                .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             )
         } else {
             self.control_absolute_incremental_buttons_normal(
@@ -882,7 +916,7 @@ impl<T: Transformation> Mode<T> {
                 // - Minimum target step count (enables accurate normal/minimum increment, atomic)
                 // - Maximum target step count (enables accurate maximum increment, mapped)
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                Some(ModeControlResult::hit_target(ControlValue::Relative(discrete_increment)))
+                Some(ModeControlResult::hit_target(ControlValue::RelativeDiscrete(discrete_increment)))
             }
             VirtualButton => {
                 // This doesn't make sense at all. Buttons just need to be triggered, not fed with
@@ -943,6 +977,56 @@ impl<T: Transformation> Mode<T> {
         Some(ModeControlResult::hit_target(final_absolute_value))
     }
 
+    /// Absolute-to-relative conversion mode.
+    fn control_absolute_to_relative<
+        'a,
+        C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
+        TC,
+    >(
+        &mut self,
+        control_value: AbsoluteValue,
+        target: &impl Target<'a, Context = TC>,
+        context: C,
+        options: ModeControlOptions,
+    ) -> Option<ModeControlResult<ControlValue>> {
+        // If discrete processing not explicitly enabled, go continuous right here!
+        // If not, discrete-relative things like step sizes or speed factors would be taken into
+        // account, which we don't want for the "Make relative" mode (at least if not explicitly
+        // enabled in future). It's important that an absolute swipe from 0% to 100% applied
+        // relative to a target with initial value 0% results in a target value swipe from
+        // 0% to 100%, no matter step sizes! That's what we expect from this mode.
+        let control_value = if self.settings.use_discrete_processing {
+            control_value
+        } else {
+            control_value.to_continuous_value()
+        };
+        let res = self.pre_process_absolute_value(control_value)?;
+        // We can't do anything without having a previous value to relate to.
+        let prev_control_value = res.prev_source_normalized_control_value?;
+        let increment = match res.source_normalized_control_value {
+            AbsoluteValue::Continuous(v) => {
+                // This is kind of new: Continuous relative increments.
+                let prev_control_value = prev_control_value.continuous_value()?;
+                let diff = v.get() - prev_control_value.get();
+                let increment = UnitIncrement::try_from(diff).ok()?;
+                Increment::Continuous(increment)
+            }
+            AbsoluteValue::Discrete(f) => {
+                // This is easy and accurate! Conforms to our normal relative control stuff,
+                // which has always been discrete in nature.
+                // Be aware, even if the source emits discrete values, if source min/max is set,
+                // we won't arrive in this match branch because discrete processing is not unlocked
+                // yet!
+                let prev_control_value = prev_control_value.discrete_value()?;
+                let diff = f.actual() as i32 - prev_control_value.actual() as i32;
+                let increment = DiscreteIncrement::try_from(diff).ok()?;
+                Increment::Discrete(increment)
+            }
+        };
+        println!("Inc: {:?}", increment);
+        self.control_relative_normal(increment, target, context, options)
+    }
+
     /// Relative-to-absolute conversion mode.
     ///
     /// Takes care of:
@@ -956,14 +1040,13 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        discrete_increment: DiscreteIncrement,
+        increment: Increment,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         // Convert to absolute value
-        let mut inc =
-            discrete_increment.to_unit_increment(self.settings.step_size_interval.min_val())?;
+        let mut inc = increment.to_unit_increment(self.settings.step_size_interval.min_val())?;
         inc = inc.clamp_to_interval(&self.settings.step_size_interval)?;
         let full_unit_interval = full_unit_interval();
         let abs_input_value = if options.enforce_rotate || self.settings.rotate {
@@ -986,12 +1069,15 @@ impl<T: Transformation> Mode<T> {
     // I guess that possibility would rather cause irritation.
     fn control_relative_normal<'a, C: Copy + Into<TC>, TC>(
         &mut self,
-        discrete_increment: DiscreteIncrement,
+        increment: Increment,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         if !self.state.unpacked_target_value_set.is_empty() {
+            // If the incoming increment is continuous, we ignore the amount and just consider
+            // the direction.
+            let discrete_increment = increment.to_discrete_increment();
             let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
             return self.control_relative_target_value_set(
                 pepped_up_increment,
@@ -1016,16 +1102,23 @@ impl<T: Transformation> Mode<T> {
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step size (enables accurate maximum increment, clamped)
                 let potentially_reversed_increment = if self.settings.reverse {
-                    discrete_increment.inverse()
+                    increment.inverse()
                 } else {
-                    discrete_increment
+                    increment
                 };
-                let unit_increment = potentially_reversed_increment
-                    .to_unit_increment(self.settings.step_size_interval.min_val())?;
-                let clamped_unit_increment =
-                    unit_increment.clamp_to_interval(&self.settings.step_size_interval)?;
+                let final_unit_increment = match potentially_reversed_increment {
+                    Increment::Continuous(i) => {
+                        let target_scale_factor = self.settings.target_value_interval.span();
+                        UnitIncrement::try_from(i.get() * target_scale_factor).ok()?
+                    },
+                    Increment::Discrete(i) => {
+                        let unit_increment = i
+                            .to_unit_increment(self.settings.step_size_interval.min_val())?;
+                        unit_increment.clamp_to_interval(&self.settings.step_size_interval)?
+                    }
+                };
                 self.hit_target_absolutely_with_unit_increment(
-                    clamped_unit_increment,
+                    final_unit_increment,
                     self.settings.step_size_interval.min_val(),
                     target.current_value(context.into())?.to_unit_value(),
                     options,
@@ -1040,6 +1133,7 @@ impl<T: Transformation> Mode<T> {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
+                let discrete_increment = increment.to_discrete_increment();
                 let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
                 self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, options, control_type, || {
                     target.current_value(context.into())
@@ -1053,8 +1147,8 @@ impl<T: Transformation> Mode<T> {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
-                let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
-                Some(ModeControlResult::hit_target(ControlValue::Relative(pepped_up_increment)))
+                let pepped_up_increment = self.pep_up_increment(increment)?;
+                Some(ModeControlResult::hit_target(ControlValue::from_relative(pepped_up_increment)))
             }
             VirtualButton => {
                 // Controlling a button target with +/- n doesn't make sense.
@@ -1117,7 +1211,7 @@ impl<T: Transformation> Mode<T> {
         ))
     }
 
-    fn pep_up_control_value(
+    fn pep_up_absolute_value(
         &self,
         source_normalized_control_value: AbsoluteValue,
         control_type: ControlType,
@@ -1505,6 +1599,27 @@ impl<T: Transformation> Mode<T> {
         )))
     }
 
+    fn pep_up_increment(&mut self, increment: Increment) -> Option<Increment> {
+        match increment {
+            Increment::Continuous(i) => self
+                .pep_up_continuous_increment(i)
+                .map(Increment::Continuous),
+            Increment::Discrete(i) => self.pep_up_discrete_increment(i).map(Increment::Discrete),
+        }
+    }
+
+    /// Takes care of:
+    ///
+    /// - Reverse
+    fn pep_up_continuous_increment(&mut self, increment: UnitIncrement) -> Option<UnitIncrement> {
+        let result = if self.settings.reverse {
+            increment.inverse()
+        } else {
+            increment
+        };
+        Some(result)
+    }
+
     /// Takes care of:
     ///
     /// - Speed (step count)
@@ -1580,6 +1695,11 @@ impl<T: Transformation> Mode<T> {
         };
         discrete_value.to_increment(negative_if(self.settings.reverse))
     }
+}
+
+struct AbsolutePreProcessingResult {
+    source_normalized_control_value: AbsoluteValue,
+    prev_source_normalized_control_value: Option<AbsoluteValue>,
 }
 
 #[cfg(test)]
@@ -5510,6 +5630,150 @@ mod tests {
         }
     }
 
+    mod absolute_to_relative {
+        use super::*;
+
+        #[test]
+        fn continuous_to_continuous_equal() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::MakeRelative,
+                ..Default::default()
+            });
+            let target = TestTarget {
+                current_value: Some(con_val(0.0)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_eq!(mode.control(abs_con(0.0), &target, ()), None);
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.1), &target, ()).unwrap(),
+                abs_con(0.1)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.2), &target, ()).unwrap(),
+                abs_con(0.2)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.4), &target, ()).unwrap(),
+                abs_con(0.4)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.5), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.3), &target, ()).unwrap(),
+                abs_con(0.3)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(1.0), &target, ()).unwrap(),
+                abs_con(1.0)
+            );
+        }
+
+        #[test]
+        fn continuous_to_continuous_shifted() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::MakeRelative,
+                ..Default::default()
+            });
+            let target = TestTarget {
+                current_value: Some(con_val(0.4)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            assert_eq!(mode.control(abs_con(0.0), &target, ()), None);
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.1), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.2), &target, ()).unwrap(),
+                abs_con(0.6)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.4), &target, ()).unwrap(),
+                abs_con(0.8)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.5), &target, ()).unwrap(),
+                abs_con(0.9)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.3), &target, ()).unwrap(),
+                abs_con(0.7)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(1.0), &target, ()).unwrap(),
+                abs_con(1.0)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.9), &target, ()).unwrap(),
+                abs_con(0.9)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.8), &target, ()).unwrap(),
+                abs_con(0.8)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.0), &target, ()).unwrap(),
+                abs_con(0.0)
+            );
+        }
+
+        #[test]
+        #[ignore]
+        fn continuous_to_discrete_shifted() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::MakeRelative,
+                ..Default::default()
+            });
+            let target = TestTarget {
+                current_value: Some(con_val(0.25)),
+                control_type: ControlType::AbsoluteDiscrete {
+                    // 0 (0.0), 1 (0.5), 2 (1.0)
+                    atomic_step_size: UnitValue::new(1.0 / 2.0),
+                    is_retriggerable: false,
+                },
+            };
+            // When
+            // Then
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.0), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.1), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.2), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.7), &target, ()).unwrap(),
+                abs_con(1.0)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(1.0), &target, ()).unwrap(),
+                abs_con(1.0)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.3), &target, ()).unwrap(),
+                abs_con(0.5)
+            );
+            assert_abs_diff_eq!(
+                mode.control(abs_con(0.0), &target, ()).unwrap(),
+                abs_con(0.0)
+            );
+        }
+    }
+
     mod relative {
         use super::*;
 
@@ -5929,7 +6193,7 @@ mod tests {
             fn make_absolute_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    convert_relative_to_absolute: true,
+                    make_absolute: true,
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -5951,7 +6215,7 @@ mod tests {
             fn make_absolute_2() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    convert_relative_to_absolute: true,
+                    make_absolute: true,
                     step_size_interval: create_unit_value_interval(0.01, 0.05),
                     ..Default::default()
                 });
@@ -6431,7 +6695,7 @@ mod tests {
                 fn make_absolute_1() {
                     // Given
                     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                        convert_relative_to_absolute: true,
+                        make_absolute: true,
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -6456,7 +6720,7 @@ mod tests {
                 fn make_absolute_2() {
                     // Given
                     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                        convert_relative_to_absolute: true,
+                        make_absolute: true,
                         step_size_interval: create_unit_value_interval(0.01, 0.05),
                         ..Default::default()
                     });
@@ -7742,7 +8006,7 @@ mod tests {
             fn make_absolute_1() {
                 // Given
                 let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
-                    convert_relative_to_absolute: true,
+                    make_absolute: true,
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
