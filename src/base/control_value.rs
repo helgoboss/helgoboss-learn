@@ -36,6 +36,19 @@ pub struct ControlEvent<T> {
     payload: T,
 }
 
+pub trait AbstractControlEvent<T> {
+    /// Returns the payload of this event.
+    fn payload(&self) -> T
+    where
+        T: Copy;
+
+    /// Replaces the payload of this event but keeps the timestamp.
+    fn with_payload<P>(&self, payload: P) -> ControlEvent<P>;
+
+    /// Returns the amount of time elapsed since this event occurred.
+    fn elapsed(&self) -> Duration;
+}
+
 impl<T: Display> Display for ControlEvent<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(timestamp) = self.timestamp {
@@ -43,6 +56,28 @@ impl<T: Display> Display for ControlEvent<T> {
         } else {
             self.payload.fmt(f)
         }
+    }
+}
+
+impl<T> AbstractControlEvent<T> for ControlEvent<T> {
+    fn payload(&self) -> T
+    where
+        T: Copy,
+    {
+        self.payload
+    }
+
+    fn with_payload<P>(&self, payload: P) -> ControlEvent<P> {
+        ControlEvent {
+            timestamp: self.timestamp,
+            payload,
+        }
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.timestamp
+            .map(|t| t.elapsed())
+            .unwrap_or(Duration::ZERO)
     }
 }
 
@@ -72,8 +107,6 @@ impl<T> ControlEvent<T> {
     }
 
     /// Constructs the event without time information.
-    ///
-    /// This makes [`Self::elapsed`] always return 0.
     pub fn without_timestamp(payload: T) -> Self {
         Self {
             timestamp: None,
@@ -86,25 +119,9 @@ impl<T> ControlEvent<T> {
         self.timestamp
     }
 
-    /// Returns the payload of this event.
-    pub fn payload(&self) -> T
-    where
-        T: Copy,
-    {
-        self.payload
-    }
-
     /// Consumes this event and returns the payload.
     pub fn into_payload(self) -> T {
         self.payload
-    }
-
-    /// Replaces the payload of this event but keeps the timestamp.
-    pub fn with_payload<P>(&self, payload: P) -> ControlEvent<P> {
-        ControlEvent {
-            timestamp: self.timestamp,
-            payload,
-        }
     }
 
     /// Transforms the payload of this event.
