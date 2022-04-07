@@ -5670,37 +5670,20 @@ mod tests {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
-            let target = TestTarget {
+            let mut target = TestTarget {
                 current_value: Some(con_val(0.0)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
             // Then
-            assert_eq!(mode.control(abs_con(0.0), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.1), &target, ()).unwrap(),
-                abs_con(0.1)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.2)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.4)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.3), &target, ()).unwrap(),
-                abs_con(0.3)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
+            let mut test = |i, o| {
+                abs_test_cumulative(&mut mode, &mut target, i, o);
+            };
+            test(0.0, None);
+            test(0.1, Some(0.1));
+            test(0.4, Some(0.4));
+            test(0.5, Some(0.5));
+            test(1.0, Some(1.0));
         }
 
         #[test]
@@ -5710,97 +5693,56 @@ mod tests {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
-            let target = TestTarget {
+            let mut target = TestTarget {
                 current_value: Some(con_val(0.4)),
                 control_type: ControlType::AbsoluteContinuous,
             };
             // When
             // Then
-            assert_eq!(mode.control(abs_con(0.0), &target, ()), None);
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.1), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.6)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.4), &target, ()).unwrap(),
-                abs_con(0.8)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.5), &target, ()).unwrap(),
-                abs_con(0.9)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.3), &target, ()).unwrap(),
-                abs_con(0.7)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.9), &target, ()).unwrap(),
-                abs_con(0.9)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.8), &target, ()).unwrap(),
-                abs_con(0.8)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
+            let mut test = |i, o| {
+                abs_test_cumulative(&mut mode, &mut target, i, o);
+            };
+            test(0.0, None);
+            test(0.1, Some(0.5));
+            test(0.2, Some(0.6));
+            test(0.4, Some(0.8));
+            test(0.5, Some(0.9));
+            test(0.3, Some(0.7));
+            test(1.0, Some(1.0));
+            test(0.9, Some(0.9));
+            test(0.8, Some(0.8));
+            test(0.0, Some(0.0));
         }
 
         #[test]
-        #[ignore]
-        fn continuous_to_discrete_shifted() {
+        fn continuous_to_disrete_shifted() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
-            let target = TestTarget {
-                current_value: Some(con_val(0.25)),
+            let mut target = TestTarget {
+                current_value: Some(con_val(0.4)),
                 control_type: ControlType::AbsoluteDiscrete {
-                    // 0 (0.0), 1 (0.5), 2 (1.0)
-                    atomic_step_size: UnitValue::new(1.0 / 2.0),
+                    atomic_step_size: UnitValue::new(0.5),
                     is_retriggerable: false,
                 },
             };
             // When
             // Then
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.1), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.2), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.7), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(1.0), &target, ()).unwrap(),
-                abs_con(1.0)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.3), &target, ()).unwrap(),
-                abs_con(0.5)
-            );
-            assert_abs_diff_eq!(
-                mode.control(abs_con(0.0), &target, ()).unwrap(),
-                abs_con(0.0)
-            );
+            let mut test = |i, o| {
+                abs_test_cumulative(&mut mode, &mut target, i, o);
+            };
+            test(0.0, None);
+            test(0.1, Some(0.5));
+            test(0.2, Some(0.6));
+            test(0.4, Some(0.8));
+            test(0.5, Some(0.9));
+            test(0.3, Some(0.7));
+            test(1.0, Some(1.0));
+            test(0.9, Some(0.9));
+            test(0.8, Some(0.8));
+            test(0.0, Some(0.0));
         }
     }
 
