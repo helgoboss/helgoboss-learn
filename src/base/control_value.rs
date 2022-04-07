@@ -5,6 +5,17 @@ use crate::{
 use std::fmt::{Display, Formatter};
 use std::time::{Duration, Instant};
 
+/// The timestamp is intended to be be used for things like takeover modes. Ideally, the event
+/// time should be captured when the event occurs but it's also okay to do that somewhat later
+/// in the same callstack because event processing within the same thread happens very fast.
+/// Most importantly, if the event is sent to another thread, then the time should be captured
+/// *before* the event leaves the thread and saved. That allows more accurate processing in the
+/// destination thread.  
+pub trait AbstractTimestamp: Copy {
+    /// Returns the amount of time elapsed since this timestamp.
+    fn elapsed(&self) -> Duration;
+}
+
 /// Timestamp of a control event.
 //
 // Don't expose the inner field, it should stay private. We might swap the time unit in future to
@@ -17,9 +28,10 @@ impl ControlEventTimestamp {
     pub fn now() -> Self {
         Self(Instant::now())
     }
+}
 
-    /// Returns the amount of time elapsed since this timestamp.
-    pub fn elapsed(&self) -> Duration {
+impl AbstractTimestamp for ControlEventTimestamp {
+    fn elapsed(&self) -> Duration {
         self.0.elapsed()
     }
 }
@@ -31,12 +43,14 @@ impl Display for ControlEventTimestamp {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct ControlEvent<T> {
-    timestamp: Option<ControlEventTimestamp>,
-    payload: T,
+pub struct AbstractControlEvent<P, T: AbstractTimestamp> {
+    payload: P,
+    timestamp: Option<T>,
 }
 
-impl<T: Display> Display for ControlEvent<T> {
+pub type ControlEvent<P> = AbstractControlEvent<P, ControlEventTimestamp>;
+
+impl<P: Display, T: AbstractTimestamp + Display> Display for AbstractControlEvent<P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(timestamp) = self.timestamp {
             write!(f, "{} at {}", &self.payload, timestamp)
@@ -46,25 +60,14 @@ impl<T: Display> Display for ControlEvent<T> {
     }
 }
 
-impl<T> ControlEvent<T> {
-    pub fn new(payload: T, timestamp: Option<ControlEventTimestamp>) -> Self {
+impl<P, T: AbstractTimestamp> AbstractControlEvent<P, T> {
+    /// Creates an event with an optional timestamp.
+    pub fn new(payload: P, timestamp: Option<T>) -> Self {
         Self { timestamp, payload }
     }
 
-    /// Creates an event capturing the current time.
-    ///
-    /// The timestamp is intended to be be used for things like takeover modes. Ideally, the event
-    /// time should be captured when the event occurs but it's also okay to do that somewhat later
-    /// in the same callstack because event processing within the same thread happens very fast.
-    /// Most importantly, if the event is sent to another thread, then the time should be captured
-    /// *before* the event leaves the thread and saved. That allows more accurate processing in the
-    /// destination thread.  
-    pub fn now(payload: T) -> Self {
-        Self::with_timestamp(payload, ControlEventTimestamp::now())
-    }
-
     /// Creates an event with the given timestamp.
-    pub fn with_timestamp(payload: T, timestamp: ControlEventTimestamp) -> Self {
+    pub fn with_timestamp(payload: P, timestamp: T) -> Self {
         Self {
             timestamp: Some(timestamp),
             payload,
@@ -72,9 +75,7 @@ impl<T> ControlEvent<T> {
     }
 
     /// Constructs the event without time information.
-    ///
-    /// This makes [`Self::elapsed`] always return 0.
-    pub fn without_timestamp(payload: T) -> Self {
+    pub fn without_timestamp(payload: P) -> Self {
         Self {
             timestamp: None,
             payload,
@@ -82,35 +83,35 @@ impl<T> ControlEvent<T> {
     }
 
     /// Returns the timestamp of this event.
-    pub fn timestamp(&self) -> Option<ControlEventTimestamp> {
+    pub fn timestamp(&self) -> Option<T> {
         self.timestamp
     }
 
     /// Returns the payload of this event.
-    pub fn payload(&self) -> T
+    pub fn payload(&self) -> P
     where
-        T: Copy,
+        P: Copy,
     {
         self.payload
     }
 
     /// Consumes this event and returns the payload.
-    pub fn into_payload(self) -> T {
+    pub fn into_payload(self) -> P {
         self.payload
     }
 
     /// Replaces the payload of this event but keeps the timestamp.
-    pub fn with_payload<P>(&self, payload: P) -> ControlEvent<P> {
-        ControlEvent {
+    pub fn with_payload<O>(&self, payload: O) -> AbstractControlEvent<O, T> {
+        AbstractControlEvent {
             timestamp: self.timestamp,
             payload,
         }
     }
 
     /// Transforms the payload of this event.
-    pub fn map_payload<P>(self, map: impl FnOnce(T) -> P) -> ControlEvent<P> {
+    pub fn map_payload<O>(self, map: impl FnOnce(P) -> O) -> AbstractControlEvent<O, T> {
         let transformed_payload = map(self.payload);
-        ControlEvent {
+        AbstractControlEvent {
             timestamp: self.timestamp,
             payload: transformed_payload,
         }
