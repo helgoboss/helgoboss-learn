@@ -1,10 +1,9 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    negative_if, AbsoluteValue, AbstractControlEvent, ButtonUsage, ControlEvent, ControlType,
-    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FireMode,
-    Fraction, Increment, Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor,
-    TakeoverMode, Target, TextualFeedbackValue, Transformation, UnitIncrement, UnitValue,
-    ValueSequence, BASE_EPSILON,
+    negative_if, AbsoluteValue, ButtonUsage, ControlEvent, ControlType, ControlValue,
+    DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FireMode, Fraction, Increment,
+    Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target,
+    TextualFeedbackValue, Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -416,7 +415,7 @@ impl<T: Transformation> Mode<T> {
     #[cfg(test)]
     fn control<'a, C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>, TC>(
         &mut self,
-        control_event: impl AbstractControlEvent<ControlValue>,
+        control_event: ControlEvent<ControlValue>,
         target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ControlValue> {
@@ -439,7 +438,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: impl AbstractControlEvent<ControlValue>,
+        control_event: ControlEvent<ControlValue>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
@@ -661,7 +660,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: impl AbstractControlEvent<Increment>,
+        control_event: ControlEvent<Increment>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
@@ -686,7 +685,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: impl AbstractControlEvent<AbsoluteValue>,
+        control_event: ControlEvent<AbsoluteValue>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         consider_press_duration: bool,
