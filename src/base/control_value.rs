@@ -3,6 +3,83 @@ use crate::{
     Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use std::fmt::{Display, Formatter};
+use std::time::{Duration, Instant};
+
+/// Timestamp of a control event.
+//
+// Don't expose the inner field, it should stay private. We might swap the time unit in future to
+// improve performance and accuracy.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ControlEventTimestamp(Instant);
+
+impl ControlEventTimestamp {
+    /// Creates a timestamp corresponding to "now".
+    pub fn now() -> Self {
+        Self(Instant::now())
+    }
+
+    /// Returns the amount of time elapsed since this timestamp.
+    pub fn elapsed(&self) -> Duration {
+        self.0.elapsed()
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ControlEvent<T> {
+    timestamp: Option<ControlEventTimestamp>,
+    payload: T,
+}
+
+impl<T> ControlEvent<T> {
+    /// Creates an event capturing the current time.
+    ///
+    /// The timestamp is intended to be be used for things like takeover modes. Ideally, the event
+    /// time should be captured when the event occurs but it's also okay to do that somewhat later
+    /// in the same callstack because event processing within the same thread happens very fast.
+    /// Most importantly, if the event is sent to another thread, then the time should be captured
+    /// *before* the event leaves the thread and saved. That allows more accurate processing in the
+    /// destination thread.  
+    pub fn now(payload: T) -> Self {
+        Self::with_timestamp(payload, ControlEventTimestamp::now())
+    }
+
+    /// Creates an event with the given timestamp.
+    pub fn with_timestamp(payload: T, timestamp: ControlEventTimestamp) -> Self {
+        Self {
+            timestamp: Some(timestamp),
+            payload,
+        }
+    }
+
+    /// Constructs the event without time information.
+    ///
+    /// This makes [`Self::elapsed`] always return 0.
+    pub fn without_timestamp(payload: T) -> Self {
+        Self {
+            timestamp: None,
+            payload,
+        }
+    }
+
+    /// Returns the timestamp of this event.
+    pub fn timestamp(&self) -> Option<ControlEventTimestamp> {
+        self.timestamp
+    }
+
+    pub fn payload(&self) -> T
+    where
+        T: Copy,
+    {
+        self.payload
+    }
+
+    pub fn with_payload<P>(&self, payload: P) -> ControlEvent<P> {
+        ControlEvent {
+            timestamp: self.timestamp,
+            payload,
+        }
+    }
+}
 
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
 #[derive(Copy, Clone, Debug, PartialEq)]
