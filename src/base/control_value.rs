@@ -24,13 +24,33 @@ impl ControlEventTimestamp {
     }
 }
 
+impl Display for ControlEventTimestamp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ControlEvent<T> {
     timestamp: Option<ControlEventTimestamp>,
     payload: T,
 }
 
+impl<T: Display> Display for ControlEvent<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(timestamp) = self.timestamp {
+            write!(f, "{} at {}", &self.payload, timestamp)
+        } else {
+            self.payload.fmt(f)
+        }
+    }
+}
+
 impl<T> ControlEvent<T> {
+    pub fn new(payload: T, timestamp: Option<ControlEventTimestamp>) -> Self {
+        Self { timestamp, payload }
+    }
+
     /// Creates an event capturing the current time.
     ///
     /// The timestamp is intended to be be used for things like takeover modes. Ideally, the event
@@ -71,6 +91,11 @@ impl<T> ControlEvent<T> {
     where
         T: Copy,
     {
+        self.payload
+    }
+
+    /// Consumes this event and returns the payload.
+    pub fn into_payload(self) -> T {
         self.payload
     }
 
