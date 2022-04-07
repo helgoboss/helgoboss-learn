@@ -23,18 +23,18 @@ impl AbstractTimestamp for () {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub struct AbstractControlEvent<P, T: AbstractTimestamp> {
+pub struct ControlEvent<P, T: AbstractTimestamp> {
     payload: P,
     timestamp: T,
 }
 
-impl<P: Display, T: AbstractTimestamp + Display> Display for AbstractControlEvent<P, T> {
+impl<P: Display, T: AbstractTimestamp + Display> Display for ControlEvent<P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} at {}", &self.payload, self.timestamp)
     }
 }
 
-impl<P, T: AbstractTimestamp> AbstractControlEvent<P, T> {
+impl<P, T: AbstractTimestamp> ControlEvent<P, T> {
     /// Creates an event.
     pub fn new(payload: P, timestamp: T) -> Self {
         Self { timestamp, payload }
@@ -59,17 +59,17 @@ impl<P, T: AbstractTimestamp> AbstractControlEvent<P, T> {
     }
 
     /// Replaces the payload of this event but keeps the timestamp.
-    pub fn with_payload<O>(&self, payload: O) -> AbstractControlEvent<O, T> {
-        AbstractControlEvent {
+    pub fn with_payload<O>(&self, payload: O) -> ControlEvent<O, T> {
+        ControlEvent {
             timestamp: self.timestamp,
             payload,
         }
     }
 
     /// Transforms the payload of this event.
-    pub fn map_payload<O>(self, map: impl FnOnce(P) -> O) -> AbstractControlEvent<O, T> {
+    pub fn map_payload<O>(self, map: impl FnOnce(P) -> O) -> ControlEvent<O, T> {
         let transformed_payload = map(self.payload);
-        AbstractControlEvent {
+        ControlEvent {
             timestamp: self.timestamp,
             payload: transformed_payload,
         }

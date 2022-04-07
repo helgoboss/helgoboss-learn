@@ -1,6 +1,6 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    negative_if, AbsoluteValue, AbstractControlEvent, AbstractTimestamp, ButtonUsage, ControlType,
+    negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
     ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FireMode,
     Fraction, Increment, Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor,
     TakeoverMode, Target, TextualFeedbackValue, Transformation, UnitIncrement, UnitValue,
@@ -416,7 +416,7 @@ impl<T: Transformation> Mode<T> {
     #[cfg(test)]
     fn control<'a, C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>, TC>(
         &mut self,
-        control_event: AbstractControlEvent<ControlValue, impl AbstractTimestamp>,
+        control_event: ControlEvent<ControlValue, impl AbstractTimestamp>,
         target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ControlValue> {
@@ -439,7 +439,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: AbstractControlEvent<ControlValue, impl AbstractTimestamp>,
+        control_event: ControlEvent<ControlValue, impl AbstractTimestamp>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
@@ -661,7 +661,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: AbstractControlEvent<Increment, impl AbstractTimestamp>,
+        control_event: ControlEvent<Increment, impl AbstractTimestamp>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
@@ -686,7 +686,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: AbstractControlEvent<AbsoluteValue, impl AbstractTimestamp>,
+        control_event: ControlEvent<AbsoluteValue, impl AbstractTimestamp>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         consider_press_duration: bool,
@@ -1790,7 +1790,7 @@ fn textual_feedback_expression_regex() -> &'static regex::Regex {
 
 const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
 
-type TimelessControlEvent<P> = AbstractControlEvent<P, ()>;
+type TimelessControlEvent<P> = ControlEvent<P, ()>;
 
 fn create_timeless_control_event<P>(payload: P) -> TimelessControlEvent<P> {
     TimelessControlEvent::new(payload, ())
