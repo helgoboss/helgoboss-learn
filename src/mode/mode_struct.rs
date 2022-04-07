@@ -1654,30 +1654,31 @@ impl<T: Transformation> Mode<T> {
     /// - Reverse
     fn pep_up_discrete_increment(
         &mut self,
-        mut increment: DiscreteIncrement,
+        original_inc: DiscreteIncrement,
         consider_steps: bool,
     ) -> Option<DiscreteIncrement> {
+        let mut inc = original_inc;
         // Process speed (step count)
         if consider_steps {
-            let factor = increment.clamp_to_interval(&self.settings.step_count_interval);
-            increment = if factor.is_positive() {
+            let factor = inc.clamp_to_interval(&self.settings.step_count_interval);
+            inc = if factor.is_positive() {
                 factor
             } else {
                 let nth = factor.get().abs() as u32;
-                let (fire, new_counter_value) = self.its_time_to_fire(nth, increment.signum());
+                let (fire, new_counter_value) = self.its_time_to_fire(nth, inc.signum());
                 self.state.increment_counter = new_counter_value;
                 if !fire {
                     return None;
                 }
                 DiscreteIncrement::new(1)
             };
-            increment = increment.with_direction(increment.signum());
+            inc = inc.with_direction(original_inc.signum());
         }
         // Process reverse
         if self.settings.reverse {
-            increment = increment.inverse();
+            inc = inc.inverse();
         }
-        Some(increment)
+        Some(inc)
     }
 
     /// `nth` stands for "fire every nth time". `direction_signum` is either +1 or -1.
