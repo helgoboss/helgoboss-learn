@@ -651,18 +651,16 @@ impl<T: Transformation> Mode<T> {
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
-        match self.settings.encoder_usage {
-            EncoderUsage::IncrementOnly if !i.is_positive() => return None,
-            EncoderUsage::DecrementOnly if i.is_positive() => return None,
-            _ => {}
-        };
+        if !self.settings.encoder_usage.matches(i) {
+            return None;
+        }
         if self.settings.make_absolute {
             Some(
                 self.control_relative_to_absolute(i, target, context, options)?
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             )
         } else {
-            self.control_relative_normal(i, target, context, options)
+            self.control_relative_normal(i, target, context, options, true)
         }
     }
 
@@ -795,7 +793,8 @@ impl<T: Transformation> Mode<T> {
         Some(res)
     }
 
-    /// "Incremental button" mode (convert absolute button presses to relative increments)
+    /// "Incremental button" mode: Convert absolute button presses to relative increments,
+    /// taking the velocity into account.
     fn control_absolute_incremental_buttons<
         'a,
         C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
@@ -818,7 +817,12 @@ impl<T: Transformation> Mode<T> {
             return None;
         }
         if self.settings.make_absolute {
-            // TODO-high CONTINUE Here we can probably convert absolute continuous to relative continuous!
+            // Convert absolute button presses to increments/decrements of pseudo absolute value.
+            // We could just as well convert to a continuous increment (we have one now).
+            // However, I think it's not worth to change existing behavior at this point. First,
+            // nobody expects 100% accuracy incrementing/decrementing something via button-press
+            // velocity. Second, using "Incremental buttons" with "Make absolute" is probably
+            // something people rarely use.
             let discrete_increment = self.convert_to_discrete_increment(control_value)?;
             Some(
                 self.control_relative_to_absolute(
@@ -830,6 +834,7 @@ impl<T: Transformation> Mode<T> {
                 .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             )
         } else {
+            // Initiate relative control via incremental buttons
             self.control_absolute_incremental_buttons_normal(
                 control_value,
                 target,
@@ -897,7 +902,7 @@ impl<T: Transformation> Mode<T> {
                 // - Target value interval (absolute, important for rotation only, clamped)
                 // - Maximum target step count (enables accurate maximum increment, clamped)
                 let discrete_increment = self.convert_to_discrete_increment(control_value)?;
-                self.hit_discrete_target_absolutely(discrete_increment, atomic_step_size, options, control_type, || {
+                self.hit_discrete_target_absolutely(Increment::Discrete(discrete_increment), atomic_step_size, options, control_type, || {
                     target.current_value(context.into())
                 })
             }
@@ -1023,8 +1028,12 @@ impl<T: Transformation> Mode<T> {
                 Increment::Discrete(increment)
             }
         };
-        println!("Inc: {:?}", increment);
-        self.control_relative_normal(increment, target, context, options)
+        if !self.settings.encoder_usage.matches(increment) {
+            return None;
+        }
+        // We ignore steps because the most important thing about this mode is that we can do
+        // full sweeps, no matter the character of the target and potential discrete steps.
+        self.control_relative_normal(increment, target, context, options, false)
     }
 
     /// Relative-to-absolute conversion mode.
@@ -1073,12 +1082,14 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
+        consider_steps: bool,
     ) -> Option<ModeControlResult<ControlValue>> {
         if !self.state.unpacked_target_value_set.is_empty() {
             // If the incoming increment is continuous, we ignore the amount and just consider
             // the direction.
             let discrete_increment = increment.to_discrete_increment();
-            let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
+            let pepped_up_increment =
+                self.pep_up_discrete_increment(discrete_increment, consider_steps)?;
             return self.control_relative_target_value_set(
                 pepped_up_increment,
                 target,
@@ -1133,8 +1144,12 @@ impl<T: Transformation> Mode<T> {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
-                let discrete_increment = increment.to_discrete_increment();
-                let pepped_up_increment = self.pep_up_discrete_increment(discrete_increment)?;
+                let increment = if consider_steps {
+                    Increment::Discrete(increment.to_discrete_increment())
+                } else {
+                    increment
+                };
+                let pepped_up_increment = self.pep_up_increment(increment, consider_steps)?;
                 self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, options, control_type, || {
                     target.current_value(context.into())
                 })
@@ -1147,7 +1162,7 @@ impl<T: Transformation> Mode<T> {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
-                let pepped_up_increment = self.pep_up_increment(increment)?;
+                let pepped_up_increment = self.pep_up_increment(increment, consider_steps)?;
                 Some(ModeControlResult::hit_target(ControlValue::from_relative(pepped_up_increment)))
             }
             VirtualButton => {
@@ -1484,11 +1499,11 @@ impl<T: Transformation> Mode<T> {
 
     /// Takes care of:
     ///
-    /// - Applying increment
+    /// - Applying increment (the target step size is only looked at for discrete increments)
     /// - Wrap (rotate)
     fn hit_discrete_target_absolutely(
         &mut self,
-        discrete_increment: DiscreteIncrement,
+        increment: Increment,
         target_step_size: UnitValue,
         options: ModeControlOptions,
         control_type: ControlType,
@@ -1501,23 +1516,26 @@ impl<T: Transformation> Mode<T> {
                     // But target reports continuous value!? Shouldn't happen. Whatever, fall back
                     // to continuous processing.
                     self.hit_target_absolutely_with_unit_increment(
-                        discrete_increment.to_unit_increment(target_step_size)?,
+                        increment.to_unit_increment(target_step_size)?,
                         target_step_size,
                         current_value()?.to_unit_value(),
                         options,
                     )
                 }
-                AbsoluteValue::Discrete(f) => self.hit_target_absolutely_with_discrete_increment(
-                    discrete_increment,
-                    f,
-                    options,
-                    control_type,
-                ),
+                AbsoluteValue::Discrete(f) => {
+                    let discrete_increment = increment.to_discrete_increment();
+                    self.hit_target_absolutely_with_discrete_increment(
+                        discrete_increment,
+                        f,
+                        options,
+                        control_type,
+                    )
+                }
             }
         } else {
             // Continuous processing although target is discrete. Kept for backward compatibility.
             self.hit_target_absolutely_with_unit_increment(
-                discrete_increment.to_unit_increment(target_step_size)?,
+                increment.to_unit_increment(target_step_size)?,
                 target_step_size,
                 current_value()?.to_unit_value(),
                 options,
@@ -1599,12 +1617,22 @@ impl<T: Transformation> Mode<T> {
         )))
     }
 
-    fn pep_up_increment(&mut self, increment: Increment) -> Option<Increment> {
+    /// Takes care of:
+    ///
+    /// - Reverse
+    /// - Speed (only for discrete increments and only if steps are considered)
+    fn pep_up_increment(
+        &mut self,
+        increment: Increment,
+        consider_steps: bool,
+    ) -> Option<Increment> {
         match increment {
             Increment::Continuous(i) => self
                 .pep_up_continuous_increment(i)
                 .map(Increment::Continuous),
-            Increment::Discrete(i) => self.pep_up_discrete_increment(i).map(Increment::Discrete),
+            Increment::Discrete(i) => self
+                .pep_up_discrete_increment(i, consider_steps)
+                .map(Increment::Discrete),
         }
     }
 
@@ -1622,33 +1650,34 @@ impl<T: Transformation> Mode<T> {
 
     /// Takes care of:
     ///
-    /// - Speed (step count)
+    /// - Speed (if steps are considered)
     /// - Reverse
     fn pep_up_discrete_increment(
         &mut self,
-        increment: DiscreteIncrement,
+        mut increment: DiscreteIncrement,
+        consider_steps: bool,
     ) -> Option<DiscreteIncrement> {
         // Process speed (step count)
-        let factor = increment.clamp_to_interval(&self.settings.step_count_interval);
-        let actual_increment = if factor.is_positive() {
-            factor
-        } else {
-            let nth = factor.get().abs() as u32;
-            let (fire, new_counter_value) = self.its_time_to_fire(nth, increment.signum());
-            self.state.increment_counter = new_counter_value;
-            if !fire {
-                return None;
-            }
-            DiscreteIncrement::new(1)
-        };
-        let clamped_increment = actual_increment.with_direction(increment.signum());
+        if consider_steps {
+            let factor = increment.clamp_to_interval(&self.settings.step_count_interval);
+            increment = if factor.is_positive() {
+                factor
+            } else {
+                let nth = factor.get().abs() as u32;
+                let (fire, new_counter_value) = self.its_time_to_fire(nth, increment.signum());
+                self.state.increment_counter = new_counter_value;
+                if !fire {
+                    return None;
+                }
+                DiscreteIncrement::new(1)
+            };
+            increment = increment.with_direction(increment.signum());
+        }
         // Process reverse
-        let result = if self.settings.reverse {
-            clamped_increment.inverse()
-        } else {
-            clamped_increment
-        };
-        Some(result)
+        if self.settings.reverse {
+            increment = increment.inverse();
+        }
+        Some(increment)
     }
 
     /// `nth` stands for "fire every nth time". `direction_signum` is either +1 or -1.

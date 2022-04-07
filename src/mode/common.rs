@@ -1,4 +1,4 @@
-use crate::{AbsoluteValue, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
+use crate::{AbsoluteValue, Increment, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -140,6 +140,16 @@ pub enum EncoderUsage {
     #[cfg_attr(feature = "serde", serde(rename = "decrement-only"))]
     #[display(fmt = "Decrement only")]
     DecrementOnly,
+}
+
+impl EncoderUsage {
+    pub fn matches(&self, i: Increment) -> bool {
+        match self {
+            EncoderUsage::IncrementOnly if !i.is_positive() => false,
+            EncoderUsage::DecrementOnly if i.is_positive() => false,
+            _ => true,
+        }
+    }
 }
 
 impl Default for EncoderUsage {

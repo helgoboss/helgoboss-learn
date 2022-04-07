@@ -141,6 +141,19 @@ impl ModeApplicability {
     }
 }
 
+const STEP_SIZE_MIN_FOR_RANGE_DESC: &'static str =
+    "Sets the target value change amount for an incoming non-accelerated increment/decrement.";
+const SPEED_MIN_FOR_RANGE_DESC: &'static str =
+    "Sets the number of target increments for an incoming non-accelerated increment/decrement.";
+const STEP_SIZE_MAX_FOR_RANGE_DESC: &'static str =
+    "Sets the target value change amount for an incoming most accelerated increment/decrement.";
+const SPEED_MAX_FOR_RANGE_DESC: &'static str =
+    "Sets the number of target increments for an incoming most accelerated increment/decrement.";
+
+const ROTATE_FOR_RANGE_DESC: &'static str = "If enabled, jumps from max target value to min target value for increments (opposite for decrements). Was called \"Rotate\" before.";
+
+const NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC: &'static str = "Sets target to the value that corresponds to the knob/fader position. Proportionally maps from source to target range.";
+
 pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeApplicability {
     use ModeApplicability::*;
     use ModeParameter::*;
@@ -326,7 +339,10 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             }
         }
         JumpMinMax | TakeoverMode => {
-            if input.target_is_virtual || input.is_feedback {
+            if input.target_is_virtual
+                || input.is_feedback
+                || input.absolute_mode == crate::AbsoluteMode::MakeRelative
+            {
                 HasNoEffect
             } else {
                 use DetailedSourceCharacter::*;
@@ -351,7 +367,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             }
         }
         ControlTransformation => {
-            if input.is_feedback {
+            if input.is_feedback || input.absolute_mode == crate::AbsoluteMode::MakeRelative {
                 HasNoEffect
             } else {
                 use DetailedSourceCharacter::*;
@@ -466,13 +482,9 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                 HasNoEffect
                             }
                         } else if input.mode_parameter == StepSizeMin {
-                            MakesSense(
-                                "Sets the target value change amount for an incoming non-accelerated increment/decrement.",
-                            )
+                            MakesSense(STEP_SIZE_MIN_FOR_RANGE_DESC)
                         } else {
-                            MakesSense(
-                                "Sets the number of target increments for an incoming non-accelerated increment/decrement.",
-                            )
+                            MakesSense(SPEED_MIN_FOR_RANGE_DESC)
                         }
                     }
                 }
@@ -484,7 +496,6 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    RangeControl => HasNoEffect,
                     MomentaryOnOffButton | PressOnlyButton => MakesNoSenseUseDefault,
                     MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
@@ -501,6 +512,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             HasNoEffect
                         }
                     }
+                    RangeControl => HasNoEffect,
                     Relative => {
                         if input.make_absolute {
                             if input.mode_parameter == StepSizeMax {
@@ -511,23 +523,22 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                 HasNoEffect
                             }
                         } else if input.mode_parameter == StepSizeMin {
-                            MakesSense(
-                                "Sets the target value change amount for an incoming most accelerated increment/decrement.",
-                            )
+                            MakesSense(STEP_SIZE_MAX_FOR_RANGE_DESC)
                         } else {
-                            MakesSense(
-                                "Sets the number of target increments for an incoming most accelerated increment/decrement.",
-                            )
+                            MakesSense(SPEED_MAX_FOR_RANGE_DESC)
                         }
                     }
                 }
             }
         }
         RelativeFilter => {
-            if input.is_feedback || input.source_character != DetailedSourceCharacter::Relative {
-                HasNoEffect
-            } else {
+            if !input.is_feedback
+                && (input.source_character == DetailedSourceCharacter::Relative
+                    || input.absolute_mode == crate::AbsoluteMode::MakeRelative)
+            {
                 MakesSense("Defines whether to process increments only, decrements only or both.")
+            } else {
+                HasNoEffect
             }
         }
         Rotate => {
@@ -545,16 +556,20 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             HasNoEffect
                         }
                     }
-                    RangeControl => HasNoEffect,
+                    RangeControl => {
+                        if input.absolute_mode == crate::AbsoluteMode::MakeRelative {
+                            MakesSense(ROTATE_FOR_RANGE_DESC)
+                        } else {
+                            HasNoEffect
+                        }
+                    }
                     Relative => {
                         if input.make_absolute {
                             MakesSense(
                                 "If enabled, jumps from absolute value 100% to 0% for increments (opposite for decrements). Was called \"Rotate\" before.",
                             )
                         } else {
-                            MakesSense(
-                                "If enabled, jumps from max target value to min target value for increments (opposite for decrements). Was called \"Rotate\" before.",
-                            )
+                            MakesSense(ROTATE_FOR_RANGE_DESC)
                         }
                     }
                 }
@@ -563,7 +578,10 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         FireMode => {
             if input.is_feedback {
                 HasNoEffect
-            } else if input.source_is_button() && !input.target_is_virtual {
+            } else if input.source_is_button()
+                && !input.target_is_virtual
+                && input.absolute_mode != crate::AbsoluteMode::MakeRelative
+            {
                 // Description not interesting, will be queried for specific fire mode only.
                 MakesSense("-")
             } else {
@@ -571,43 +589,39 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             }
         }
         SpecificFireMode(m) => {
-            if input.is_feedback || !input.source_is_button() {
-                HasNoEffect
-            } else {
-                use crate::FireMode::*;
-                match m {
-                    WhenButtonReleased => {
-                        if input.source_character == DetailedSourceCharacter::PressOnlyButton {
-                            MakesNoSenseParentTakesCareOfDefault
-                        } else {
-                            MakesSense(
+            use crate::FireMode::*;
+            match m {
+                WhenButtonReleased => {
+                    if input.source_character == DetailedSourceCharacter::PressOnlyButton {
+                        MakesNoSenseParentTakesCareOfDefault
+                    } else {
+                        MakesSense(
                                 "If min and max is 0 ms, fires immediately on button press. If one of them is > 0 ms, fires on release if the button press duration was in range.",
                             )
-                        }
                     }
-                    AfterTimeout => {
-                        if input.source_character == DetailedSourceCharacter::PressOnlyButton {
-                            MakesSense("Fires after the specified timeout instead of immediately.")
-                        } else {
-                            MakesSense(
-                                "Fires as soon as button pressed as long as the specified timeout.",
-                            )
-                        }
+                }
+                AfterTimeout => {
+                    if input.source_character == DetailedSourceCharacter::PressOnlyButton {
+                        MakesSense("Fires after the specified timeout instead of immediately.")
+                    } else {
+                        MakesSense(
+                            "Fires as soon as button pressed as long as the specified timeout.",
+                        )
                     }
-                    AfterTimeoutKeepFiring => {
-                        if input.source_character == DetailedSourceCharacter::PressOnlyButton {
-                            // What sense does it make if we can't turn the turbo off again ...
-                            MakesNoSenseParentTakesCareOfDefault
-                        } else {
-                            MakesSense(
+                }
+                AfterTimeoutKeepFiring => {
+                    if input.source_character == DetailedSourceCharacter::PressOnlyButton {
+                        // What sense does it make if we can't turn the turbo off again ...
+                        MakesNoSenseParentTakesCareOfDefault
+                    } else {
+                        MakesSense(
                                 "When button pressed, waits until specified timeout and then fires continuously with the specified rate until button released.",
                             )
-                        }
                     }
-                    OnSinglePress => MakesSense("Reacts to single button presses only."),
-                    OnDoublePress => MakesSense(
-                        "Reacts to double button presses only (like a mouse double-click).",
-                    ),
+                }
+                OnSinglePress => MakesSense("Reacts to single button presses only."),
+                OnDoublePress => {
+                    MakesSense("Reacts to double button presses only (like a mouse double-click).")
                 }
             }
         }
@@ -660,7 +674,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
                         input.absolute_mode == crate::AbsoluteMode::Normal
                     }
-                    RangeControl => true,
+                    RangeControl => input.absolute_mode != crate::AbsoluteMode::MakeRelative,
                     Relative => input.make_absolute,
                 };
                 if makes_sense {
@@ -675,7 +689,9 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         AbsoluteMode => {
             if input.is_feedback {
                 HasNoEffect
-            } else if input.source_is_button() {
+            } else if input.source_is_button()
+                || input.source_character == DetailedSourceCharacter::RangeControl
+            {
                 // Description not interesting, will be queried for specific absolute mode only.
                 MakesSense("-")
             } else {
@@ -716,20 +732,37 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             ToggleButton => MakesSense(
                                 "Switches the target value between its minimum and maximum on each button press.",
                             ),
-                            MakeRelative => MakesSense(
-                                "Attempts to convert incoming absolute control values to relative increments, making it possible to control targets relatively with absolute controls."
-                            )
+                            MakeRelative => MakesNoSenseUseDefault
                         }
                     }
-                    RangeControl | Relative => {
-                        if input.source_character == Relative && !input.make_absolute {
-                            HasNoEffect
-                        } else if m == Normal {
-                            MakesSense(
-                                "Sets target to the value that corresponds to the knob/fader position. Proportionally maps from source to target range.",
-                            )
+                    RangeControl => {
+                        match m {
+                            Normal => {
+                                MakesSense(
+                                    NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC,
+                                )
+
+                            }
+                            MakeRelative => {
+                                MakesSense(
+                                    "Attempts to convert incoming absolute control values to relative increments, making it possible to control targets relatively with absolute controls."
+                                )
+                            }
+                            IncrementalButton | ToggleButton => MakesNoSenseParentTakesCareOfDefault
+                        }
+                    }
+                    Relative => {
+                        if input.make_absolute {
+                            match m {
+                                Normal => {
+                                    MakesSense(
+                                        NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC,
+                                    )
+                                }
+                                MakeRelative | IncrementalButton | ToggleButton => MakesNoSenseParentTakesCareOfDefault
+                            }
                         } else {
-                            MakesNoSenseParentTakesCareOfDefault
+                            HasNoEffect
                         }
                     }
                 }
