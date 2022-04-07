@@ -660,7 +660,7 @@ impl<T: Transformation> Mode<T> {
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             )
         } else {
-            self.control_relative_normal(i, target, context, options, true)
+            self.control_relative_normal(i, target, context, options)
         }
     }
 
@@ -1033,7 +1033,7 @@ impl<T: Transformation> Mode<T> {
         }
         // We ignore steps because the most important thing about this mode is that we can do
         // full sweeps, no matter the character of the target and potential discrete steps.
-        self.control_relative_normal(increment, target, context, options, false)
+        self.control_relative_normal(increment, target, context, options)
     }
 
     /// Relative-to-absolute conversion mode.
@@ -1082,16 +1082,13 @@ impl<T: Transformation> Mode<T> {
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
-        consider_steps: bool,
     ) -> Option<ModeControlResult<ControlValue>> {
         if !self.state.unpacked_target_value_set.is_empty() {
+            let pepped_up_increment = self.pep_up_increment(increment)?;
             // If the incoming increment is continuous, we ignore the amount and just consider
             // the direction.
-            let discrete_increment = increment.to_discrete_increment();
-            let pepped_up_increment =
-                self.pep_up_discrete_increment(discrete_increment, consider_steps)?;
             return self.control_relative_target_value_set(
-                pepped_up_increment,
+                pepped_up_increment.to_discrete_increment(),
                 target,
                 context,
                 options,
@@ -1144,12 +1141,7 @@ impl<T: Transformation> Mode<T> {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
-                let increment = if consider_steps {
-                    Increment::Discrete(increment.to_discrete_increment())
-                } else {
-                    increment
-                };
-                let pepped_up_increment = self.pep_up_increment(increment, consider_steps)?;
+                let pepped_up_increment = self.pep_up_increment(increment)?;
                 self.hit_discrete_target_absolutely(pepped_up_increment, atomic_step_size, options, control_type, || {
                     target.current_value(context.into())
                 })
@@ -1162,7 +1154,7 @@ impl<T: Transformation> Mode<T> {
                 //
                 // Settings which are necessary in order to support >1-increments:
                 // - Maximum target step count (enables accurate maximum increment, clamped)
-                let pepped_up_increment = self.pep_up_increment(increment, consider_steps)?;
+                let pepped_up_increment = self.pep_up_increment(increment)?;
                 Some(ModeControlResult::hit_target(ControlValue::from_relative(pepped_up_increment)))
             }
             VirtualButton => {
@@ -1620,19 +1612,13 @@ impl<T: Transformation> Mode<T> {
     /// Takes care of:
     ///
     /// - Reverse
-    /// - Speed (only for discrete increments and only if steps are considered)
-    fn pep_up_increment(
-        &mut self,
-        increment: Increment,
-        consider_steps: bool,
-    ) -> Option<Increment> {
+    /// - Speed (only for discrete increments)
+    fn pep_up_increment(&mut self, increment: Increment) -> Option<Increment> {
         match increment {
             Increment::Continuous(i) => self
                 .pep_up_continuous_increment(i)
                 .map(Increment::Continuous),
-            Increment::Discrete(i) => self
-                .pep_up_discrete_increment(i, consider_steps)
-                .map(Increment::Discrete),
+            Increment::Discrete(i) => self.pep_up_discrete_increment(i).map(Increment::Discrete),
         }
     }
 
@@ -1650,30 +1636,27 @@ impl<T: Transformation> Mode<T> {
 
     /// Takes care of:
     ///
-    /// - Speed (if steps are considered)
+    /// - Speed
     /// - Reverse
     fn pep_up_discrete_increment(
         &mut self,
         original_inc: DiscreteIncrement,
-        consider_steps: bool,
     ) -> Option<DiscreteIncrement> {
         let mut inc = original_inc;
         // Process speed (step count)
-        if consider_steps {
-            let factor = inc.clamp_to_interval(&self.settings.step_count_interval);
-            inc = if factor.is_positive() {
-                factor
-            } else {
-                let nth = factor.get().abs() as u32;
-                let (fire, new_counter_value) = self.its_time_to_fire(nth, inc.signum());
-                self.state.increment_counter = new_counter_value;
-                if !fire {
-                    return None;
-                }
-                DiscreteIncrement::new(1)
-            };
-            inc = inc.with_direction(original_inc.signum());
-        }
+        let factor = inc.clamp_to_interval(&self.settings.step_count_interval);
+        inc = if factor.is_positive() {
+            factor
+        } else {
+            let nth = factor.get().abs() as u32;
+            let (fire, new_counter_value) = self.its_time_to_fire(nth, inc.signum());
+            self.state.increment_counter = new_counter_value;
+            if !fire {
+                return None;
+            }
+            DiscreteIncrement::new(1)
+        };
+        inc = inc.with_direction(original_inc.signum());
         // Process reverse
         if self.settings.reverse {
             inc = inc.inverse();
@@ -2470,7 +2453,7 @@ mod tests {
                 // When
                 // Then
                 let mut test = |i, o| {
-                    abs_test(&mut mode, &target, i, o);
+                    abs_con_test(&mut mode, &target, i, o);
                 };
                 test(0.0, Some(0.00));
                 test(0.1, Some(0.05));
@@ -2497,7 +2480,7 @@ mod tests {
                 // When
                 // Then
                 let mut test = |i, o| {
-                    abs_test(&mut mode, &target, i, o);
+                    abs_con_test(&mut mode, &target, i, o);
                 };
                 // Pickup mode is strict. If we never reach the actual value, we can't pick it up.
                 test(0.0, None);
@@ -2555,7 +2538,7 @@ mod tests {
                     // control value. So each assertion is independent and therefore we can
                     // intuitively test it without actually adjusting the current target value
                     // between each assertion.
-                    abs_test(&mut mode, &target, i, o);
+                    abs_con_test(&mut mode, &target, i, o);
                 };
                 test(0.0, Some(0.4));
                 test(0.1, Some(0.42));
@@ -2582,7 +2565,7 @@ mod tests {
                 // When
                 // Then
                 let mut test = |i, o| {
-                    abs_test(&mut mode, &target, i, o);
+                    abs_con_test(&mut mode, &target, i, o);
                 };
                 test(0.0, Some(0.00));
                 test(0.1, Some(0.05));
@@ -2613,7 +2596,7 @@ mod tests {
                 // When
                 // Then
                 let mut test = |i, o| {
-                    abs_test(&mut mode, &target, i, o);
+                    abs_con_test(&mut mode, &target, i, o);
                 };
                 // That's a jump, but one that we allow because target value being out of range
                 // is an exceptional situation.
@@ -2647,7 +2630,7 @@ mod tests {
                 let mut test = |i, o| {
                     // In order to intuitively test this takeover mode, we need to also adjust
                     // the current target value after each assertion.
-                    abs_test_cumulative(&mut mode, &mut target, i, o);
+                    abs_con_test_cumulative(&mut mode, &mut target, i, o);
                 };
                 // First one indeterminate
                 test(0.6, None);
@@ -2692,7 +2675,7 @@ mod tests {
                 // When
                 // Then
                 let mut test = |i, o| {
-                    abs_test_cumulative(&mut mode, &mut target, i, o);
+                    abs_con_test_cumulative(&mut mode, &mut target, i, o);
                 };
                 // First one indeterminate
                 test(0.6, None);
@@ -5677,7 +5660,7 @@ mod tests {
             // When
             // Then
             let mut test = |i, o| {
-                abs_test_cumulative(&mut mode, &mut target, i, o);
+                abs_con_test_cumulative(&mut mode, &mut target, i, o);
             };
             test(0.0, None);
             test(0.1, Some(0.1));
@@ -5700,7 +5683,7 @@ mod tests {
             // When
             // Then
             let mut test = |i, o| {
-                abs_test_cumulative(&mut mode, &mut target, i, o);
+                abs_con_test_cumulative(&mut mode, &mut target, i, o);
             };
             test(0.0, None);
             test(0.1, Some(0.5));
@@ -5714,8 +5697,10 @@ mod tests {
             test(0.0, Some(0.0));
         }
 
+        /// Yes, we want to ignore the target's atomic step size! We want a full control sweep to
+        /// always result in a full target sweep!
         #[test]
-        fn continuous_to_disrete_shifted() {
+        fn continuous_to_discrete_shifted() {
             // Given
             let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::MakeRelative,
@@ -5731,7 +5716,7 @@ mod tests {
             // When
             // Then
             let mut test = |i, o| {
-                abs_test_cumulative(&mut mode, &mut target, i, o);
+                abs_con_test_cumulative(&mut mode, &mut target, i, o);
             };
             test(0.0, None);
             test(0.1, Some(0.5));
@@ -5743,6 +5728,99 @@ mod tests {
             test(0.9, Some(0.9));
             test(0.8, Some(0.8));
             test(0.0, Some(0.0));
+        }
+
+        /// Absolute discrete becomes relative continuous when not using discrete processing.
+        #[test]
+        fn discrete_to_continuous_shifted() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::MakeRelative,
+                ..Default::default()
+            });
+            let mut target = TestTarget {
+                current_value: Some(con_val(0.4)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            // When
+            // Then
+            let mut test = |i, o| {
+                abs_test_cumulative(&mut mode, &mut target, ControlValue::AbsoluteDiscrete(i), o);
+            };
+            test(Fraction::new(0, 10), None);
+            test(Fraction::new(1, 10), Some(0.5));
+            test(Fraction::new(2, 10), Some(0.6));
+            test(Fraction::new(4, 10), Some(0.8));
+            test(Fraction::new(5, 10), Some(0.9));
+            test(Fraction::new(3, 10), Some(0.7));
+            test(Fraction::new(10, 10), Some(1.0));
+            test(Fraction::new(9, 10), Some(0.9));
+            test(Fraction::new(8, 10), Some(0.8));
+            test(Fraction::new(0, 10), Some(0.0));
+        }
+
+        /// Absolute discrete becomes relative continuous when not using discrete processing.
+        #[test]
+        fn discrete_to_discrete_shifted() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::MakeRelative,
+                ..Default::default()
+            });
+            let mut target = TestTarget {
+                current_value: Some(con_val(0.4)),
+                control_type: ControlType::AbsoluteDiscrete {
+                    atomic_step_size: UnitValue::new(0.5),
+                    is_retriggerable: false,
+                },
+            };
+            // When
+            // Then
+            let mut test = |i, o| {
+                abs_test_cumulative(&mut mode, &mut target, ControlValue::AbsoluteDiscrete(i), o);
+            };
+            test(Fraction::new(0, 10), None);
+            test(Fraction::new(0, 10), None);
+            test(Fraction::new(1, 10), Some(0.5));
+            test(Fraction::new(2, 10), Some(0.6));
+            test(Fraction::new(4, 10), Some(0.8));
+            test(Fraction::new(5, 10), Some(0.9));
+            test(Fraction::new(3, 10), Some(0.7));
+            test(Fraction::new(10, 10), Some(1.0));
+            test(Fraction::new(9, 10), Some(0.9));
+            test(Fraction::new(8, 10), Some(0.8));
+            test(Fraction::new(0, 10), Some(0.0));
+        }
+
+        /// We can even navigate relatively in target value sequences, but step counts are ignored.
+        #[test]
+        fn target_value_sequence() {
+            // Given
+            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
+                target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
+                step_count_interval: create_discrete_increment_interval(10, 10),
+                absolute_mode: AbsoluteMode::MakeRelative,
+                ..Default::default()
+            });
+            let mut target = TestTarget {
+                current_value: Some(con_val(0.6)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            mode.update_from_target(&target, ());
+            // When
+            // Then
+            let mut test = |i, o| {
+                abs_test_cumulative(&mut mode, &mut target, abs_con(i), o);
+            };
+            test(0.5, None);
+            test(0.55, Some(0.9));
+            test(0.6, None);
+            test(0.5, Some(0.5));
+            test(0.4, Some(0.4));
+            test(0.3, Some(0.2));
+            test(0.2, Some(0.0));
+            test(0.1, None);
         }
     }
 
@@ -8866,13 +8944,31 @@ mod tests {
         AbsoluteValue::Discrete(Fraction::new(actual, max))
     }
 
-    fn abs_test(
+    fn abs_con_test(
         mode: &mut Mode<TestTransformation>,
         target: &TestTarget,
         input: f64,
         output: Option<f64>,
     ) {
-        let result = mode.control(abs_con(input), target, ());
+        abs_test(mode, target, abs_con(input), output)
+    }
+
+    fn abs_con_test_cumulative(
+        mode: &mut Mode<TestTransformation>,
+        target: &mut TestTarget,
+        input: f64,
+        output: Option<f64>,
+    ) {
+        abs_test_cumulative(mode, target, abs_con(input), output)
+    }
+
+    fn abs_test(
+        mode: &mut Mode<TestTransformation>,
+        target: &TestTarget,
+        input: ControlValue,
+        output: Option<f64>,
+    ) {
+        let result = mode.control(input, target, ());
         if let Some(o) = output {
             assert_abs_diff_eq!(result.unwrap(), abs_con(o));
         } else {
@@ -8883,7 +8979,7 @@ mod tests {
     fn abs_test_cumulative(
         mode: &mut Mode<TestTransformation>,
         target: &mut TestTarget,
-        input: f64,
+        input: ControlValue,
         output: Option<f64>,
     ) {
         abs_test(mode, target, input, output);
