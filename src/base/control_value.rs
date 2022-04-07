@@ -16,46 +16,32 @@ pub trait AbstractTimestamp: Copy {
     fn elapsed(&self) -> Duration;
 }
 
+impl AbstractTimestamp for () {
+    fn elapsed(&self) -> Duration {
+        Duration::ZERO
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AbstractControlEvent<P, T: AbstractTimestamp> {
     payload: P,
-    timestamp: Option<T>,
+    timestamp: T,
 }
 
 impl<P: Display, T: AbstractTimestamp + Display> Display for AbstractControlEvent<P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if let Some(timestamp) = self.timestamp {
-            write!(f, "{} at {}", &self.payload, timestamp)
-        } else {
-            self.payload.fmt(f)
-        }
+        write!(f, "{} at {}", &self.payload, self.timestamp)
     }
 }
 
 impl<P, T: AbstractTimestamp> AbstractControlEvent<P, T> {
-    /// Creates an event with an optional timestamp.
-    pub fn new(payload: P, timestamp: Option<T>) -> Self {
+    /// Creates an event.
+    pub fn new(payload: P, timestamp: T) -> Self {
         Self { timestamp, payload }
     }
 
-    /// Creates an event with the given timestamp.
-    pub fn with_timestamp(payload: P, timestamp: T) -> Self {
-        Self {
-            timestamp: Some(timestamp),
-            payload,
-        }
-    }
-
-    /// Constructs the event without time information.
-    pub fn without_timestamp(payload: P) -> Self {
-        Self {
-            timestamp: None,
-            payload,
-        }
-    }
-
     /// Returns the timestamp of this event.
-    pub fn timestamp(&self) -> Option<T> {
+    pub fn timestamp(&self) -> T {
         self.timestamp
     }
 

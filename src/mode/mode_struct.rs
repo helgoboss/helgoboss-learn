@@ -628,7 +628,7 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<ModeControlResult<ControlValue>> {
         let control_value = self.state.press_duration_processor.poll()?;
         self.control_absolute(
-            TimelessControlEvent::without_timestamp(control_value),
+            create_timeless_control_event(control_value),
             target,
             context,
             false,
@@ -1792,10 +1792,8 @@ const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
 
 type TimelessControlEvent<P> = AbstractControlEvent<P, ()>;
 
-impl AbstractTimestamp for () {
-    fn elapsed(&self) -> Duration {
-        Duration::ZERO
-    }
+fn create_timeless_control_event<P>(payload: P) -> TimelessControlEvent<P> {
+    TimelessControlEvent::new(payload, ())
 }
 
 #[cfg(test)]
@@ -9708,7 +9706,7 @@ mod tests {
 
     /// Absolute continuous control event.
     fn abs_con_evt(number: f64) -> TimelessControlEvent<ControlValue> {
-        TimelessControlEvent::without_timestamp(abs_con_val(number))
+        create_timeless_control_event(abs_con_val(number))
     }
 
     /// Absolute continuous control value.
@@ -9718,7 +9716,7 @@ mod tests {
 
     /// Absolute discrete control event.
     fn abs_dis_evt(actual: u32, max: u32) -> TimelessControlEvent<ControlValue> {
-        TimelessControlEvent::without_timestamp(abs_dis_val(actual, max))
+        create_timeless_control_event(abs_dis_val(actual, max))
     }
 
     /// Absolute discrete control value.
@@ -9728,7 +9726,7 @@ mod tests {
 
     /// Relative discrete control event.
     fn rel_dis_evt(increment: i32) -> TimelessControlEvent<ControlValue> {
-        TimelessControlEvent::without_timestamp(rel_dis_val(increment))
+        create_timeless_control_event(rel_dis_val(increment))
     }
 
     /// Relative discrete control value.
@@ -9778,7 +9776,7 @@ mod tests {
         input: ControlValue,
         output: Option<f64>,
     ) {
-        let result = mode.control(TimelessControlEvent::without_timestamp(input), target, ());
+        let result = mode.control(create_timeless_control_event(input), target, ());
         if let Some(o) = output {
             assert_abs_diff_eq!(result.unwrap(), abs_con_val(o));
         } else {
