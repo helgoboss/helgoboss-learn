@@ -66,6 +66,7 @@ impl<T> ControlEvent<T> {
         self.timestamp
     }
 
+    /// Returns the payload of this event.
     pub fn payload(&self) -> T
     where
         T: Copy,
@@ -73,10 +74,20 @@ impl<T> ControlEvent<T> {
         self.payload
     }
 
+    /// Replaces the payload of this event but keeps the timestamp.
     pub fn with_payload<P>(&self, payload: P) -> ControlEvent<P> {
         ControlEvent {
             timestamp: self.timestamp,
             payload,
+        }
+    }
+
+    /// Transforms the payload of this event.
+    pub fn map_payload<P>(self, map: impl FnOnce(T) -> P) -> ControlEvent<P> {
+        let transformed_payload = map(self.payload);
+        ControlEvent {
+            timestamp: self.timestamp,
+            payload: transformed_payload,
         }
     }
 }
