@@ -3,7 +3,7 @@ use crate::{
     Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use std::fmt::{Display, Formatter};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The timestamp is intended to be be used for things like takeover modes. Ideally, the event
 /// time should be captured when the event occurs but it's also okay to do that somewhat later
@@ -16,39 +16,11 @@ pub trait AbstractTimestamp: Copy {
     fn elapsed(&self) -> Duration;
 }
 
-/// Timestamp of a control event.
-//
-// Don't expose the inner field, it should stay private. We might swap the time unit in future to
-// improve performance and accuracy.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct ControlEventTimestamp(Instant);
-
-impl ControlEventTimestamp {
-    /// Creates a timestamp corresponding to "now".
-    pub fn now() -> Self {
-        Self(Instant::now())
-    }
-}
-
-impl AbstractTimestamp for ControlEventTimestamp {
-    fn elapsed(&self) -> Duration {
-        self.0.elapsed()
-    }
-}
-
-impl Display for ControlEventTimestamp {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
-    }
-}
-
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AbstractControlEvent<P, T: AbstractTimestamp> {
     payload: P,
     timestamp: Option<T>,
 }
-
-pub type ControlEvent<P> = AbstractControlEvent<P, ControlEventTimestamp>;
 
 impl<P: Display, T: AbstractTimestamp + Display> Display for AbstractControlEvent<P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

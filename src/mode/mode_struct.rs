@@ -1,10 +1,10 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    negative_if, AbsoluteValue, AbstractControlEvent, AbstractTimestamp, ButtonUsage, ControlEvent,
-    ControlType, ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle,
-    FireMode, Fraction, Increment, Interval, MinIsMaxBehavior, OutOfRangeBehavior,
-    PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue, Transformation,
-    UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
+    negative_if, AbsoluteValue, AbstractControlEvent, AbstractTimestamp, ButtonUsage, ControlType,
+    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FireMode,
+    Fraction, Increment, Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor,
+    TakeoverMode, Target, TextualFeedbackValue, Transformation, UnitIncrement, UnitValue,
+    ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -628,7 +628,7 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<ModeControlResult<ControlValue>> {
         let control_value = self.state.press_duration_processor.poll()?;
         self.control_absolute(
-            ControlEvent::without_timestamp(control_value),
+            TimelessControlEvent::without_timestamp(control_value),
             target,
             context,
             false,
@@ -1730,6 +1730,72 @@ impl<T: Transformation> Mode<T> {
 struct AbsolutePreProcessingResult {
     source_normalized_control_value: AbsoluteValue,
     prev_source_normalized_control_value: Option<AbsoluteValue>,
+}
+
+pub fn default_step_size_interval() -> Interval<UnitValue> {
+    // 0.01 has also been chosen as default maximum step size because most users probably
+    // want to start easy, that is without using the "press harder = more increments"
+    // respectively "dial harder = more increments" features. Activating them right from
+    // the start by choosing a higher step size maximum could lead to surprising results
+    // such as ugly parameters jumps, especially if the source is not suited for that.
+    create_unit_value_interval(DEFAULT_STEP_SIZE, DEFAULT_STEP_SIZE)
+}
+
+pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
+    // Same reasoning as with step size interval
+    create_discrete_increment_interval(1, 1)
+}
+
+/// If something like this is returned from the mode, it already means that the source value
+/// was not filtered out (e.g. because of button filter).
+pub enum ModeControlResult<T> {
+    /// Target should be hit with the given value.
+    HitTarget { value: T },
+    /// Target is reached but already has the given desired value and is not retriggerable.
+    /// It shouldn't be hit.
+    LeaveTargetUntouched(T),
+}
+
+impl<T> ModeControlResult<T> {
+    pub fn hit_target(value: T) -> Self {
+        Self::HitTarget { value }
+    }
+
+    pub fn map<R>(self, f: impl FnOnce(T) -> R) -> ModeControlResult<R> {
+        use ModeControlResult::*;
+        match self {
+            HitTarget { value } => HitTarget { value: f(value) },
+            LeaveTargetUntouched(v) => LeaveTargetUntouched(f(v)),
+        }
+    }
+}
+
+impl<T> From<ModeControlResult<T>> for Option<T> {
+    fn from(res: ModeControlResult<T>) -> Self {
+        use ModeControlResult::*;
+        match res {
+            LeaveTargetUntouched(_) => None,
+            HitTarget { value, .. } => Some(value),
+        }
+    }
+}
+
+fn full_discrete_interval() -> Interval<u32> {
+    Interval::new(0, u32::MAX)
+}
+
+fn textual_feedback_expression_regex() -> &'static regex::Regex {
+    regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#)
+}
+
+const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
+
+type TimelessControlEvent<P> = AbstractControlEvent<P, ()>;
+
+impl AbstractTimestamp for () {
+    fn elapsed(&self) -> Duration {
+        Duration::ZERO
+    }
 }
 
 #[cfg(test)]
@@ -9641,8 +9707,8 @@ mod tests {
     }
 
     /// Absolute continuous control event.
-    fn abs_con_evt(number: f64) -> ControlEvent<ControlValue> {
-        ControlEvent::without_timestamp(abs_con_val(number))
+    fn abs_con_evt(number: f64) -> TimelessControlEvent<ControlValue> {
+        TimelessControlEvent::without_timestamp(abs_con_val(number))
     }
 
     /// Absolute continuous control value.
@@ -9651,8 +9717,8 @@ mod tests {
     }
 
     /// Absolute discrete control event.
-    fn abs_dis_evt(actual: u32, max: u32) -> ControlEvent<ControlValue> {
-        ControlEvent::without_timestamp(abs_dis_val(actual, max))
+    fn abs_dis_evt(actual: u32, max: u32) -> TimelessControlEvent<ControlValue> {
+        TimelessControlEvent::without_timestamp(abs_dis_val(actual, max))
     }
 
     /// Absolute discrete control value.
@@ -9661,8 +9727,8 @@ mod tests {
     }
 
     /// Relative discrete control event.
-    fn rel_dis_evt(increment: i32) -> ControlEvent<ControlValue> {
-        ControlEvent::without_timestamp(rel_dis_val(increment))
+    fn rel_dis_evt(increment: i32) -> TimelessControlEvent<ControlValue> {
+        TimelessControlEvent::without_timestamp(rel_dis_val(increment))
     }
 
     /// Relative discrete control value.
@@ -9712,7 +9778,7 @@ mod tests {
         input: ControlValue,
         output: Option<f64>,
     ) {
-        let result = mode.control(ControlEvent::without_timestamp(input), target, ());
+        let result = mode.control(TimelessControlEvent::without_timestamp(input), target, ());
         if let Some(o) = output {
             assert_abs_diff_eq!(result.unwrap(), abs_con_val(o));
         } else {
@@ -9738,61 +9804,3 @@ mod tests {
         max_discrete_source_value: Some(100),
     };
 }
-
-pub fn default_step_size_interval() -> Interval<UnitValue> {
-    // 0.01 has also been chosen as default maximum step size because most users probably
-    // want to start easy, that is without using the "press harder = more increments"
-    // respectively "dial harder = more increments" features. Activating them right from
-    // the start by choosing a higher step size maximum could lead to surprising results
-    // such as ugly parameters jumps, especially if the source is not suited for that.
-    create_unit_value_interval(DEFAULT_STEP_SIZE, DEFAULT_STEP_SIZE)
-}
-
-pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
-    // Same reasoning as with step size interval
-    create_discrete_increment_interval(1, 1)
-}
-
-/// If something like this is returned from the mode, it already means that the source value
-/// was not filtered out (e.g. because of button filter).
-pub enum ModeControlResult<T> {
-    /// Target should be hit with the given value.
-    HitTarget { value: T },
-    /// Target is reached but already has the given desired value and is not retriggerable.
-    /// It shouldn't be hit.
-    LeaveTargetUntouched(T),
-}
-
-impl<T> ModeControlResult<T> {
-    pub fn hit_target(value: T) -> Self {
-        Self::HitTarget { value }
-    }
-
-    pub fn map<R>(self, f: impl FnOnce(T) -> R) -> ModeControlResult<R> {
-        use ModeControlResult::*;
-        match self {
-            HitTarget { value } => HitTarget { value: f(value) },
-            LeaveTargetUntouched(v) => LeaveTargetUntouched(f(v)),
-        }
-    }
-}
-
-impl<T> From<ModeControlResult<T>> for Option<T> {
-    fn from(res: ModeControlResult<T>) -> Self {
-        use ModeControlResult::*;
-        match res {
-            LeaveTargetUntouched(_) => None,
-            HitTarget { value, .. } => Some(value),
-        }
-    }
-}
-
-fn full_discrete_interval() -> Interval<u32> {
-    Interval::new(0, u32::MAX)
-}
-
-fn textual_feedback_expression_regex() -> &'static regex::Regex {
-    regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#)
-}
-
-const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
