@@ -173,13 +173,13 @@ impl<T: Transformation> Default for ModeSettings<T> {
 ///         - Displayed as: "{count} x" or "{count}" (former if source emits increments) TODO I
 ///           think now we have only the "x" variant
 #[derive(Clone, Debug)]
-pub struct Mode<T: Transformation> {
+pub struct Mode<T: Transformation, S: AbstractTimestamp> {
     settings: ModeSettings<T>,
-    state: ModeState,
+    state: ModeState<S>,
 }
 
-#[derive(Clone, Debug, Default)]
-struct ModeState {
+#[derive(Clone, Debug)]
+struct ModeState<S: AbstractTimestamp> {
     press_duration_processor: PressDurationProcessor,
     /// For relative-to-absolute mode
     current_absolute_value: UnitValue,
@@ -194,13 +194,28 @@ struct ModeState {
     increment_counter: i32,
     /// Used in absolute control for "make relative" and certain takeover modes to calculate the
     /// next value based on the previous one.
-    previous_absolute_control_value: Option<AbsoluteValue>,
+    previous_absolute_value_event: Option<ControlEvent<AbsoluteValue, S>>,
     // For absolute control
     unpacked_target_value_sequence: Vec<UnitValue>,
     // For relative control
     unpacked_target_value_set: BTreeSet<UnitValue>,
     // For textual feedback
     feedback_props_in_use: HashSet<String>,
+}
+
+impl<S: AbstractTimestamp> Default for ModeState<S> {
+    fn default() -> Self {
+        Self {
+            press_duration_processor: Default::default(),
+            current_absolute_value: Default::default(),
+            discrete_current_absolute_value: 0,
+            increment_counter: 0,
+            previous_absolute_value_event: None,
+            unpacked_target_value_sequence: vec![],
+            unpacked_target_value_set: Default::default(),
+            feedback_props_in_use: Default::default(),
+        }
+    }
 }
 
 #[derive(
@@ -355,7 +370,7 @@ impl NumericValue {
     }
 }
 
-impl<T: Transformation> Mode<T> {
+impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     pub fn new(settings: ModeSettings<T>) -> Self {
         let state = ModeState {
             press_duration_processor: PressDurationProcessor::new(
@@ -416,7 +431,7 @@ impl<T: Transformation> Mode<T> {
     #[cfg(test)]
     fn control<'a, C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>, TC>(
         &mut self,
-        control_event: ControlEvent<ControlValue, impl AbstractTimestamp>,
+        control_event: ControlEvent<ControlValue, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ControlValue> {
@@ -439,7 +454,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: ControlEvent<ControlValue, impl AbstractTimestamp>,
+        control_event: ControlEvent<ControlValue, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
@@ -625,10 +640,11 @@ impl<T: Transformation> Mode<T> {
         &mut self,
         target: &impl Target<'a, Context = TC>,
         context: C,
+        timestamp: S,
     ) -> Option<ModeControlResult<ControlValue>> {
         let control_value = self.state.press_duration_processor.poll()?;
         self.control_absolute(
-            create_timeless_control_event(control_value),
+            ControlEvent::new(control_value, timestamp),
             target,
             context,
             false,
@@ -661,22 +677,21 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: ControlEvent<Increment, impl AbstractTimestamp>,
+        control_event: ControlEvent<Increment, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
-        let i = control_event.payload();
-        if !self.settings.encoder_usage.matches(i) {
+        if !self.settings.encoder_usage.matches(control_event.payload()) {
             return None;
         }
         if self.settings.make_absolute {
             Some(
-                self.control_relative_to_absolute(i, target, context, options)?
+                self.control_relative_to_absolute(control_event, target, context, options)?
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             )
         } else {
-            self.control_relative_normal(i, target, context, options)
+            self.control_relative_normal(control_event.payload(), target, context, options)
         }
     }
 
@@ -686,7 +701,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_event: ControlEvent<AbsoluteValue, impl AbstractTimestamp>,
+        control_event: ControlEvent<AbsoluteValue, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         consider_press_duration: bool,
@@ -694,28 +709,29 @@ impl<T: Transformation> Mode<T> {
     ) -> Option<ModeControlResult<ControlValue>> {
         // Filter presses/releases. Makes sense only for absolute mode "Normal". If this is used
         // a filter is used with another absolute mode, it's considered a usage fault.
-        let v = control_event.payload();
+        let mut v = control_event.payload();
         match self.settings.button_usage {
             ButtonUsage::PressOnly if v.is_zero() => return None,
             ButtonUsage::ReleaseOnly if !v.is_zero() => return None,
             _ => {}
         };
         // Press duration
-        let v = if consider_press_duration {
-            self.state
+        if consider_press_duration {
+            v = self
+                .state
                 .press_duration_processor
-                .process_press_or_release(v)?
-        } else {
-            v
-        };
+                .process_press_or_release(v)?;
+        }
+        // Dispatch
+        let control_event = control_event.with_payload(v);
         use AbsoluteMode::*;
         match self.settings.absolute_mode {
             Normal => Some(
-                self.control_absolute_normal(v, target, context)?
+                self.control_absolute_normal(control_event, target, context)?
                     .map(ControlValue::from_absolute),
             ),
             IncrementalButton => self.control_absolute_incremental_buttons(
-                v.to_unit_value(),
+                control_event.with_payload(v.to_unit_value()),
                 target,
                 context,
                 options,
@@ -724,7 +740,9 @@ impl<T: Transformation> Mode<T> {
                 self.control_absolute_toggle_buttons(v, target, context)?
                     .map(|v| ControlValue::AbsoluteContinuous(v.to_unit_value())),
             ),
-            MakeRelative => self.control_absolute_to_relative(v, target, context, options),
+            MakeRelative => {
+                self.control_absolute_to_relative(control_event, target, context, options)
+            }
         }
     }
 
@@ -736,15 +754,15 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_value: AbsoluteValue,
+        control_event: ControlEvent<AbsoluteValue, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
-        let res = self.pre_process_absolute_value(control_value)?;
+        let res = self.pre_process_absolute_value(control_event)?;
         let current_target_value = target.current_value(context.into());
         let control_type = target.control_type(context.into());
         let pepped_up_control_value = self.pep_up_absolute_value(
-            res.source_normalized_control_value,
+            res.control_event.payload(),
             control_type,
             current_target_value,
             context.additional_input(),
@@ -753,15 +771,16 @@ impl<T: Transformation> Mode<T> {
             pepped_up_control_value,
             current_target_value,
             control_type,
-            res.source_normalized_control_value,
-            res.prev_source_normalized_control_value,
+            res.control_event,
+            res.prev_control_event,
         )
     }
 
     fn pre_process_absolute_value(
         &mut self,
-        control_value: AbsoluteValue,
-    ) -> Option<AbsolutePreProcessingResult> {
+        control_event: ControlEvent<AbsoluteValue, S>,
+    ) -> Option<AbsolutePreProcessingResult<S>> {
+        let control_value = control_event.payload();
         let interval_match_result = control_value.matches_tolerant(
             &self.settings.source_value_interval,
             &self.settings.discrete_source_value_interval,
@@ -799,13 +818,13 @@ impl<T: Transformation> Mode<T> {
             BASE_EPSILON,
         );
         // Memorize as previous value for next control cycle.
-        let prev_source_normalized_control_value = self
+        let prev_absolute_control_event = self
             .state
-            .previous_absolute_control_value
-            .replace(source_normalized_control_value);
+            .previous_absolute_value_event
+            .replace(control_event.with_payload(source_normalized_control_value));
         let res = AbsolutePreProcessingResult {
-            source_normalized_control_value,
-            prev_source_normalized_control_value,
+            control_event: control_event.with_payload(source_normalized_control_value),
+            prev_control_event: prev_absolute_control_event,
         };
         Some(res)
     }
@@ -818,17 +837,17 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_value: UnitValue,
+        control_event: ControlEvent<UnitValue, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
         // TODO-high-discrete In discrete processing, don't interpret current target value as percentage!
-        if control_value.is_zero()
+        if control_event.payload().is_zero()
             || !self
                 .settings
                 .source_value_interval
-                .value_matches_tolerant(control_value, BASE_EPSILON)
+                .value_matches_tolerant(control_event.payload(), BASE_EPSILON)
                 .matches()
         {
             return None;
@@ -840,10 +859,10 @@ impl<T: Transformation> Mode<T> {
             // nobody expects 100% accuracy incrementing/decrementing something via button-press
             // velocity. Second, using "Incremental buttons" with "Make absolute" is probably
             // something people rarely use.
-            let discrete_increment = self.convert_to_discrete_increment(control_value)?;
+            let discrete_increment = self.convert_to_discrete_increment(control_event.payload())?;
             Some(
                 self.control_relative_to_absolute(
-                    Increment::Discrete(discrete_increment),
+                    control_event.with_payload(Increment::Discrete(discrete_increment)),
                     target,
                     context,
                     options,
@@ -853,7 +872,7 @@ impl<T: Transformation> Mode<T> {
         } else {
             // Initiate relative control via incremental buttons
             self.control_absolute_incremental_buttons_normal(
-                control_value,
+                control_event.payload(),
                 target,
                 context,
                 options,
@@ -1006,7 +1025,7 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        control_value: AbsoluteValue,
+        control_event: ControlEvent<AbsoluteValue, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
@@ -1017,18 +1036,18 @@ impl<T: Transformation> Mode<T> {
         // enabled in future). It's important that an absolute swipe from 0% to 100% applied
         // relative to a target with initial value 0% results in a target value swipe from
         // 0% to 100%, no matter step sizes! That's what we expect from this mode.
-        let control_value = if self.settings.use_discrete_processing {
-            control_value
+        let control_event = if self.settings.use_discrete_processing {
+            control_event
         } else {
-            control_value.to_continuous_value()
+            control_event.map_payload(|v| v.to_continuous_value())
         };
-        let res = self.pre_process_absolute_value(control_value)?;
+        let res = self.pre_process_absolute_value(control_event)?;
         // We can't do anything without having a previous value to relate to.
-        let prev_control_value = res.prev_source_normalized_control_value?;
-        let increment = match res.source_normalized_control_value {
+        let prev_control_value = res.prev_control_event?;
+        let increment = match res.control_event.payload() {
             AbsoluteValue::Continuous(v) => {
                 // This is kind of new: Continuous relative increments.
-                let prev_control_value = prev_control_value.continuous_value()?;
+                let prev_control_value = prev_control_value.payload().continuous_value()?;
                 let diff = v.get() - prev_control_value.get();
                 let increment = UnitIncrement::try_from(diff).ok()?;
                 Increment::Continuous(increment)
@@ -1039,7 +1058,7 @@ impl<T: Transformation> Mode<T> {
                 // Be aware, even if the source emits discrete values, if source min/max is set,
                 // we won't arrive in this match branch because discrete processing is not unlocked
                 // yet!
-                let prev_control_value = prev_control_value.discrete_value()?;
+                let prev_control_value = prev_control_value.payload().discrete_value()?;
                 let diff = f.actual() as i32 - prev_control_value.actual() as i32;
                 let increment = DiscreteIncrement::try_from(diff).ok()?;
                 Increment::Discrete(increment)
@@ -1066,13 +1085,15 @@ impl<T: Transformation> Mode<T> {
         TC,
     >(
         &mut self,
-        increment: Increment,
+        control_event: ControlEvent<Increment, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         // Convert to absolute value
-        let mut inc = increment.to_unit_increment(self.settings.step_size_interval.min_val())?;
+        let mut inc = control_event
+            .payload()
+            .to_unit_increment(self.settings.step_size_interval.min_val())?;
         inc = inc.clamp_to_interval(&self.settings.step_size_interval)?;
         let full_unit_interval = full_unit_interval();
         let abs_input_value = if options.enforce_rotate || self.settings.rotate {
@@ -1086,7 +1107,11 @@ impl<T: Transformation> Mode<T> {
         };
         self.state.current_absolute_value = abs_input_value;
         // Do the usual absolute processing
-        self.control_absolute_normal(AbsoluteValue::Continuous(abs_input_value), target, context)
+        self.control_absolute_normal(
+            control_event.with_payload(AbsoluteValue::Continuous(abs_input_value)),
+            target,
+            context,
+        )
     }
 
     // Classic relative mode: We are getting encoder increments from the source.
@@ -1308,8 +1333,8 @@ impl<T: Transformation> Mode<T> {
         pepped_up_control_value: AbsoluteValue,
         current_target_value: Option<AbsoluteValue>,
         control_type: ControlType,
-        source_normalized_control_value: AbsoluteValue,
-        prev_source_normalized_control_value: Option<AbsoluteValue>,
+        source_normalized_control_event: ControlEvent<AbsoluteValue, S>,
+        prev_source_normalized_control_event: Option<ControlEvent<AbsoluteValue, S>>,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
@@ -1348,9 +1373,10 @@ impl<T: Transformation> Mode<T> {
                 }
                 Parallel => {
                     // TODO-high-discrete Implement advanced takeover modes for discrete values, too
-                    if let Some(prev) = prev_source_normalized_control_value {
+                    if let Some(prev) = prev_source_normalized_control_event {
                         let relative_increment =
-                            source_normalized_control_value.to_unit_value() - prev.to_unit_value();
+                            source_normalized_control_event.payload().to_unit_value()
+                                - prev.payload().to_unit_value();
                         if relative_increment == 0.0 {
                             None
                         } else {
@@ -1399,10 +1425,10 @@ impl<T: Transformation> Mode<T> {
                     )
                 }
                 CatchUp => {
-                    if let Some(prev) = prev_source_normalized_control_value {
-                        let prev = prev.to_unit_value();
+                    if let Some(prev) = prev_source_normalized_control_event {
+                        let prev = prev.payload().to_unit_value();
                         let relative_increment =
-                            source_normalized_control_value.to_unit_value() - prev;
+                            source_normalized_control_event.payload().to_unit_value() - prev;
                         if relative_increment == 0.0 {
                             None
                         } else {
@@ -1727,9 +1753,9 @@ impl<T: Transformation> Mode<T> {
     }
 }
 
-struct AbsolutePreProcessingResult {
-    source_normalized_control_value: AbsoluteValue,
-    prev_source_normalized_control_value: Option<AbsoluteValue>,
+struct AbsolutePreProcessingResult<S: AbstractTimestamp> {
+    control_event: ControlEvent<AbsoluteValue, S>,
+    prev_control_event: Option<ControlEvent<AbsoluteValue, S>>,
 }
 
 pub fn default_step_size_interval() -> Interval<UnitValue> {
@@ -1790,12 +1816,6 @@ fn textual_feedback_expression_regex() -> &'static regex::Regex {
 
 const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
 
-type TimelessControlEvent<P> = ControlEvent<P, ()>;
-
-fn create_timeless_control_event<P>(payload: P) -> TimelessControlEvent<P> {
-    TimelessControlEvent::new(payload, ())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1813,7 +1833,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1856,7 +1876,7 @@ mod tests {
             #[test]
             fn default_with_virtual_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1899,7 +1919,7 @@ mod tests {
             #[test]
             fn default_target_is_trigger() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1929,7 +1949,7 @@ mod tests {
             #[test]
             fn relative_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -1955,7 +1975,7 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.2, 0.6),
                     ..Default::default()
                 });
@@ -2026,7 +2046,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_ignore() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.2, 0.6),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
                     ..Default::default()
@@ -2058,7 +2078,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.2, 0.6),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
                     ..Default::default()
@@ -2102,7 +2122,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_ignore_source_one_value() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.5, 0.5),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
                     ..Default::default()
@@ -2126,7 +2146,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_min_source_one_value() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.5, 0.5),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
                     ..Default::default()
@@ -2162,7 +2182,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_min_max_source_one_value() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.5, 0.5),
                     out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
                     ..Default::default()
@@ -2198,7 +2218,7 @@ mod tests {
             #[test]
             fn target_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.6),
                     ..Default::default()
                 });
@@ -2237,7 +2257,7 @@ mod tests {
             #[test]
             fn target_interval_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.6, 1.0),
                     reverse: true,
                     ..Default::default()
@@ -2273,7 +2293,7 @@ mod tests {
             #[test]
             fn source_and_target_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.2, 0.6),
                     target_value_interval: create_unit_value_interval(0.2, 0.6),
                     ..Default::default()
@@ -2313,7 +2333,7 @@ mod tests {
             #[test]
             fn source_and_target_interval_shifted() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.2, 0.6),
                     target_value_interval: create_unit_value_interval(0.4, 0.8),
                     ..Default::default()
@@ -2353,7 +2373,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     reverse: true,
                     ..Default::default()
                 });
@@ -2380,7 +2400,7 @@ mod tests {
             #[test]
             fn reverse_discrete_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     reverse: true,
                     ..Default::default()
                 });
@@ -2412,7 +2432,7 @@ mod tests {
             #[test]
             fn discrete_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -2447,7 +2467,7 @@ mod tests {
             #[test]
             fn round() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     round_target_value: true,
                     ..Default::default()
                 });
@@ -2492,7 +2512,7 @@ mod tests {
             #[test]
             fn jump_interval_max_pickup() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.2),
                     ..Default::default()
                 });
@@ -2528,7 +2548,7 @@ mod tests {
             #[test]
             fn jump_interval_max_pickup_with_target_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.0, 0.5),
                     ..Default::default()
@@ -2555,7 +2575,7 @@ mod tests {
             #[test]
             fn jump_interval_max_pickup_with_target_interval_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.0, 0.5),
                     ..Default::default()
@@ -2583,7 +2603,7 @@ mod tests {
             #[test]
             fn jump_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.1, 1.0),
                     ..Default::default()
                 });
@@ -2609,7 +2629,7 @@ mod tests {
             #[test]
             fn jump_interval_max_long_time_no_see() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.2),
                     takeover_mode: TakeoverMode::LongTimeNoSee,
                     ..Default::default()
@@ -2639,7 +2659,7 @@ mod tests {
             #[test]
             fn jump_interval_max_long_time_no_see_with_target_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.0, 0.5),
                     takeover_mode: TakeoverMode::LongTimeNoSee,
@@ -2670,7 +2690,7 @@ mod tests {
             #[test]
             fn jump_interval_max_long_time_no_see_with_target_interval_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.0, 0.5),
                     takeover_mode: TakeoverMode::LongTimeNoSee,
@@ -2703,7 +2723,7 @@ mod tests {
             #[test]
             fn jump_interval_max_parallel() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     takeover_mode: TakeoverMode::Parallel,
                     ..Default::default()
@@ -2749,7 +2769,7 @@ mod tests {
             #[test]
             fn jump_interval_max_parallel_with_target_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.0, 0.5),
                     takeover_mode: TakeoverMode::Parallel,
@@ -2788,7 +2808,7 @@ mod tests {
             #[test]
             fn jump_interval_max_catch_up() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     takeover_mode: TakeoverMode::CatchUp,
                     ..Default::default()
@@ -2841,7 +2861,7 @@ mod tests {
             #[test]
             fn jump_interval_max_catch_up_corner_case() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.47, 0.53),
                     jump_interval: create_unit_value_interval(0.0, 0.02),
                     target_value_interval: create_unit_value_interval(0.0, 0.716),
@@ -2884,7 +2904,7 @@ mod tests {
             #[test]
             fn jump_interval_max_catch_up_with_target_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.5, 1.0),
                     takeover_mode: TakeoverMode::CatchUp,
@@ -2931,7 +2951,7 @@ mod tests {
             #[test]
             fn transformation_ok() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     control_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
                     ..Default::default()
                 });
@@ -2958,7 +2978,7 @@ mod tests {
             #[test]
             fn transformation_err() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
                     ..Default::default()
                 });
@@ -2986,7 +3006,7 @@ mod tests {
             #[test]
             fn target_value_sequence_continuous_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                     ..Default::default()
                 });
@@ -3075,7 +3095,7 @@ mod tests {
             #[test]
             fn target_value_sequence_discrete_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                     ..Default::default()
                 });
@@ -3170,7 +3190,7 @@ mod tests {
                     "0.25 - 0.50 (0.01), 0.75, 0.50, 0.10".parse().unwrap();
                 let count = target_value_sequence.unpack(UnitValue::new(0.01)).len();
                 let max = count - 1;
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_sequence,
                     ..Default::default()
                 });
@@ -3201,7 +3221,7 @@ mod tests {
             #[test]
             fn feedback() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 // When
@@ -3220,7 +3240,7 @@ mod tests {
             #[test]
             fn feedback_with_virtual_source() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let options = ModeFeedbackOptions {
@@ -3261,7 +3281,7 @@ mod tests {
             #[test]
             fn feedback_reverse() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     reverse: true,
                     ..Default::default()
                 });
@@ -3275,7 +3295,7 @@ mod tests {
             #[test]
             fn feedback_target_interval() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -3292,7 +3312,7 @@ mod tests {
             #[test]
             fn feedback_target_interval_reverse() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 1.0),
                     reverse: true,
                     ..Default::default()
@@ -3310,7 +3330,7 @@ mod tests {
             #[test]
             fn feedback_source_and_target_interval() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
                     target_value_interval: create_unit_value_interval(0.4, 1.0),
                     ..Default::default()
@@ -3326,7 +3346,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_ignore() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
                     ..Default::default()
@@ -3341,7 +3361,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
                     ..Default::default()
@@ -3358,7 +3378,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_max_okay() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.02, 0.02),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
                     ..Default::default()
@@ -3374,7 +3394,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_max_issue_263() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.03, 0.03),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
                     ..Default::default()
@@ -3390,7 +3410,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_max_issue_263_more() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.03, 0.03),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
                     ..Default::default()
@@ -3410,7 +3430,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_target_one_value() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.5, 0.5),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
                     ..Default::default()
@@ -3427,7 +3447,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_max_target_one_value() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.5, 0.5),
                     ..Default::default()
                 });
@@ -3443,7 +3463,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_ignore_target_one_value() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.5, 0.5),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
                     ..Default::default()
@@ -3460,7 +3480,7 @@ mod tests {
             #[test]
             fn feedback_transformation() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     feedback_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
                     ..Default::default()
                 });
@@ -3478,7 +3498,7 @@ mod tests {
             #[test]
             fn case_1_no_interval_restriction() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     ..Default::default()
                 });
@@ -3535,7 +3555,7 @@ mod tests {
             #[test]
             fn case_2_target_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(50, u32::MAX),
                     ..Default::default()
@@ -3593,7 +3613,7 @@ mod tests {
             #[test]
             fn case_3_source_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(50, u32::MAX),
                     ..Default::default()
@@ -3651,7 +3671,7 @@ mod tests {
             #[test]
             fn case_4_source_and_target_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(50, u32::MAX),
                     discrete_target_value_interval: Interval::new(50, u32::MAX),
@@ -3710,7 +3730,7 @@ mod tests {
             #[test]
             fn case_5_source_and_target_interval_min_max() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(0, 50),
                     discrete_target_value_interval: Interval::new(50, u32::MAX),
@@ -3774,7 +3794,7 @@ mod tests {
             #[test]
             fn case_6_source_and_target_interval_disjoint() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(50, u32::MAX),
                     discrete_target_value_interval: Interval::new(200, u32::MAX),
@@ -3854,7 +3874,7 @@ mod tests {
             #[test]
             fn case_7_interval_max_greater_than_target_max() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(50, 200),
                     ..Default::default()
@@ -3912,7 +3932,7 @@ mod tests {
             #[test]
             fn case_8_target_subset_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(50, 100),
                     ..Default::default()
@@ -3970,7 +3990,7 @@ mod tests {
             #[test]
             fn case_9_no_interval_restriction_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     ..Default::default()
@@ -4023,7 +4043,7 @@ mod tests {
             #[test]
             fn case_10_target_interval_min_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     discrete_target_value_interval: Interval::new(50, u32::MAX),
@@ -4077,7 +4097,7 @@ mod tests {
             #[test]
             fn case_11_source_interval_min_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     discrete_source_value_interval: Interval::new(50, u32::MAX),
@@ -4131,7 +4151,7 @@ mod tests {
             #[test]
             fn case_12_source_and_target_interval_min_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     discrete_source_value_interval: Interval::new(50, u32::MAX),
@@ -4186,7 +4206,7 @@ mod tests {
             #[test]
             fn case_13_source_and_target_interval_disjoint_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     discrete_source_value_interval: Interval::new(50, u32::MAX),
@@ -4262,7 +4282,7 @@ mod tests {
             #[test]
             fn case_14_interval_max_greater_than_target_max_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     discrete_target_value_interval: Interval::new(50, 200),
@@ -4321,7 +4341,7 @@ mod tests {
             #[test]
             fn case_15_target_subset_interval_reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     discrete_target_value_interval: Interval::new(50, 100),
@@ -4380,7 +4400,7 @@ mod tests {
             #[test]
             fn default_with_virtual_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     ..Default::default()
                 });
@@ -4419,7 +4439,7 @@ mod tests {
             #[test]
             fn relative_target() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     ..Default::default()
                 });
@@ -4446,7 +4466,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_ignore() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(20, 60),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
@@ -4482,7 +4502,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(20, 60),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
@@ -4530,7 +4550,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_ignore_source_one_value() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(60, 60),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
@@ -4560,7 +4580,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_min_source_one_value() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(60, 60),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
@@ -4600,7 +4620,7 @@ mod tests {
             #[test]
             fn source_interval_out_of_range_min_max_source_one_value() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(60, 60),
                     out_of_range_behavior: OutOfRangeBehavior::MinOrMax,
@@ -4642,7 +4662,7 @@ mod tests {
                 // TODO-high-discrete Add other reverse tests with source and target interval and
                 //  also intervals with max values! First for continuous!
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(70, 100),
                     reverse: true,
@@ -4682,7 +4702,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     ..Default::default()
@@ -4713,7 +4733,7 @@ mod tests {
             #[test]
             fn round() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     round_target_value: true,
                     ..Default::default()
@@ -4744,7 +4764,7 @@ mod tests {
             #[test]
             fn jump_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_jump_interval: Interval::new(0, 2),
                     ..Default::default()
@@ -4780,7 +4800,7 @@ mod tests {
             #[test]
             fn jump_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_jump_interval: Interval::new(10, 100),
                     ..Default::default()
@@ -4818,7 +4838,7 @@ mod tests {
             // #[test]
             // fn jump_interval_approach() {
             //     // Given
-            //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            //     let mut mode: TestMode = Mode::new(ModeSettings {
             //         jump_interval: create_unit_value_interval(0.0, 0.2),
             //         takeover_mode: TakeoverMode::LongTimeNoSee,
             //         ..Default::default()
@@ -4862,7 +4882,7 @@ mod tests {
             #[test]
             fn transformation_ok() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     control_transformation: Some(TestTransformation::new(|input| Ok(input + 20.0))),
                     ..Default::default()
@@ -4893,7 +4913,7 @@ mod tests {
             #[test]
             fn transformation_negative() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     control_transformation: Some(TestTransformation::new(|input| Ok(input - 20.0))),
                     ..Default::default()
@@ -4924,7 +4944,7 @@ mod tests {
             #[test]
             fn transformation_err() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
                     ..Default::default()
@@ -4955,7 +4975,7 @@ mod tests {
             #[test]
             fn feedback() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     ..Default::default()
                 });
@@ -4979,7 +4999,7 @@ mod tests {
             #[test]
             fn feedback_with_virtual_source() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     ..Default::default()
                 });
@@ -5007,7 +5027,7 @@ mod tests {
             #[test]
             fn feedback_reverse() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     reverse: true,
                     ..Default::default()
@@ -5034,7 +5054,7 @@ mod tests {
             #[test]
             fn feedback_target_interval() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(20, u32::MAX),
                     ..Default::default()
@@ -5076,7 +5096,7 @@ mod tests {
             #[test]
             fn feedback_target_interval_reverse() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(20, u32::MAX),
                     reverse: true,
@@ -5119,7 +5139,7 @@ mod tests {
             #[test]
             fn feedback_source_and_target_interval() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_source_value_interval: Interval::new(20, 80),
                     discrete_target_value_interval: Interval::new(40, 100),
@@ -5152,7 +5172,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_ignore() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(20, 80),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
@@ -5172,7 +5192,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(20, 80),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
@@ -5210,7 +5230,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_max_okay() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(2, 2),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
@@ -5247,7 +5267,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_max_issue_263() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(3, 3),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
@@ -5285,7 +5305,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_target_one_value() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(50, 50),
                     out_of_range_behavior: OutOfRangeBehavior::Min,
@@ -5323,7 +5343,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_min_max_target_one_value() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(50, 50),
                     ..Default::default()
@@ -5360,7 +5380,7 @@ mod tests {
             #[test]
             fn feedback_out_of_range_ignore_target_one_value() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     discrete_target_value_interval: Interval::new(50, 50),
                     out_of_range_behavior: OutOfRangeBehavior::Ignore,
@@ -5382,7 +5402,7 @@ mod tests {
             #[test]
             fn feedback_transformation() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     feedback_transformation: Some(TestTransformation::new(
                         |input| Ok(input - 10.0),
@@ -5416,7 +5436,7 @@ mod tests {
         #[test]
         fn absolute_value_target_off() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
@@ -5444,7 +5464,7 @@ mod tests {
         #[test]
         fn absolute_value_target_on() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
@@ -5472,7 +5492,7 @@ mod tests {
         #[test]
         fn absolute_value_target_rather_off() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
@@ -5500,7 +5520,7 @@ mod tests {
         #[test]
         fn absolute_value_target_rather_on() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
@@ -5528,7 +5548,7 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_off() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
@@ -5557,7 +5577,7 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_on() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
@@ -5586,7 +5606,7 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_rather_off() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
@@ -5615,7 +5635,7 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_rather_on() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
@@ -5644,7 +5664,7 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_too_off() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
@@ -5673,7 +5693,7 @@ mod tests {
         #[test]
         fn absolute_value_target_interval_target_too_on() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
@@ -5702,7 +5722,7 @@ mod tests {
         #[test]
         fn feedback() {
             // Given
-            let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 ..Default::default()
             });
@@ -5716,7 +5736,7 @@ mod tests {
         #[test]
         fn feedback_target_interval() {
             // Given
-            let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::ToggleButton,
                 target_value_interval: create_unit_value_interval(0.3, 0.7),
                 ..Default::default()
@@ -5736,7 +5756,7 @@ mod tests {
         #[test]
         fn continuous_to_continuous_equal() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
@@ -5759,7 +5779,7 @@ mod tests {
         #[test]
         fn continuous_to_continuous_shifted() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
@@ -5789,7 +5809,7 @@ mod tests {
         #[test]
         fn continuous_to_discrete_shifted() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
@@ -5821,7 +5841,7 @@ mod tests {
         #[test]
         fn discrete_to_continuous_shifted() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
@@ -5850,7 +5870,7 @@ mod tests {
         #[test]
         fn discrete_to_discrete_shifted() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
@@ -5883,7 +5903,7 @@ mod tests {
         #[test]
         fn target_value_sequence() {
             // Given
-            let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+            let mut mode: TestMode = Mode::new(ModeSettings {
                 // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                 target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                 step_count_interval: create_discrete_increment_interval(10, 10),
@@ -5920,7 +5940,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -5949,7 +5969,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -5978,7 +5998,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -6008,7 +6028,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
                 });
@@ -6038,7 +6058,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -6068,7 +6088,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
                 });
@@ -6098,7 +6118,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     reverse: true,
                     ..Default::default()
                 });
@@ -6128,7 +6148,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     rotate: true,
                     ..Default::default()
                 });
@@ -6167,7 +6187,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     rotate: true,
                     ..Default::default()
                 });
@@ -6206,7 +6226,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -6236,7 +6256,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -6266,7 +6286,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -6305,7 +6325,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_just_appearing_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -6345,7 +6365,7 @@ mod tests {
             #[test]
             fn not_get_stuck() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: full_unit_interval(),
                     step_size_interval: create_unit_value_interval(0.01, 0.01),
                     ..Default::default()
@@ -6365,7 +6385,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -6405,7 +6425,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -6445,7 +6465,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
                     ..Default::default()
@@ -6486,7 +6506,7 @@ mod tests {
             #[test]
             fn target_value_sequence() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                     step_count_interval: create_discrete_increment_interval(1, 5),
@@ -6533,7 +6553,7 @@ mod tests {
             #[test]
             fn target_value_sequence_rotate() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                     step_count_interval: create_discrete_increment_interval(1, 5),
@@ -6584,7 +6604,7 @@ mod tests {
             #[test]
             fn make_absolute_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     make_absolute: true,
                     ..Default::default()
                 });
@@ -6618,7 +6638,7 @@ mod tests {
             #[test]
             fn make_absolute_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     make_absolute: true,
                     step_size_interval: create_unit_value_interval(0.01, 0.05),
                     ..Default::default()
@@ -6671,7 +6691,7 @@ mod tests {
                 #[test]
                 fn default_1() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -6703,7 +6723,7 @@ mod tests {
                 #[test]
                 fn default_2() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -6735,7 +6755,7 @@ mod tests {
                 #[test]
                 fn min_step_count_1() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         step_count_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
                     });
@@ -6781,7 +6801,7 @@ mod tests {
                 #[test]
                 fn min_step_count_2() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         step_count_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
                     });
@@ -6816,7 +6836,7 @@ mod tests {
                 #[test]
                 fn max_step_count_1() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         step_count_interval: create_discrete_increment_interval(1, 2),
                         ..Default::default()
                     });
@@ -6849,7 +6869,7 @@ mod tests {
                 #[test]
                 fn max_step_count_throttle() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         step_count_interval: create_discrete_increment_interval(-2, -2),
                         ..Default::default()
                     });
@@ -6887,7 +6907,7 @@ mod tests {
                 #[test]
                 fn max_step_count_2() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         step_count_interval: create_discrete_increment_interval(1, 2),
                         ..Default::default()
                     });
@@ -6920,7 +6940,7 @@ mod tests {
                 #[test]
                 fn reverse() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         reverse: true,
                         ..Default::default()
                     });
@@ -6953,7 +6973,7 @@ mod tests {
                 #[test]
                 fn rotate_1() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         rotate: true,
                         ..Default::default()
                     });
@@ -6995,7 +7015,7 @@ mod tests {
                 #[test]
                 fn rotate_2() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         rotate: true,
                         ..Default::default()
                     });
@@ -7037,7 +7057,7 @@ mod tests {
                 #[test]
                 fn target_interval_min() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         ..Default::default()
                     });
@@ -7070,7 +7090,7 @@ mod tests {
                 #[test]
                 fn target_interval_max() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         ..Default::default()
                     });
@@ -7103,7 +7123,7 @@ mod tests {
                 #[test]
                 fn target_interval_current_target_value_out_of_range() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         ..Default::default()
                     });
@@ -7145,7 +7165,7 @@ mod tests {
                 #[test]
                 fn target_interval_step_interval_current_target_value_out_of_range() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         step_count_interval: create_discrete_increment_interval(1, 100),
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         ..Default::default()
@@ -7188,7 +7208,7 @@ mod tests {
                 #[test]
                 fn target_interval_min_rotate() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         rotate: true,
                         ..Default::default()
@@ -7231,7 +7251,7 @@ mod tests {
                 #[test]
                 fn target_interval_max_rotate() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         rotate: true,
                         ..Default::default()
@@ -7274,7 +7294,7 @@ mod tests {
                 #[test]
                 fn target_interval_rotate_current_target_value_out_of_range() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         rotate: true,
                         ..Default::default()
@@ -7317,7 +7337,7 @@ mod tests {
                 #[test]
                 fn make_absolute_1() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         make_absolute: true,
                         ..Default::default()
                     });
@@ -7354,7 +7374,7 @@ mod tests {
                 #[test]
                 fn make_absolute_2() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         make_absolute: true,
                         step_size_interval: create_unit_value_interval(0.01, 0.05),
                         ..Default::default()
@@ -7405,7 +7425,7 @@ mod tests {
                 #[test]
                 fn default_1() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         use_discrete_processing: true,
                         ..Default::default()
                     });
@@ -7438,7 +7458,7 @@ mod tests {
                 #[test]
                 fn default_2() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         use_discrete_processing: true,
                         ..Default::default()
                     });
@@ -7471,7 +7491,7 @@ mod tests {
                 #[test]
                 fn min_step_count_1() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         use_discrete_processing: true,
                         step_count_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
@@ -7513,7 +7533,7 @@ mod tests {
                 #[test]
                 fn min_step_count_2() {
                     // Given
-                    let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                    let mut mode: TestMode = Mode::new(ModeSettings {
                         step_count_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
                     });
@@ -7548,7 +7568,7 @@ mod tests {
                 // #[test]
                 // fn max_step_count_1() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         step_count_interval: create_discrete_increment_interval(1, 2),
                 //         ..Default::default()
                 //     });
@@ -7571,7 +7591,7 @@ mod tests {
                 // #[test]
                 // fn max_step_count_throttle() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         step_count_interval: create_discrete_increment_interval(-2, -2),
                 //         ..Default::default()
                 //     });
@@ -7599,7 +7619,7 @@ mod tests {
                 // #[test]
                 // fn max_step_count_2() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         step_count_interval: create_discrete_increment_interval(1, 2),
                 //         ..Default::default()
                 //     });
@@ -7625,7 +7645,7 @@ mod tests {
                 // #[test]
                 // fn reverse() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         reverse: true,
                 //         ..Default::default()
                 //     });
@@ -7651,7 +7671,7 @@ mod tests {
                 // #[test]
                 // fn rotate_1() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         rotate: true,
                 //         ..Default::default()
                 //     });
@@ -7674,7 +7694,7 @@ mod tests {
                 // #[test]
                 // fn rotate_2() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         rotate: true,
                 //         ..Default::default()
                 //     });
@@ -7700,7 +7720,7 @@ mod tests {
                 // #[test]
                 // fn target_interval_min() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         target_value_interval: create_unit_value_interval(0.2, 0.8),
                 //         ..Default::default()
                 //     });
@@ -7723,7 +7743,7 @@ mod tests {
                 // #[test]
                 // fn target_interval_max() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         target_value_interval: create_unit_value_interval(0.2, 0.8),
                 //         ..Default::default()
                 //     });
@@ -7749,7 +7769,7 @@ mod tests {
                 // #[test]
                 // fn target_interval_current_target_value_out_of_range() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         target_value_interval: create_unit_value_interval(0.2, 0.8),
                 //         ..Default::default()
                 //     });
@@ -7772,7 +7792,7 @@ mod tests {
                 // #[test]
                 // fn target_interval_step_interval_current_target_value_out_of_range() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         step_count_interval: create_discrete_increment_interval(1, 100),
                 //         target_value_interval: create_unit_value_interval(0.2, 0.8),
                 //         ..Default::default()
@@ -7796,7 +7816,7 @@ mod tests {
                 // #[test]
                 // fn target_interval_min_rotate() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         target_value_interval: create_unit_value_interval(0.2, 0.8),
                 //         rotate: true,
                 //         ..Default::default()
@@ -7820,7 +7840,7 @@ mod tests {
                 // #[test]
                 // fn target_interval_max_rotate() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         target_value_interval: create_unit_value_interval(0.2, 0.8),
                 //         rotate: true,
                 //         ..Default::default()
@@ -7847,7 +7867,7 @@ mod tests {
                 // #[test]
                 // fn target_interval_rotate_current_target_value_out_of_range() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         target_value_interval: create_unit_value_interval(0.2, 0.8),
                 //         rotate: true,
                 //         ..Default::default()
@@ -7871,7 +7891,7 @@ mod tests {
                 // #[test]
                 // fn make_absolute_1() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         convert_relative_to_absolute: true,
                 //         ..Default::default()
                 //     });
@@ -7895,7 +7915,7 @@ mod tests {
                 // #[test]
                 // fn make_absolute_2() {
                 //     // Given
-                //     let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                //     let mut mode: TestMode = Mode::new(ModeSettings {
                 //         convert_relative_to_absolute: true,
                 //         step_size_interval: create_unit_value_interval(0.01, 0.05),
                 //         ..Default::default()
@@ -7925,7 +7945,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -7963,7 +7983,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_count_interval: create_discrete_increment_interval(2, 100),
                     ..Default::default()
                 });
@@ -8002,7 +8022,7 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_count_interval: create_discrete_increment_interval(-4, 100),
                     ..Default::default()
                 });
@@ -8059,7 +8079,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 });
@@ -8098,7 +8118,7 @@ mod tests {
             #[test]
             fn max_step_count_throttle() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     step_count_interval: create_discrete_increment_interval(-10, -4),
                     ..Default::default()
                 });
@@ -8150,7 +8170,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     reverse: true,
                     ..Default::default()
                 });
@@ -8197,7 +8217,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
@@ -8221,7 +8241,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
@@ -8239,7 +8259,7 @@ mod tests {
             #[test]
             fn min_step_size_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
@@ -8268,7 +8288,7 @@ mod tests {
             #[test]
             fn min_step_size_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.2, 1.0),
                     ..Default::default()
@@ -8287,7 +8307,7 @@ mod tests {
             #[test]
             fn max_step_size_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
@@ -8320,7 +8340,7 @@ mod tests {
             #[test]
             fn max_step_size_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_size_interval: create_unit_value_interval(0.01, 0.09),
                     ..Default::default()
@@ -8339,7 +8359,7 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
@@ -8369,7 +8389,7 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_size_interval: create_unit_value_interval(0.5, 1.0),
@@ -8400,7 +8420,7 @@ mod tests {
             #[test]
             fn reverse_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
@@ -8419,7 +8439,7 @@ mod tests {
             #[test]
             fn reverse_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
@@ -8448,7 +8468,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
@@ -8477,7 +8497,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
@@ -8506,7 +8526,7 @@ mod tests {
             #[test]
             fn rotate_3_almost_max() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
@@ -8535,7 +8555,7 @@ mod tests {
             #[test]
             fn reverse_and_rotate_almost_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     reverse: true,
@@ -8557,7 +8577,7 @@ mod tests {
             #[test]
             fn reverse_and_rotate_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     reverse: true,
@@ -8579,7 +8599,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -8608,7 +8628,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -8628,7 +8648,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -8657,7 +8677,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
@@ -8687,7 +8707,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
@@ -8717,7 +8737,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
@@ -8747,7 +8767,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
@@ -8778,7 +8798,7 @@ mod tests {
             #[test]
             fn make_absolute_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     make_absolute: true,
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
@@ -8811,7 +8831,7 @@ mod tests {
             #[test]
             fn target_value_sequence() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
                     absolute_mode: AbsoluteMode::IncrementalButton,
@@ -8838,7 +8858,7 @@ mod tests {
             #[test]
             fn default_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
@@ -8869,7 +8889,7 @@ mod tests {
             #[test]
             fn default_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
@@ -8891,7 +8911,7 @@ mod tests {
             #[test]
             fn min_step_count_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -8923,7 +8943,7 @@ mod tests {
             #[test]
             fn min_step_count_throttle() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(-4, -4),
                     ..Default::default()
@@ -8955,7 +8975,7 @@ mod tests {
             #[test]
             fn min_step_count_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
@@ -8978,7 +8998,7 @@ mod tests {
             #[test]
             fn max_step_count_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 8),
                     ..Default::default()
@@ -9010,7 +9030,7 @@ mod tests {
             #[test]
             fn max_step_count_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
@@ -9044,7 +9064,7 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
@@ -9077,7 +9097,7 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
@@ -9111,7 +9131,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
@@ -9134,7 +9154,7 @@ mod tests {
             #[test]
             fn rotate_1() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
@@ -9166,7 +9186,7 @@ mod tests {
             #[test]
             fn rotate_2() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     rotate: true,
                     ..Default::default()
@@ -9198,7 +9218,7 @@ mod tests {
             #[test]
             fn target_interval_min() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -9230,7 +9250,7 @@ mod tests {
             #[test]
             fn target_interval_max() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -9253,7 +9273,7 @@ mod tests {
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
@@ -9285,7 +9305,7 @@ mod tests {
             #[test]
             fn step_count_interval_exceeded() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     ..Default::default()
@@ -9317,7 +9337,7 @@ mod tests {
             #[test]
             fn target_interval_step_interval_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
@@ -9350,7 +9370,7 @@ mod tests {
             #[test]
             fn target_interval_min_rotate() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
@@ -9383,7 +9403,7 @@ mod tests {
             #[test]
             fn target_interval_max_rotate() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
@@ -9416,7 +9436,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     rotate: true,
@@ -9449,7 +9469,7 @@ mod tests {
             #[test]
             fn target_interval_rotate_reverse_current_target_value_out_of_range() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     reverse: true,
@@ -9487,7 +9507,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
@@ -9515,7 +9535,7 @@ mod tests {
             #[test]
             fn min_step_count() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(2, 8),
                     ..Default::default()
@@ -9544,7 +9564,7 @@ mod tests {
             #[test]
             fn max_step_count() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     step_count_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
@@ -9573,7 +9593,7 @@ mod tests {
             #[test]
             fn source_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     ..Default::default()
@@ -9599,7 +9619,7 @@ mod tests {
             #[test]
             fn source_interval_step_interval() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
                     step_count_interval: create_discrete_increment_interval(4, 8),
@@ -9626,7 +9646,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mut mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
@@ -9659,7 +9679,7 @@ mod tests {
             #[test]
             fn default() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     ..Default::default()
                 });
@@ -9673,7 +9693,7 @@ mod tests {
             #[test]
             fn reverse() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     reverse: true,
                     ..Default::default()
@@ -9688,7 +9708,7 @@ mod tests {
             #[test]
             fn source_and_target_interval() {
                 // Given
-                let mode: Mode<TestTransformation> = Mode::new(ModeSettings {
+                let mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.2, 0.8),
                     target_value_interval: create_unit_value_interval(0.4, 1.0),
@@ -9742,12 +9762,7 @@ mod tests {
         AbsoluteValue::Discrete(Fraction::new(actual, max))
     }
 
-    fn abs_con_test(
-        mode: &mut Mode<TestTransformation>,
-        target: &TestTarget,
-        input: f64,
-        output: Option<f64>,
-    ) {
+    fn abs_con_test(mode: &mut TestMode, target: &TestTarget, input: f64, output: Option<f64>) {
         abs_test(
             mode,
             target,
@@ -9757,7 +9772,7 @@ mod tests {
     }
 
     fn abs_con_test_cumulative(
-        mode: &mut Mode<TestTransformation>,
+        mode: &mut TestMode,
         target: &mut TestTarget,
         input: f64,
         output: Option<f64>,
@@ -9771,7 +9786,7 @@ mod tests {
     }
 
     fn abs_test(
-        mode: &mut Mode<TestTransformation>,
+        mode: &mut TestMode,
         target: &TestTarget,
         input: ControlValue,
         output: Option<f64>,
@@ -9785,7 +9800,7 @@ mod tests {
     }
 
     fn abs_test_cumulative(
-        mode: &mut Mode<TestTransformation>,
+        mode: &mut TestMode,
         target: &mut TestTarget,
         input: ControlValue,
         output: Option<f64>,
@@ -9794,6 +9809,14 @@ mod tests {
         if let Some(o) = output {
             target.current_value = Some(con_val(o));
         }
+    }
+
+    type TestMode = Mode<TestTransformation, ()>;
+
+    type TimelessControlEvent<P> = ControlEvent<P, ()>;
+
+    fn create_timeless_control_event<P>(payload: P) -> TimelessControlEvent<P> {
+        TimelessControlEvent::new(payload, ())
     }
 
     const FB_OPTS: ModeFeedbackOptions = ModeFeedbackOptions {
