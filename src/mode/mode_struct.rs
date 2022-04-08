@@ -32,6 +32,7 @@ pub const DEFAULT_STEP_SIZE: f64 = 0.01;
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct ModeControlOptions {
     pub enforce_rotate: bool,
+    pub last_non_performance_target_value: Option<AbsoluteValue>,
 }
 
 pub trait TransformationInputProvider<T> {
@@ -232,6 +233,8 @@ pub enum AbsoluteMode {
     ToggleButton = 2,
     #[display(fmt = "Make relative")]
     MakeRelative = 3,
+    #[display(fmt = "Performance control")]
+    PerformanceControl = 4,
 }
 
 impl Default for AbsoluteMode {
@@ -727,7 +730,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         use AbsoluteMode::*;
         match self.settings.absolute_mode {
             Normal => Some(
-                self.control_absolute_normal(control_event, target, context)?
+                self.control_absolute_normal(control_event, target, context, None)?
                     .map(ControlValue::from_absolute),
             ),
             IncrementalButton => self.control_absolute_incremental_buttons(
@@ -743,11 +746,22 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             MakeRelative => {
                 self.control_absolute_to_relative(control_event, target, context, options)
             }
+            PerformanceControl => Some(
+                self.control_absolute_normal(
+                    control_event,
+                    target,
+                    context,
+                    options.last_non_performance_target_value,
+                )?
+                .map(ControlValue::from_absolute),
+            ),
         }
     }
 
     /// Processes the given control value in absolute mode and maybe returns an appropriate target
     /// value.
+    ///
+    /// Provide `last_non_performance_target_value` only if you want "Performance control".
     fn control_absolute_normal<
         'a,
         C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>,
@@ -757,6 +771,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         control_event: ControlEvent<AbsoluteValue, S>,
         target: &impl Target<'a, Context = TC>,
         context: C,
+        last_non_performance_target_value: Option<AbsoluteValue>,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         let res = self.pre_process_absolute_value(control_event)?;
         let current_target_value = target.current_value(context.into());
@@ -766,6 +781,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             control_type,
             current_target_value,
             context.additional_input(),
+            last_non_performance_target_value,
         );
         self.hitting_target_considering_max_jump(
             pepped_up_control_value,
@@ -1111,6 +1127,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             control_event.with_payload(AbsoluteValue::Continuous(abs_input_value)),
             target,
             context,
+            None,
         )
     }
 
@@ -1266,8 +1283,20 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         control_type: ControlType,
         current_target_value: Option<AbsoluteValue>,
         additional_transformation_input: T::AdditionalInput,
+        last_non_performance_target_value: Option<AbsoluteValue>,
     ) -> AbsoluteValue {
         let mut v = source_normalized_control_value;
+        // 1. Performance control (optional)
+        if let Some(y_last) = last_non_performance_target_value {
+            let x = v.to_unit_value().get();
+            let y_last = y_last.to_unit_value().get();
+            let y = if self.settings.reverse {
+                y_last - x * y_last
+            } else {
+                y_last + x * (1.0 - y_last)
+            };
+            v = AbsoluteValue::Continuous(UnitValue::new_clamped(y));
+        }
         // 2. Apply transformation
         if let Some(transformation) = self.settings.control_transformation.as_ref() {
             if let Ok(res) = v.transform(

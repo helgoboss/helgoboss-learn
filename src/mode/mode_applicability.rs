@@ -227,10 +227,8 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                 "If enabled, decreases the target value on press instead of increasing it.",
                             ),
                             crate::AbsoluteMode::ToggleButton => MakesNoSenseUseDefault,
-                            crate::AbsoluteMode::MakeRelative =>
-                                MakesSense(
-                                    "If enabled, converts increments to decrements and vice versa.",
-                                ),
+                            crate::AbsoluteMode::MakeRelative => MakesNoSenseUseDefault,
+                            crate::AbsoluteMode::PerformanceControl => MakesNoSenseUseDefault,
                         }
                     }
                     RangeControl | Relative => {
@@ -732,7 +730,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             ToggleButton => MakesSense(
                                 "Switches the target value between its minimum and maximum on each button press.",
                             ),
-                            MakeRelative => MakesNoSenseUseDefault
+                            MakeRelative | PerformanceControl => MakesNoSenseUseDefault,
                         }
                     }
                     RangeControl => {
@@ -748,6 +746,11 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                     "Attempts to convert incoming absolute control values to relative increments, making it possible to control targets relatively with absolute controls."
                                 )
                             }
+                            PerformanceControl => {
+                                MakesSense(
+                                    "Changes the target value starting from its last position set within REAPER."
+                                )
+                            }
                             IncrementalButton | ToggleButton => MakesNoSenseParentTakesCareOfDefault
                         }
                     }
@@ -759,7 +762,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                         NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC,
                                     )
                                 }
-                                MakeRelative | IncrementalButton | ToggleButton => MakesNoSenseParentTakesCareOfDefault
+                                MakeRelative | IncrementalButton | ToggleButton | PerformanceControl => MakesNoSenseParentTakesCareOfDefault
                             }
                         } else {
                             HasNoEffect
