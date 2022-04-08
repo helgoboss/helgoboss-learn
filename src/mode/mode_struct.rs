@@ -1821,7 +1821,7 @@ mod tests {
     use super::*;
 
     use crate::mode::test_util::{TestTarget, TestTransformation};
-    use crate::{create_unit_value_interval, ControlType, Fraction};
+    use crate::{create_unit_value_interval, ControlType, Fraction, NoopTimestamp};
     use approx::*;
 
     mod absolute_normal {
@@ -9811,12 +9811,12 @@ mod tests {
         }
     }
 
-    type TestMode = Mode<TestTransformation, ()>;
+    type TestMode = Mode<TestTransformation, NoopTimestamp>;
 
-    type TimelessControlEvent<P> = ControlEvent<P, ()>;
+    type TimelessControlEvent<P> = ControlEvent<P, NoopTimestamp>;
 
     fn create_timeless_control_event<P>(payload: P) -> TimelessControlEvent<P> {
-        TimelessControlEvent::new(payload, ())
+        TimelessControlEvent::new(payload, NoopTimestamp)
     }
 
     const FB_OPTS: ModeFeedbackOptions = ModeFeedbackOptions {

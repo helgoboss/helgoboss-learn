@@ -3,7 +3,8 @@ use crate::{
     Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use std::fmt::{Display, Formatter};
-use std::time::Duration;
+use std::ops::Sub;
+use std::time::{Duration, Instant};
 
 /// The timestamp is intended to be be used for things like takeover modes. Ideally, the event
 /// time should be captured when the event occurs but it's also okay to do that somewhat later
@@ -11,16 +12,23 @@ use std::time::Duration;
 /// Most importantly, if the event is sent to another thread, then the time should be captured
 /// *before* the event leaves the thread and saved. That allows more accurate processing in the
 /// destination thread.  
-pub trait AbstractTimestamp: Copy {
-    /// Returns the amount of time elapsed since this timestamp.
-    fn elapsed(&self) -> Duration;
-}
+pub trait AbstractTimestamp: Copy + Sub<Output = Duration> {}
 
-impl AbstractTimestamp for () {
-    fn elapsed(&self) -> Duration {
+/// A timestamp that does nothing and takes no space.
+#[derive(Copy, Clone)]
+pub struct NoopTimestamp;
+
+impl AbstractTimestamp for NoopTimestamp {}
+
+impl Sub for NoopTimestamp {
+    type Output = Duration;
+
+    fn sub(self, _: Self) -> Duration {
         Duration::ZERO
     }
 }
+
+impl AbstractTimestamp for Instant {}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ControlEvent<P, T: AbstractTimestamp> {
