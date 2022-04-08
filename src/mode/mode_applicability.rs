@@ -141,18 +141,18 @@ impl ModeApplicability {
     }
 }
 
-const STEP_SIZE_MIN_FOR_RANGE_DESC: &'static str =
+const STEP_SIZE_MIN_FOR_RANGE_DESC: &str =
     "Sets the target value change amount for an incoming non-accelerated increment/decrement.";
-const SPEED_MIN_FOR_RANGE_DESC: &'static str =
+const SPEED_MIN_FOR_RANGE_DESC: &str =
     "Sets the number of target increments for an incoming non-accelerated increment/decrement.";
-const STEP_SIZE_MAX_FOR_RANGE_DESC: &'static str =
+const STEP_SIZE_MAX_FOR_RANGE_DESC: &str =
     "Sets the target value change amount for an incoming most accelerated increment/decrement.";
-const SPEED_MAX_FOR_RANGE_DESC: &'static str =
+const SPEED_MAX_FOR_RANGE_DESC: &str =
     "Sets the number of target increments for an incoming most accelerated increment/decrement.";
 
-const ROTATE_FOR_RANGE_DESC: &'static str = "If enabled, jumps from max target value to min target value for increments (opposite for decrements). Was called \"Rotate\" before.";
+const ROTATE_FOR_RANGE_DESC: &str = "If enabled, jumps from max target value to min target value for increments (opposite for decrements). Was called \"Rotate\" before.";
 
-const NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC: &'static str = "Sets target to the value that corresponds to the knob/fader position. Proportionally maps from source to target range.";
+const NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC: &str = "Sets target to the value that corresponds to the knob/fader position. Proportionally maps from source to target range.";
 
 pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeApplicability {
     use ModeApplicability::*;
