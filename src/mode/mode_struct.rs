@@ -32,7 +32,6 @@ pub const DEFAULT_STEP_SIZE: f64 = 0.01;
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct ModeControlOptions {
     pub enforce_rotate: bool,
-    pub last_non_performance_target_value: Option<AbsoluteValue>,
 }
 
 pub trait TransformationInputProvider<T> {
@@ -443,6 +442,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             target,
             context,
             ModeControlOptions::default(),
+            None,
         )?
         .into()
     }
@@ -461,6 +461,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         target: &impl Target<'a, Context = TC>,
         context: C,
         options: ModeControlOptions,
+        last_non_performance_target_value: Option<AbsoluteValue>,
     ) -> Option<ModeControlResult<ControlValue>> {
         match control_event.payload() {
             ControlValue::AbsoluteContinuous(v) => self.control_absolute(
@@ -469,6 +470,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 context,
                 true,
                 options,
+                last_non_performance_target_value,
             ),
             ControlValue::AbsoluteDiscrete(v) => self.control_absolute(
                 control_event.with_payload(AbsoluteValue::Discrete(v)),
@@ -476,6 +478,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 context,
                 true,
                 options,
+                last_non_performance_target_value,
             ),
             ControlValue::RelativeDiscrete(i) => self.control_relative(
                 control_event.with_payload(Increment::Discrete(i)),
@@ -652,6 +655,8 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             context,
             false,
             ModeControlOptions::default(),
+            // Polling is only for buttons. "Performance control" mode is only for range elements.
+            None,
         )
     }
 
@@ -709,6 +714,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         context: C,
         consider_press_duration: bool,
         options: ModeControlOptions,
+        last_non_performance_target_value: Option<AbsoluteValue>,
     ) -> Option<ModeControlResult<ControlValue>> {
         // Filter presses/releases. Makes sense only for absolute mode "Normal". If this is used
         // a filter is used with another absolute mode, it's considered a usage fault.
@@ -751,7 +757,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                     control_event,
                     target,
                     context,
-                    options.last_non_performance_target_value,
+                    last_non_performance_target_value,
                 )?
                 .map(ControlValue::from_absolute),
             ),
@@ -1287,16 +1293,23 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     ) -> AbsoluteValue {
         let mut v = source_normalized_control_value;
         // 1. Performance control (optional)
-        if let Some(y_last) = last_non_performance_target_value {
+        let performance_control = if let Some(y_last) = last_non_performance_target_value {
             let x = v.to_unit_value().get();
             let y_last = y_last.to_unit_value().get();
+            let target_min = self.settings.target_value_interval.min_val().get();
+            let target_max = self.settings.target_value_interval.max_val().get();
             let y = if self.settings.reverse {
-                y_last - x * y_last
+                let span = (y_last - target_min).max(0.0);
+                y_last - x * span
             } else {
-                y_last + x * (1.0 - y_last)
+                let span = (target_max - y_last).max(0.0);
+                y_last + x * span
             };
             v = AbsoluteValue::Continuous(UnitValue::new_clamped(y));
-        }
+            true
+        } else {
+            false
+        };
         // 2. Apply transformation
         if let Some(transformation) = self.settings.control_transformation.as_ref() {
             if let Ok(res) = v.transform(
@@ -1308,50 +1321,58 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 v = res;
             }
         };
-        // 3. Apply reverse
-        if self.settings.reverse {
-            // We must normalize the target value value and use it in the inversion operation.
-            // As an alternative, we could BEFORE doing all that stuff homogenize the source and
-            // target intervals to have the same (minimum) size?
-            let normalized_max_discrete_target_value = control_type.discrete_max().map(|m| {
-                self.settings
-                    .discrete_target_value_interval
-                    .normalize_to_min(m)
-            });
-            // If this is a discrete target (which reports a discrete maximum) and discrete
-            // processing is disabled, the reverse operation must use a "scaling reverse", not a
-            // "subtraction reverse". Therefore we must turn a discrete control value into a
-            // continuous value in this case before applying the reverse operation.
-            if normalized_max_discrete_target_value.is_some()
-                && !self.settings.use_discrete_processing
-            {
-                v = v.to_continuous_value();
-            }
-            v = v.inverse(normalized_max_discrete_target_value);
-        };
-        // 4. Apply target interval and rounding OR target value sequence
-        if self.state.unpacked_target_value_sequence.is_empty() {
-            // We don't have a target value sequence. Apply target interval and rounding.
-            v = v.denormalize(
-                &self.settings.target_value_interval,
-                &self.settings.discrete_target_value_interval,
-                self.settings.use_discrete_processing,
-                control_type.discrete_max(),
-            );
+        if performance_control {
+            // Performance control. Just apply rounding.
             if self.settings.round_target_value {
                 v = v.round(control_type);
             };
         } else {
-            // We have a target value sequence. Apply it.
-            let max_index = self.state.unpacked_target_value_sequence.len() - 1;
-            let seq_index = (v.to_unit_value().get() * max_index as f64).round() as usize;
-            let unit_value = self
-                .state
-                .unpacked_target_value_sequence
-                .get(seq_index)
-                .copied()
-                .unwrap_or_default();
-            v = AbsoluteValue::Continuous(unit_value)
+            // No performance control
+            // 3. Apply reverse
+            if self.settings.reverse {
+                // We must normalize the target value value and use it in the inversion operation.
+                // As an alternative, we could BEFORE doing all that stuff homogenize the source and
+                // target intervals to have the same (minimum) size?
+                let normalized_max_discrete_target_value = control_type.discrete_max().map(|m| {
+                    self.settings
+                        .discrete_target_value_interval
+                        .normalize_to_min(m)
+                });
+                // If this is a discrete target (which reports a discrete maximum) and discrete
+                // processing is disabled, the reverse operation must use a "scaling reverse", not a
+                // "subtraction reverse". Therefore we must turn a discrete control value into a
+                // continuous value in this case before applying the reverse operation.
+                if normalized_max_discrete_target_value.is_some()
+                    && !self.settings.use_discrete_processing
+                {
+                    v = v.to_continuous_value();
+                }
+                v = v.inverse(normalized_max_discrete_target_value);
+            };
+            // 4. Apply target interval and rounding OR target value sequence
+            if self.state.unpacked_target_value_sequence.is_empty() {
+                // We don't have a target value sequence. Apply target interval and rounding.
+                v = v.denormalize(
+                    &self.settings.target_value_interval,
+                    &self.settings.discrete_target_value_interval,
+                    self.settings.use_discrete_processing,
+                    control_type.discrete_max(),
+                );
+                if self.settings.round_target_value {
+                    v = v.round(control_type);
+                };
+            } else {
+                // We have a target value sequence. Apply it.
+                let max_index = self.state.unpacked_target_value_sequence.len() - 1;
+                let seq_index = (v.to_unit_value().get() * max_index as f64).round() as usize;
+                let unit_value = self
+                    .state
+                    .unpacked_target_value_sequence
+                    .get(seq_index)
+                    .copied()
+                    .unwrap_or_default();
+                v = AbsoluteValue::Continuous(unit_value)
+            }
         }
         // Return
         v
@@ -5779,7 +5800,7 @@ mod tests {
         }
     }
 
-    mod absolute_to_relative {
+    mod make_relative {
         use super::*;
 
         #[test]
@@ -5957,6 +5978,126 @@ mod tests {
             test(0.3, Some(0.2));
             test(0.2, Some(0.0));
             test(0.1, None);
+        }
+    }
+
+    mod performance_control {
+        use super::*;
+
+        #[test]
+        fn performance_control() {
+            // Given
+            let mut mode: TestMode = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::PerformanceControl,
+                ..Default::default()
+            });
+            let target = TestTarget {
+                current_value: Some(con_val(0.0)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            let last_non_performance_target_value = Some(con_val(0.5));
+            // When
+            // Then
+            let mut test = |i, o| {
+                perf_test(
+                    &mut mode,
+                    &target,
+                    abs_con_val(i),
+                    o,
+                    last_non_performance_target_value,
+                );
+            };
+            test(0.0, Some(0.5));
+            test(0.5, Some(0.75));
+            test(1.0, Some(1.0));
+        }
+
+        #[test]
+        fn performance_control_max() {
+            // Given
+            let mut mode: TestMode = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::PerformanceControl,
+                target_value_interval: create_unit_value_interval(0.0, 0.6),
+                ..Default::default()
+            });
+            let target = TestTarget {
+                current_value: Some(con_val(0.0)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            let last_non_performance_target_value = Some(con_val(0.1));
+            // When
+            // Then
+            let mut test = |i, o| {
+                perf_test(
+                    &mut mode,
+                    &target,
+                    abs_con_val(i),
+                    o,
+                    last_non_performance_target_value,
+                );
+            };
+            test(0.0, Some(0.1));
+            test(0.5, Some(0.35));
+            test(1.0, Some(0.6));
+        }
+
+        #[test]
+        fn performance_control_reverse() {
+            // Given
+            let mut mode: TestMode = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::PerformanceControl,
+                reverse: true,
+                ..Default::default()
+            });
+            let target = TestTarget {
+                current_value: Some(con_val(1.0)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            let last_non_performance_target_value = Some(con_val(0.5));
+            // When
+            // Then
+            let mut test = |i, o| {
+                perf_test(
+                    &mut mode,
+                    &target,
+                    abs_con_val(i),
+                    o,
+                    last_non_performance_target_value,
+                );
+            };
+            test(0.0, Some(0.5));
+            test(0.5, Some(0.25));
+            test(1.0, Some(0.0));
+        }
+
+        #[test]
+        fn performance_control_reverse_min() {
+            // Given
+            let mut mode: TestMode = Mode::new(ModeSettings {
+                absolute_mode: AbsoluteMode::PerformanceControl,
+                target_value_interval: create_unit_value_interval(0.4, 1.0),
+                reverse: true,
+                ..Default::default()
+            });
+            let target = TestTarget {
+                current_value: Some(con_val(0.0)),
+                control_type: ControlType::AbsoluteContinuous,
+            };
+            let last_non_performance_target_value = Some(con_val(0.9));
+            // When
+            // Then
+            let mut test = |i, o| {
+                perf_test(
+                    &mut mode,
+                    &target,
+                    abs_con_val(i),
+                    o,
+                    last_non_performance_target_value,
+                );
+            };
+            test(0.0, Some(0.9));
+            test(0.5, Some(0.65));
+            test(1.0, Some(0.4));
         }
     }
 
@@ -9821,8 +9962,12 @@ mod tests {
         output: Option<f64>,
     ) {
         let result = mode.control(create_timeless_control_event(input), target, ());
-        if let Some(o) = output {
-            assert_abs_diff_eq!(result.unwrap(), abs_con_val(o));
+        assert_equals(result, output)
+    }
+
+    fn assert_equals(result: Option<ControlValue>, expected: Option<f64>) {
+        if let Some(e) = expected {
+            assert_abs_diff_eq!(result.unwrap(), abs_con_val(e));
         } else {
             assert_eq!(result, None);
         }
@@ -9838,6 +9983,25 @@ mod tests {
         if let Some(o) = output {
             target.current_value = Some(con_val(o));
         }
+    }
+
+    fn perf_test(
+        mode: &mut TestMode,
+        target: &TestTarget,
+        input: ControlValue,
+        output: Option<f64>,
+        last_non_performance_target_value: Option<AbsoluteValue>,
+    ) {
+        let result = mode
+            .control_with_options(
+                create_timeless_control_event(input),
+                target,
+                (),
+                ModeControlOptions::default(),
+                last_non_performance_target_value,
+            )
+            .and_then(|r| r.into());
+        assert_equals(result, output);
     }
 
     type TestMode = Mode<TestTransformation, NoopTimestamp>;

@@ -419,7 +419,15 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             if input.target_is_virtual || input.is_feedback {
                 HasNoEffect
             } else {
-                MakesSense("Allows you to step through a sequence of comma-separated user-defined target values and value ranges. When using relative control, duplicate values and direction changes are ignored. Example: 25 - 50 (2), 75, 50, 100 %")
+                use crate::AbsoluteMode::*;
+                match input.absolute_mode {
+                    Normal | IncrementalButton | MakeRelative => {
+                        MakesSense("Allows you to step through a sequence of comma-separated user-defined target values and value ranges. When using relative control, duplicate values and direction changes are ignored. Example: 25 - 50 (2), 75, 50, 100 %")
+                    }
+                    ToggleButton | PerformanceControl => {
+                        MakesNoSenseUseDefault
+                    }
+                }
             }
         }
         FeedbackTransformation => {
