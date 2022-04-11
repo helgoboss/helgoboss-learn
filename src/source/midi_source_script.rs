@@ -1,6 +1,6 @@
-use crate::{AbsoluteValue, RawMidiEvents};
+use crate::{FeedbackValue, RawMidiEvents};
 
 pub trait MidiSourceScript {
     /// Returns raw MIDI bytes.
-    fn execute(&self, input_value: AbsoluteValue) -> Result<RawMidiEvents, &'static str>;
+    fn execute(&self, input_value: FeedbackValue) -> Result<RawMidiEvents, &'static str>;
 }
