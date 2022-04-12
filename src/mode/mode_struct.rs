@@ -1,10 +1,10 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
-    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FireMode,
-    Fraction, Increment, Interval, MinIsMaxBehavior, OutOfRangeBehavior, PressDurationProcessor,
-    TakeoverMode, Target, TextualFeedbackValue, Transformation, UnitIncrement, UnitValue,
-    ValueSequence, BASE_EPSILON,
+    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FeedbackValue,
+    FireMode, Fraction, Increment, Interval, MinIsMaxBehavior, NumericFeedbackValue,
+    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue,
+    Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -14,7 +14,8 @@ use regex::Captures;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::{BTreeSet, HashSet};
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -55,6 +56,41 @@ pub struct ModeFeedbackOptions {
 }
 
 #[derive(Clone, Debug)]
+pub enum FeedbackValueTable {
+    FromTextToDiscrete(HashMap<String, u32>),
+}
+
+impl FeedbackValueTable {
+    /// At the moment this always returns either `None` or something owned, but this might
+    /// change in future (passing through something borrowed).
+    pub fn transform_value<'a, 'b, 'c>(
+        &'b self,
+        value: Cow<'a, FeedbackValue<'c>>,
+    ) -> Option<Cow<'a, FeedbackValue<'c>>> {
+        match self {
+            FeedbackValueTable::FromTextToDiscrete(map) => match value.as_ref() {
+                FeedbackValue::Off => Some(Cow::Owned(FeedbackValue::Off)),
+                FeedbackValue::Numeric(_) => None,
+                FeedbackValue::Textual(v) => {
+                    let discrete_value = map.get(v.text.as_ref())?;
+                    let numeric_value = NumericFeedbackValue::new(
+                        v.style,
+                        AbsoluteValue::Discrete(Fraction::new_max(*discrete_value)),
+                    );
+                    Some(Cow::Owned(FeedbackValue::Numeric(numeric_value)))
+                }
+            },
+        }
+    }
+}
+
+impl Default for FeedbackValueTable {
+    fn default() -> Self {
+        Self::FromTextToDiscrete(HashMap::new())
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ModeSettings<T: Transformation> {
     pub absolute_mode: AbsoluteMode,
     pub source_value_interval: Interval<UnitValue>,
@@ -76,6 +112,7 @@ pub struct ModeSettings<T: Transformation> {
     pub out_of_range_behavior: OutOfRangeBehavior,
     pub control_transformation: Option<T>,
     pub feedback_transformation: Option<T>,
+    pub feedback_value_table: Option<FeedbackValueTable>,
     /// Converts incoming relative messages to absolute ones.
     pub make_absolute: bool,
     /// Not in use at the moment, should always be `false`.
@@ -149,6 +186,7 @@ impl<T: Transformation> Default for ModeSettings<T> {
             textual_feedback_expression: Default::default(),
             feedback_color: None,
             feedback_background_color: None,
+            feedback_value_table: None,
         }
     }
 }
@@ -550,18 +588,56 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         target_value: AbsoluteValue,
         options: ModeFeedbackOptions,
     ) -> Option<AbsoluteValue> {
-        self.feedback_with_options_detail(target_value, options, Default::default())
+        let in_cow = Cow::Owned(FeedbackValue::Numeric(NumericFeedbackValue::new(
+            Default::default(),
+            target_value,
+        )));
+        let out_cow = self.feedback_with_options_detail(in_cow, options, Default::default())?;
+        Some(out_cow.to_numeric()?.value)
     }
 
     /// Takes a target value, interprets and transforms it conforming to mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback_with_options_detail(
-        &self,
-        target_value: AbsoluteValue,
+    pub fn feedback_with_options_detail<'a, 'b, 'c>(
+        &'b self,
+        target_value: Cow<'a, FeedbackValue<'c>>,
         options: ModeFeedbackOptions,
         additional_transformation_input: T::AdditionalInput,
-    ) -> Option<AbsoluteValue> {
-        let v = target_value;
+    ) -> Option<Cow<'a, FeedbackValue<'c>>> {
+        match target_value {
+            Cow::Owned(FeedbackValue::Numeric(feedback_value)) => {
+                let res = self.feedback_numerical_target_value(
+                    feedback_value,
+                    options,
+                    additional_transformation_input,
+                )?;
+                Some(Cow::Owned(res))
+            }
+            Cow::Borrowed(FeedbackValue::Numeric(feedback_value)) => {
+                let res = self.feedback_numerical_target_value(
+                    *feedback_value,
+                    options,
+                    additional_transformation_input,
+                )?;
+                Some(Cow::Owned(res))
+            }
+            v => {
+                if let Some(table) = self.settings.feedback_value_table.as_ref() {
+                    table.transform_value(v)
+                } else {
+                    Some(v)
+                }
+            }
+        }
+    }
+
+    fn feedback_numerical_target_value(
+        &self,
+        feedback_value: NumericFeedbackValue,
+        options: ModeFeedbackOptions,
+        additional_transformation_input: T::AdditionalInput,
+    ) -> Option<FeedbackValue<'static>> {
+        let v = feedback_value.value;
         // 4. Filter and Apply target interval (normalize)
         let interval_match_result = v.matches_tolerant(
             &self.settings.target_value_interval,
@@ -631,7 +707,10 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             // discrete processing enabled).
             v = v.to_continuous_value();
         };
-        Some(v)
+        Some(FeedbackValue::Numeric(NumericFeedbackValue::new(
+            feedback_value.style,
+            v,
+        )))
     }
 
     /// If this returns `true`, the `poll` method should be called, on a regular basis.
@@ -9891,6 +9970,87 @@ mod tests {
                 assert_abs_diff_eq!(mode.feedback(con_val(0.7)).unwrap(), con_val(0.5));
                 assert_abs_diff_eq!(mode.feedback(con_val(1.0)).unwrap(), con_val(0.8));
             }
+        }
+    }
+
+    mod text_feedback {
+        use crate::mode::mode_struct::tests::TestMode;
+        use crate::{
+            AbsoluteValue, FeedbackStyle, FeedbackValue, FeedbackValueTable, Fraction, Mode,
+            ModeFeedbackOptions, ModeSettings, NumericFeedbackValue, RgbColor,
+            TextualFeedbackValue,
+        };
+        use std::borrow::Cow;
+        use std::collections::HashMap;
+
+        #[test]
+        fn pass_through() {
+            // Given
+            let mode: TestMode = Mode::new(ModeSettings {
+                ..Default::default()
+            });
+            // When
+            let style = FeedbackStyle {
+                color: Some(RgbColor::new(10, 10, 10)),
+                background_color: None,
+            };
+            let result = mode.feedback_with_options_detail(
+                Cow::Owned(FeedbackValue::Textual(TextualFeedbackValue::new(
+                    style,
+                    "playing".into(),
+                ))),
+                ModeFeedbackOptions::default(),
+                (),
+            );
+            // Then
+            assert_eq!(
+                result,
+                Some(Cow::Owned(FeedbackValue::Textual(
+                    TextualFeedbackValue::new(style, "playing".into(),)
+                )))
+            );
+        }
+
+        #[test]
+        fn feedback_value_table() {
+            // Given
+            let map: HashMap<String, u32> = [("playing", 5), ("paused", 6)]
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect();
+            let mode: TestMode = Mode::new(ModeSettings {
+                feedback_value_table: Some(FeedbackValueTable::FromTextToDiscrete(map)),
+                ..Default::default()
+            });
+            // When
+            let style = FeedbackStyle {
+                color: Some(RgbColor::new(10, 10, 10)),
+                background_color: None,
+            };
+            let matched_result = mode.feedback_with_options_detail(
+                Cow::Owned(FeedbackValue::Textual(TextualFeedbackValue::new(
+                    style,
+                    "playing".into(),
+                ))),
+                ModeFeedbackOptions::default(),
+                (),
+            );
+            let unmatched_result = mode.feedback_with_options_detail(
+                Cow::Owned(FeedbackValue::Textual(TextualFeedbackValue::new(
+                    style,
+                    "bla".into(),
+                ))),
+                ModeFeedbackOptions::default(),
+                (),
+            );
+            // Then
+            assert_eq!(
+                matched_result,
+                Some(Cow::Owned(FeedbackValue::Numeric(
+                    NumericFeedbackValue::new(style, AbsoluteValue::Discrete(Fraction::new_max(5)))
+                )))
+            );
+            assert_eq!(unmatched_result, None);
         }
     }
 

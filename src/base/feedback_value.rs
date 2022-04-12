@@ -8,7 +8,7 @@ pub enum FeedbackValue<'a> {
     Off,
     Numeric(NumericFeedbackValue),
     // This Cow is in case the producer of the feedback value can use the borrowed value. At the
-    // moment this is not the case because the target API is designed to returns owned strings.
+    // moment this is not the case because the target API is designed to return owned strings.
     Textual(TextualFeedbackValue<'a>),
 }
 
