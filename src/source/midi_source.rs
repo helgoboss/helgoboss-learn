@@ -224,6 +224,14 @@ pub enum MidiSourceAddress {
     Raw {
         pattern: Vec<PatternByte>,
     },
+    Script {
+        /// Example: 0x4bb0 for a generated MIDI message with:
+        ///
+        /// - status byte = 0xb0
+        /// - data byte 1 = 0x4b
+        /// - data byte 2 = 0x0a  
+        bytes: u64,
+    },
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -294,8 +302,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Raw { pattern, .. } => MidiSourceAddress::Raw {
                 pattern: pattern.to_pattern_bytes(),
             },
-            // No static analysis possible
-            Script { .. } => return None,
+            Script { script } => script.as_ref()?.execute(FeedbackValue::Off).ok()?.address?,
             // No feedback
             ClockTempo | ClockTransport { .. } | NoteKeyNumber { .. } => return None,
             // Non-feedback-compatible configurations (e.g. channel == <Any>)
@@ -902,7 +909,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             Script { script } => {
                 let script = script.as_ref()?;
-                let events = script.execute(feedback_value).ok()?;
+                let events = script.execute(feedback_value).ok()?.events;
                 let value = V::Raw {
                     // We can't provide a sensible feedback address here! The script source is
                     // not going to work well with feedback relay.
