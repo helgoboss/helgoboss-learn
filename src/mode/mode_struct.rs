@@ -343,7 +343,7 @@ pub enum PropValue {
     /// Human-friendly numeric representation.
     Numeric(NumericValue),
     /// Textual representation.
-    Text(String),
+    Text(Cow<'static, str>),
     /// Color.
     Color(RgbColor),
 }
@@ -374,7 +374,7 @@ impl RgbColor {
 
 impl Default for PropValue {
     fn default() -> Self {
-        Self::Text(String::new())
+        Self::Text(Cow::Owned(String::new()))
     }
 }
 
@@ -388,14 +388,14 @@ impl PropValue {
         }
     }
 
-    pub fn into_textual(self) -> String {
+    pub fn into_textual(self) -> Cow<'static, str> {
         use PropValue::*;
         match self {
-            Normalized(v) => format!("{:.2}", v.get() * 100.0),
-            Numeric(v) => v.into_textual(),
-            Index(i) => i.to_string(),
+            Normalized(v) => format!("{:.2}", v.get() * 100.0).into(),
+            Numeric(v) => v.into_textual().into(),
+            Index(i) => i.to_string().into(),
             Text(text) => text,
-            Color(color) => format!("{:?}", color),
+            Color(color) => format!("{:?}", color).into(),
         }
     }
 }
