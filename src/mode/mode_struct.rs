@@ -314,6 +314,7 @@ pub struct ModeGarbage<T> {
     _feedback_color: Option<VirtualColor>,
     _feedback_background_color: Option<VirtualColor>,
     _feedback_props_in_use: HashSet<String>,
+    _feedback_value_table: Option<FeedbackValueTable>,
 }
 
 /// Human-readable numeric value (not normalized, not zero-rooted).
@@ -462,6 +463,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             _feedback_color: self.settings.feedback_color,
             _feedback_background_color: self.settings.feedback_background_color,
             _feedback_props_in_use: self.state.feedback_props_in_use,
+            _feedback_value_table: self.settings.feedback_value_table,
         }
     }
 
