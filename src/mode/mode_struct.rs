@@ -741,6 +741,13 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         )
     }
 
+    /// This should be called when the containing mapping gets deactivated.
+    pub fn on_deactivate(&mut self) {
+        // Clear the previous absolute value so we don't get jumps when using "Make relative"
+        // and using this mapping next time it's active again.
+        self.state.previous_absolute_value_event = None;
+    }
+
     /// Gives the mode the opportunity to update internal state when it's being connected to a
     /// target (either initial target resolve or refreshing target resolve).  
     pub fn update_from_target<'a, C: Copy + Into<TC>, TC>(
