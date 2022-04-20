@@ -61,16 +61,12 @@ pub enum FeedbackValueTable {
 }
 
 impl FeedbackValueTable {
-    /// At the moment this always returns either `None` or something owned, but this might
-    /// change in future (passing through something borrowed).
     pub fn transform_value<'a, 'b, 'c>(
         &'b self,
         value: Cow<'a, FeedbackValue<'c>>,
     ) -> Option<Cow<'a, FeedbackValue<'c>>> {
         match self {
             FeedbackValueTable::FromTextToDiscrete(map) => match value.as_ref() {
-                FeedbackValue::Off => Some(Cow::Owned(FeedbackValue::Off)),
-                FeedbackValue::Numeric(_) => None,
                 FeedbackValue::Textual(v) => {
                     let discrete_value = map.get(v.text.as_ref())?;
                     let numeric_value = NumericFeedbackValue::new(
@@ -79,6 +75,7 @@ impl FeedbackValueTable {
                     );
                     Some(Cow::Owned(FeedbackValue::Numeric(numeric_value)))
                 }
+                _ => Some(value),
             },
         }
     }
