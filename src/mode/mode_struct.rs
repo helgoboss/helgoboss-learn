@@ -58,6 +58,7 @@ pub struct ModeFeedbackOptions {
 #[derive(Clone, Debug)]
 pub enum FeedbackValueTable {
     FromTextToDiscrete(HashMap<String, u32>),
+    FromTextToContinuous(HashMap<String, f64>),
 }
 
 impl FeedbackValueTable {
@@ -72,6 +73,17 @@ impl FeedbackValueTable {
                     let numeric_value = NumericFeedbackValue::new(
                         v.style,
                         AbsoluteValue::Discrete(Fraction::new_max(*discrete_value)),
+                    );
+                    Some(Cow::Owned(FeedbackValue::Numeric(numeric_value)))
+                }
+                _ => Some(value),
+            },
+            FeedbackValueTable::FromTextToContinuous(map) => match value.as_ref() {
+                FeedbackValue::Textual(v) => {
+                    let continuous_value = map.get(v.text.as_ref())?;
+                    let numeric_value = NumericFeedbackValue::new(
+                        v.style,
+                        AbsoluteValue::Continuous(UnitValue::new_clamped(*continuous_value)),
                     );
                     Some(Cow::Owned(FeedbackValue::Numeric(numeric_value)))
                 }
