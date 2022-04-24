@@ -187,7 +187,7 @@ impl<T: Transformation> Default for ModeSettings<T> {
             rotate: false,
             make_absolute: false,
             use_discrete_processing: false,
-            fire_mode: FireMode::WhenButtonReleased,
+            fire_mode: FireMode::Normal,
             press_duration_interval: Interval::new(ZERO_DURATION, ZERO_DURATION),
             turbo_rate: ZERO_DURATION,
             target_value_sequence: Default::default(),
@@ -1486,9 +1486,9 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         let current_target_value = match current_target_value {
             // No target value available ... just deliver! Virtual targets take this shortcut.
             None => {
-                return Some(ModeControlResult::hit_target(
-                    self.get_final_absolute_value(pepped_up_control_value, control_type),
-                ))
+                let final_absolute_value =
+                    self.get_final_absolute_value(pepped_up_control_value, control_type);
+                return Some(ModeControlResult::hit_target(final_absolute_value));
             }
             Some(v) => v,
         };
@@ -1921,6 +1921,7 @@ pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
 
 /// If something like this is returned from the mode, it already means that the source value
 /// was not filtered out (e.g. because of button filter).
+#[derive(Debug)]
 pub enum ModeControlResult<T> {
     /// Target should be hit with the given value.
     HitTarget { value: T },

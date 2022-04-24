@@ -597,7 +597,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         SpecificFireMode(m) => {
             use crate::FireMode::*;
             match m {
-                WhenButtonReleased => {
+                Normal => {
                     if input.source_character == DetailedSourceCharacter::PressOnlyButton {
                         MakesNoSenseParentTakesCareOfDefault
                     } else {

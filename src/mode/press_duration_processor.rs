@@ -38,7 +38,7 @@ const ZERO_DURATION: Duration = Duration::from_millis(0);
 impl Default for PressDurationProcessor {
     fn default() -> Self {
         Self {
-            fire_mode: FireMode::WhenButtonReleased,
+            fire_mode: FireMode::Normal,
             interval: Interval::new(ZERO_DURATION, ZERO_DURATION),
             multi_press_span: Duration::from_millis(300),
             turbo_rate: ZERO_DURATION,
@@ -68,7 +68,7 @@ impl PressDurationProcessor {
         use FireMode::*;
         match self.fire_mode {
             AfterTimeout | AfterTimeoutKeepFiring | OnSinglePress => true,
-            WhenButtonReleased | OnDoublePress => false,
+            Normal | OnDoublePress => false,
         }
     }
 
@@ -79,7 +79,7 @@ impl PressDurationProcessor {
         let min = self.interval.min_val();
         let max = self.interval.max_val();
         match self.fire_mode {
-            FireMode::WhenButtonReleased => {
+            FireMode::Normal => {
                 if min == ZERO_DURATION && max == ZERO_DURATION {
                     // No-op case: Just fire immediately. If just min is zero, we don't fire
                     // immediately but wait for button release. That way we can support different
@@ -213,7 +213,7 @@ impl PressDurationProcessor {
     /// time.
     pub fn poll(&mut self) -> Option<AbsoluteValue> {
         match self.fire_mode {
-            FireMode::WhenButtonReleased | FireMode::OnDoublePress => None,
+            FireMode::Normal | FireMode::OnDoublePress => None,
             FireMode::AfterTimeout => {
                 let fire_value = {
                     let last_button_press = self.last_button_press.as_ref()?;

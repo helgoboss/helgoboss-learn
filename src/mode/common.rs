@@ -175,7 +175,7 @@ impl Default for EncoderUsage {
 pub enum FireMode {
     #[cfg_attr(feature = "serde", serde(rename = "release"))]
     #[display(fmt = "Fire on press (or release if > 0 ms)")]
-    WhenButtonReleased,
+    Normal,
     #[cfg_attr(feature = "serde", serde(rename = "timeout"))]
     #[display(fmt = "Fire after timeout")]
     AfterTimeout,
@@ -192,7 +192,7 @@ pub enum FireMode {
 
 impl Default for FireMode {
     fn default() -> Self {
-        Self::WhenButtonReleased
+        Self::Normal
     }
 }
 
