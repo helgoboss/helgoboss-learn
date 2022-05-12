@@ -560,7 +560,6 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             get_prop_value(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY)
                 .unwrap_or_default()
                 .into_textual()
-                .into()
         } else {
             textual_feedback_expression_regex().replace_all(
                 &self.settings.textual_feedback_expression,
