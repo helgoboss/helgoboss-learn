@@ -22,7 +22,6 @@ derivative = "2.2.0"
 rosc = "0.5.1"
 # For letting the here defined raw MIDI data structure implement the REAPER MIDI event type
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", optional = true }
-# reaper-low = { path = "../../../../reaper-rs/main/low", optional = true }
 # For tokenizing sys-ex patterns
 logos = "0.12.0"
 partial-min-max = "0.4.0"
