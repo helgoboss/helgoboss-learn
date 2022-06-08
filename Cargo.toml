@@ -5,7 +5,7 @@ authors = ["Benjamin Klum <benjamin.klum@helgoboss.org>"]
 edition = "2021"
 
 [dependencies]
-helgoboss-midi = "*"
+helgoboss-midi = "0.4.0"
 num = "0.2.1"
 num_enum = "0.5.0"
 approx = "0.3.2"
