@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -1953,6 +1954,19 @@ impl<T> ModeControlResult<T> {
         match self {
             HitTarget { value } => HitTarget { value: f(value) },
             LeaveTargetUntouched(v) => LeaveTargetUntouched(f(v)),
+        }
+    }
+}
+
+impl<T: Display> Display for ModeControlResult<T> {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            ModeControlResult::HitTarget { value } => {
+                write!(f, "Hit target with value {}", value)
+            }
+            ModeControlResult::LeaveTargetUntouched(v) => {
+                write!(f, "Leave target untouched with value {}", v)
+            }
         }
     }
 }
