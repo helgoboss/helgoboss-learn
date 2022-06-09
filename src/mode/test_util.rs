@@ -1,4 +1,4 @@
-use crate::{AbsoluteValue, ControlType, Target, Transformation};
+use crate::{AbsoluteValue, ControlType, Target, Transformation, TransformationInput};
 
 pub struct TestTarget {
     pub current_value: Option<AbsoluteValue>,
@@ -34,7 +34,16 @@ impl TestTransformation {
 impl Transformation for TestTransformation {
     type AdditionalInput = ();
 
-    fn transform(&self, input_value: f64, _: f64, _: ()) -> Result<f64, &'static str> {
-        (self.transformer)(input_value)
+    fn transform(
+        &self,
+        input: TransformationInput<f64>,
+        _: f64,
+        _: (),
+    ) -> Result<f64, &'static str> {
+        (self.transformer)(input.value)
+    }
+
+    fn wants_to_be_polled(&self) -> bool {
+        false
     }
 }

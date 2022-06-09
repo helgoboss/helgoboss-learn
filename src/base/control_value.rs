@@ -1,6 +1,7 @@
 use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
-    Transformation, UnitIncrement, UnitValue, BASE_EPSILON,
+    Transformation, TransformationInput, TransformationInputMetaData, UnitIncrement, UnitValue,
+    BASE_EPSILON,
 };
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
@@ -12,13 +13,20 @@ use std::time::{Duration, Instant};
 /// Most importantly, if the event is sent to another thread, then the time should be captured
 /// *before* the event leaves the thread and saved. That allows more accurate processing in the
 /// destination thread.  
-pub trait AbstractTimestamp: Copy + Sub<Output = Duration> {}
+pub trait AbstractTimestamp: Copy + Sub<Output = Duration> {
+    /// Creates a timestamp corresponding to "now".
+    fn now() -> Self;
+}
 
 /// A timestamp that does nothing and takes no space.
 #[derive(Copy, Clone)]
 pub struct NoopTimestamp;
 
-impl AbstractTimestamp for NoopTimestamp {}
+impl AbstractTimestamp for NoopTimestamp {
+    fn now() -> Self {
+        Self
+    }
+}
 
 impl Sub for NoopTimestamp {
     type Output = Duration;
@@ -28,7 +36,11 @@ impl Sub for NoopTimestamp {
     }
 }
 
-impl AbstractTimestamp for Instant {}
+impl AbstractTimestamp for Instant {
+    fn now() -> Self {
+        Self::now()
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ControlEvent<P, T: AbstractTimestamp> {
@@ -378,6 +390,7 @@ impl AbsoluteValue {
         transformation: &T,
         current_target_value: Option<AbsoluteValue>,
         is_discrete_mode: bool,
+        meta_data: TransformationInputMetaData,
         additional_input: T::AdditionalInput,
     ) -> Result<Self, &'static str> {
         use AbsoluteValue::*;
@@ -388,7 +401,7 @@ impl AbsoluteValue {
                     .map(|t| t.to_unit_value())
                     .unwrap_or_default();
                 let res = transformation.transform_continuous(
-                    v,
+                    TransformationInput::new(v, meta_data),
                     current_target_value,
                     additional_input,
                 )?;
@@ -402,7 +415,7 @@ impl AbsoluteValue {
                     Continuous(t) => {
                         // Target value is continuous.
                         let res = transformation.transform_continuous(
-                            v.to_unit_value(),
+                            TransformationInput::new(v.to_unit_value(), meta_data),
                             t,
                             additional_input,
                         )?;
@@ -413,14 +426,18 @@ impl AbsoluteValue {
                         if is_discrete_mode {
                             // Discrete mode.
                             // Transform using non-normalized rounded floating point values.
-                            let res = transformation.transform_discrete(v, t, additional_input)?;
+                            let res = transformation.transform_discrete(
+                                TransformationInput::new(v, meta_data),
+                                t,
+                                additional_input,
+                            )?;
                             Ok(Discrete(res))
                         } else {
                             // Continuous mode.
                             // Transform using normalized floating point values, thereby destroying
                             // the value's discreteness.
                             let res = transformation.transform_continuous(
-                                v.to_unit_value(),
+                                TransformationInput::new(v.to_unit_value(), meta_data),
                                 t.to_unit_value(),
                                 additional_input,
                             )?;

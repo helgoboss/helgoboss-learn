@@ -4,7 +4,8 @@ use crate::{
     ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FeedbackValue,
     FireMode, Fraction, Increment, Interval, MinIsMaxBehavior, NumericFeedbackValue,
     OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue,
-    Transformation, UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
+    Transformation, TransformationInputMetaData, UnitIncrement, UnitValue, ValueSequence,
+    BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -698,6 +699,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 transformation,
                 Some(v),
                 self.settings.use_discrete_processing,
+                self.transformation_input_meta_data(),
                 additional_transformation_input,
             ) {
                 v = res;
@@ -724,9 +726,24 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         )))
     }
 
+    fn transformation_input_meta_data(&self) -> TransformationInputMetaData {
+        let rel_time = self
+            .state
+            .previous_absolute_value_event
+            // TODO-high CONTINUE
+            .map(|evt| S::now() - evt.timestamp())
+            .unwrap_or_default();
+        TransformationInputMetaData { rel_time }
+    }
+
     /// If this returns `true`, the `poll` method should be called, on a regular basis.
     pub fn wants_to_be_polled(&self) -> bool {
         self.state.press_duration_processor.wants_to_be_polled()
+            || self
+                .settings
+                .control_transformation
+                .iter()
+                .any(|t| t.wants_to_be_polled())
     }
 
     /// This function should be called regularly if the features are needed that are driven by a
@@ -738,6 +755,31 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         context: C,
         timestamp: S,
     ) -> Option<ModeControlResult<ControlValue>> {
+        // If we have a transformation which depends on the current timestamp, we poll this one.
+        if let Some(transformation) = &self.settings.control_transformation {
+            if transformation.wants_to_be_polled() {
+                let result = if let Some(evt) = self.state.previous_absolute_value_event {
+                    let transformed_value = evt.payload().transform(
+                        transformation,
+                        // TODO-high CONTINUE
+                        None,
+                        self.settings.use_discrete_processing,
+                        self.transformation_input_meta_data(),
+                        context.additional_input(),
+                    );
+                    if let Ok(v) = transformed_value {
+                        let v = ControlValue::from_absolute(v);
+                        Some(ModeControlResult::hit_target(v))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                return result;
+            }
+        }
+        // If not, we let the press duration processor do its job.
         let control_value = self.state.press_duration_processor.poll()?;
         self.control_absolute(
             ControlEvent::new(control_value, timestamp),
@@ -1417,6 +1459,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 transformation,
                 current_target_value,
                 self.settings.use_discrete_processing,
+                self.transformation_input_meta_data(),
                 additional_transformation_input,
             ) {
                 v = res;
