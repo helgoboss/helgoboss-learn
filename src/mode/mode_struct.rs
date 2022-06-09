@@ -793,6 +793,9 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     }
 
     /// This should be called when the containing mapping gets deactivated.
+    ///
+    /// Attention: At the moment it can be called even if the mapping was already inactive.
+    /// So it should be idempotent!
     pub fn on_deactivate(&mut self) {
         // Clear the previous absolute value so we don't get jumps when using "Make relative"
         // and using this mapping next time it's active again.
