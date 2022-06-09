@@ -281,9 +281,9 @@ impl UnitValue {
         unsafe { UnitValue::new_unchecked((self.0 * interval_count).round() / interval_count) }
     }
 
-    // Rounds value to its nearest grid value using the grid's interval size. If you pass an
-    // interval size whose multiple doesn't perfectly fit into the unit interval, the last
-    // interval will be smaller than all the others. Better don't do that.
+    /// Rounds value to its nearest grid value using the grid's interval size. If you pass an
+    /// interval size whose multiple doesn't perfectly fit into the unit interval, the last
+    /// interval will be smaller than all the others. Better don't do that.
     pub fn snap_to_grid_by_interval_size(&self, interval_size: UnitValue) -> UnitValue {
         if interval_size.is_zero() {
             return *self;

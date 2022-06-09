@@ -1041,7 +1041,9 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                     step_size_value.to_increment(negative_if(self.settings.reverse))?;
                 self.hit_target_absolutely_with_unit_increment(
                     step_size_increment,
-                    self.settings.step_size_interval.min_val(),
+                    // We don't want to adjust to a grid, target min/max are more important
+                    // (see #577).
+                    None,
                     target.current_value(context.into())?.to_unit_value(),
                     options,
                 )
@@ -1288,7 +1290,9 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 };
                 self.hit_target_absolutely_with_unit_increment(
                     final_unit_increment,
-                    self.settings.step_size_interval.min_val(),
+                    // We don't want to adjust to a grid, target min/max are more important
+                    // (see #577).
+                    None,
                     target.current_value(context.into())?.to_unit_value(),
                     options,
                 )
@@ -1698,7 +1702,9 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                     // to continuous processing.
                     self.hit_target_absolutely_with_unit_increment(
                         increment.to_unit_increment(target_step_size)?,
-                        target_step_size,
+                        // In order to not end up on "in-between" values, we should snap the target
+                        // interval into the conceptual grid defined by the target step size.
+                        Some(target_step_size),
                         current_value()?.to_unit_value(),
                         options,
                     )
@@ -1717,7 +1723,9 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             // Continuous processing although target is discrete. Kept for backward compatibility.
             self.hit_target_absolutely_with_unit_increment(
                 increment.to_unit_increment(target_step_size)?,
-                target_step_size,
+                // In order to not end up on "in-between" values, we should snap the target
+                // interval into the conceptual grid defined by the target step size.
+                Some(target_step_size),
                 current_value()?.to_unit_value(),
                 options,
             )
@@ -1725,39 +1733,45 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     }
 
     /// Takes care of:
+    /// - Snap target interval to grid if desired (if `grid_interval_size` is given)
     /// - Applying increment
     /// - Wrap (rotate)
     fn hit_target_absolutely_with_unit_increment(
         &mut self,
         increment: UnitIncrement,
-        grid_interval_size: UnitValue,
+        grid_interval_size: Option<UnitValue>,
         current_target_value: UnitValue,
         options: ModeControlOptions,
     ) -> Option<ModeControlResult<ControlValue>> {
-        let snapped_target_value_interval = Interval::new(
-            self.settings
-                .target_value_interval
-                .min_val()
-                .snap_to_grid_by_interval_size(grid_interval_size),
-            self.settings
-                .target_value_interval
-                .max_val()
-                .snap_to_grid_by_interval_size(grid_interval_size),
-        );
-        // The add functions don't add anything if the current target value is not within the target
-        // interval in the first place. Instead they return one of the interval bounds. One issue
-        // that might occur is that the current target value only *appears* out-of-range
-        // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
-        // experiences. Therefore we snap the current target value to grid first in that case.
-        let mut v = if current_target_value.is_within_interval(&snapped_target_value_interval) {
-            current_target_value
-        } else {
-            current_target_value.snap_to_grid_by_interval_size(grid_interval_size)
-        };
+        let mut v = current_target_value;
+        let mut target_value_interval = self.settings.target_value_interval;
+        // If the target is discrete, it's important to make sure that the target interval
+        // bounds correspond exactly to discrete target values. So we snap the target interval to
+        // the target step size first.
+        if let Some(grid_interval_size) = grid_interval_size {
+            target_value_interval = Interval::new(
+                self.settings
+                    .target_value_interval
+                    .min_val()
+                    .snap_to_grid_by_interval_size(grid_interval_size),
+                self.settings
+                    .target_value_interval
+                    .max_val()
+                    .snap_to_grid_by_interval_size(grid_interval_size),
+            );
+            // The add functions don't add anything if the current target value is not within the target
+            // interval in the first place. Instead they return one of the interval bounds. One issue
+            // that might occur is that the current target value only *appears* out-of-range
+            // because of numerical inaccuracies. That could lead to frustrating "it doesn't move"
+            // experiences. Therefore we snap the current target value to grid first in that case.
+            if !v.is_within_interval(&target_value_interval) {
+                v = v.snap_to_grid_by_interval_size(grid_interval_size)
+            };
+        }
         v = if options.enforce_rotate || self.settings.rotate {
-            v.add_rotating(increment, &snapped_target_value_interval, BASE_EPSILON)
+            v.add_rotating(increment, &target_value_interval, BASE_EPSILON)
         } else {
-            v.add_clamping(increment, &snapped_target_value_interval, BASE_EPSILON)
+            v.add_clamping(increment, &target_value_interval, BASE_EPSILON)
         };
         if v == current_target_value {
             // Desired value is equal to current target value. No reason to hit the target.
@@ -6550,6 +6564,27 @@ mod tests {
                 assert!(mode.control(rel_dis_evt(10), &target, ()).is_none());
             }
 
+            /// See https://github.com/helgoboss/realearn/issues/577.
+            #[test]
+            fn target_interval_max_not_exceedable() {
+                // Given
+                let mut mode: TestMode = Mode::new(ModeSettings {
+                    target_value_interval: create_unit_value_interval(0.0, 0.716),
+                    step_size_interval: create_unit_value_interval(0.01, 0.01),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.71)),
+                    control_type: ControlType::AbsoluteContinuous,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(rel_dis_evt(1), &target, ()).unwrap(),
+                    abs_con_val(0.716)
+                );
+            }
+
             #[test]
             fn target_interval_current_target_value_out_of_range() {
                 // Given
@@ -6614,17 +6649,20 @@ mod tests {
                     mode.control(rel_dis_evt(-1), &target, ()).unwrap(),
                     abs_con_val(0.2)
                 );
+                // That's the point: If the current value of 0.199999999999 would be considered as
+                // out-of-range, we would end up on 0.2 (target min). But we should consider it as
+                // in-range and therefore use the usual incrementation logic.
                 assert_abs_diff_eq!(
                     mode.control(rel_dis_evt(1), &target, ()).unwrap(),
-                    abs_con_val(0.21)
+                    abs_con_val(0.20999999999900001)
                 );
                 assert_abs_diff_eq!(
                     mode.control(rel_dis_evt(2), &target, ()).unwrap(),
-                    abs_con_val(0.21)
+                    abs_con_val(0.20999999999900001)
                 );
                 assert_abs_diff_eq!(
                     mode.control(rel_dis_evt(10), &target, ()).unwrap(),
-                    abs_con_val(0.21)
+                    abs_con_val(0.20999999999900001)
                 );
             }
 
@@ -7469,6 +7507,30 @@ mod tests {
                     assert_abs_diff_eq!(
                         mode.control(rel_dis_evt(10), &target, ()).unwrap(),
                         abs_con_val(0.2)
+                    );
+                }
+
+                #[test]
+                fn target_interval_snaps_to_target_step_size() {
+                    // Given
+                    let mut mode: TestMode = Mode::new(ModeSettings {
+                        step_count_interval: create_discrete_increment_interval(1, 1),
+                        target_value_interval: create_unit_value_interval(0.2, 0.71),
+                        ..Default::default()
+                    });
+                    let target = TestTarget {
+                        current_value: Some(con_val(0.6)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.2),
+                            is_retriggerable: false,
+                        },
+                    };
+                    // When
+                    // Then
+                    // Target interval should implicitly change to 0.2 - 0.8.
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(1), &target, ()).unwrap(),
+                        abs_con_val(0.8),
                     );
                 }
 
