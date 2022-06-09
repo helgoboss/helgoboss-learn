@@ -1,7 +1,7 @@
 use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
-    Transformation, TransformationInput, TransformationInputMetaData, UnitIncrement, UnitValue,
-    BASE_EPSILON,
+    Transformation, TransformationInput, TransformationInputMetaData, TransformationOutput,
+    UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
@@ -392,7 +392,7 @@ impl AbsoluteValue {
         is_discrete_mode: bool,
         meta_data: TransformationInputMetaData,
         additional_input: T::AdditionalInput,
-    ) -> Result<Self, &'static str> {
+    ) -> Result<TransformationOutput<Self>, &'static str> {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => {
@@ -400,12 +400,12 @@ impl AbsoluteValue {
                 let current_target_value = current_target_value
                     .map(|t| t.to_unit_value())
                     .unwrap_or_default();
-                let res = transformation.transform_continuous(
+                let output = transformation.transform_continuous(
                     TransformationInput::new(v, meta_data),
                     current_target_value,
                     additional_input,
                 )?;
-                Ok(Continuous(res))
+                Ok(output.map(Continuous))
             }
             Discrete(v) => {
                 // Input value is discrete.
@@ -414,34 +414,34 @@ impl AbsoluteValue {
                 match current_target_value {
                     Continuous(t) => {
                         // Target value is continuous.
-                        let res = transformation.transform_continuous(
+                        let output = transformation.transform_continuous(
                             TransformationInput::new(v.to_unit_value(), meta_data),
                             t,
                             additional_input,
                         )?;
-                        Ok(Continuous(res))
+                        Ok(output.map(Continuous))
                     }
                     Discrete(t) => {
                         // Target value is also discrete.
                         if is_discrete_mode {
                             // Discrete mode.
                             // Transform using non-normalized rounded floating point values.
-                            let res = transformation.transform_discrete(
+                            let output = transformation.transform_discrete(
                                 TransformationInput::new(v, meta_data),
                                 t,
                                 additional_input,
                             )?;
-                            Ok(Discrete(res))
+                            Ok(output.map(Discrete))
                         } else {
                             // Continuous mode.
                             // Transform using normalized floating point values, thereby destroying
                             // the value's discreteness.
-                            let res = transformation.transform_continuous(
+                            let output = transformation.transform_continuous(
                                 TransformationInput::new(v.to_unit_value(), meta_data),
                                 t.to_unit_value(),
                                 additional_input,
                             )?;
-                            Ok(Continuous(res))
+                            Ok(output.map(Continuous))
                         }
                     }
                 }

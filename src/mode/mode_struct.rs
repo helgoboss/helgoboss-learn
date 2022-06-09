@@ -4,8 +4,8 @@ use crate::{
     ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FeedbackValue,
     FireMode, Fraction, Increment, Interval, MinIsMaxBehavior, NumericFeedbackValue,
     OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue,
-    Transformation, TransformationInputMetaData, UnitIncrement, UnitValue, ValueSequence,
-    BASE_EPSILON,
+    Transformation, TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue,
+    ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -695,14 +695,14 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         };
         // 2. Apply transformation
         if let Some(transformation) = self.settings.feedback_transformation.as_ref() {
-            if let Ok(res) = v.transform(
+            if let Ok(output) = v.transform(
                 transformation,
                 Some(v),
                 self.settings.use_discrete_processing,
                 self.transformation_input_meta_data(),
                 additional_transformation_input,
             ) {
-                v = res;
+                v = output.value()?;
             }
         };
         // 1. Apply source interval
@@ -726,11 +726,26 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         )))
     }
 
+    fn process_control_transformation_output<O>(
+        &mut self,
+        output: TransformationOutput<O>,
+    ) -> Option<O> {
+        match output {
+            TransformationOutput::Stop => {
+                // Resetting the previous event will stop polling until the next mapping
+                // invocation.
+                self.state.previous_absolute_value_event = None;
+                None
+            }
+            TransformationOutput::None => None,
+            TransformationOutput::Control(v) => Some(v),
+        }
+    }
+
     fn transformation_input_meta_data(&self) -> TransformationInputMetaData {
         let rel_time = self
             .state
             .previous_absolute_value_event
-            // TODO-high CONTINUE
             .map(|evt| S::now() - evt.timestamp())
             .unwrap_or_default();
         TransformationInputMetaData { rel_time }
@@ -758,25 +773,20 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         // If we have a transformation which depends on the current timestamp, we poll this one.
         if let Some(transformation) = &self.settings.control_transformation {
             if transformation.wants_to_be_polled() {
-                let result = if let Some(evt) = self.state.previous_absolute_value_event {
-                    let transformed_value = evt.payload().transform(
+                let evt = self.state.previous_absolute_value_event?;
+                let output = evt
+                    .payload()
+                    .transform(
                         transformation,
-                        // TODO-high CONTINUE
-                        None,
+                        target.current_value(context.into()),
                         self.settings.use_discrete_processing,
                         self.transformation_input_meta_data(),
                         context.additional_input(),
-                    );
-                    if let Ok(v) = transformed_value {
-                        let v = ControlValue::from_absolute(v);
-                        Some(ModeControlResult::hit_target(v))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                return result;
+                    )
+                    .ok()?;
+                let v = self.process_control_transformation_output(output)?;
+                let v = ControlValue::from_absolute(v);
+                return Some(ModeControlResult::hit_target(v));
             }
         }
         // If not, we let the press duration processor do its job.
@@ -930,7 +940,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             current_target_value,
             context.additional_input(),
             last_non_performance_target_value,
-        );
+        )?;
         self.hitting_target_considering_max_jump(
             pepped_up_control_value,
             current_target_value,
@@ -1430,13 +1440,13 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     }
 
     fn pep_up_absolute_value(
-        &self,
+        &mut self,
         source_normalized_control_value: AbsoluteValue,
         control_type: ControlType,
         current_target_value: Option<AbsoluteValue>,
         additional_transformation_input: T::AdditionalInput,
         last_non_performance_target_value: Option<AbsoluteValue>,
-    ) -> AbsoluteValue {
+    ) -> Option<AbsoluteValue> {
         let mut v = source_normalized_control_value;
         // 1. Performance control (optional)
         let performance_control = if let Some(y_last) = last_non_performance_target_value {
@@ -1458,14 +1468,14 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         };
         // 2. Apply transformation
         if let Some(transformation) = self.settings.control_transformation.as_ref() {
-            if let Ok(res) = v.transform(
+            if let Ok(output) = v.transform(
                 transformation,
                 current_target_value,
                 self.settings.use_discrete_processing,
                 self.transformation_input_meta_data(),
                 additional_transformation_input,
             ) {
-                v = res;
+                v = self.process_control_transformation_output(output)?;
             }
         };
         if performance_control {
@@ -1522,7 +1532,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             }
         }
         // Return
-        v
+        Some(v)
     }
 
     fn hitting_target_considering_max_jump(
