@@ -922,7 +922,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 let value = feedback_value.to_textual();
                 let style = value.style;
                 let events: RawMidiEvents = match spec {
-                    DisplaySpec::MackieLcd { scope } => {
+                    DisplaySpec::MackieLcd {
+                        scope,
+                        extender_index,
+                    } => {
                         let mut ascii_chars = filter_ascii_chars(&value.text);
                         scope
                             .lcd_portions()
@@ -931,7 +934,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                                 let body = range
                                     .clone()
                                     .map(|_| ascii_chars.next().unwrap_or(ASCII_SPACE));
-                                let sysex = mackie_lcd_sysex(0x14, range.start, body);
+                                let sysex =
+                                    mackie_lcd_sysex(0x14 + extender_index, range.start, body);
                                 RawMidiEvent::try_from_iter(0, sysex).ok()
                             })
                             .collect()
@@ -1438,6 +1442,9 @@ pub enum DisplayType {
     #[cfg_attr(feature = "serde", serde(rename = "mackie-lcd"))]
     #[display(fmt = "Mackie LCD")]
     MackieLcd,
+    #[cfg_attr(feature = "serde", serde(rename = "mackie-xt-lcd"))]
+    #[display(fmt = "Mackie XT LCD")]
+    MackieXtLcd,
     #[cfg_attr(feature = "serde", serde(rename = "mackie-seven"))]
     #[display(fmt = "Mackie 7-segment display")]
     MackieSevenSegmentDisplay,
@@ -1454,6 +1461,7 @@ impl DisplayType {
         use DisplayType::*;
         match self {
             MackieLcd => MackieLcdScope::CHANNEL_COUNT,
+            MackieXtLcd => MackieLcdScope::CHANNEL_COUNT,
             SiniConE24 => SiniConE24Scope::CELL_COUNT,
             // Not applicable
             MackieSevenSegmentDisplay | LaunchpadProScrollingText => 0,
@@ -1464,6 +1472,7 @@ impl DisplayType {
         use DisplayType::*;
         match self {
             MackieLcd => MackieLcdScope::LINE_COUNT,
+            MackieXtLcd => MackieLcdScope::LINE_COUNT,
             SiniConE24 => SiniConE24Scope::ITEM_COUNT,
             // Not applicable
             MackieSevenSegmentDisplay | LaunchpadProScrollingText => 1,
@@ -1482,6 +1491,7 @@ impl Default for DisplayType {
 pub enum DisplaySpec {
     MackieLcd {
         scope: MackieLcdScope,
+        extender_index: u8,
     },
     MackieSevenSegmentDisplay {
         scope: MackieSevenSegmentDisplayScope,
@@ -1498,6 +1508,7 @@ pub enum DisplaySpec {
 pub enum DisplaySpecAddress {
     MackieLcd {
         scope: MackieLcdScope,
+        extender_index: u8,
     },
     MackieSevenSegmentDisplay {
         scope: MackieSevenSegmentDisplayScope,
@@ -1512,7 +1523,13 @@ impl From<DisplaySpec> for DisplaySpecAddress {
     fn from(spec: DisplaySpec) -> Self {
         use DisplaySpec::*;
         match spec {
-            MackieLcd { scope } => Self::MackieLcd { scope },
+            MackieLcd {
+                scope,
+                extender_index,
+            } => Self::MackieLcd {
+                scope,
+                extender_index,
+            },
             MackieSevenSegmentDisplay { scope } => Self::MackieSevenSegmentDisplay { scope },
             SiniConE24 { scope, .. } => Self::SiniConE24 { scope },
             LaunchpadProScrollingText => Self::LaunchpadProScrollingText,
