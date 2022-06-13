@@ -13,13 +13,13 @@ use std::time::{Duration, Instant};
 /// Most importantly, if the event is sent to another thread, then the time should be captured
 /// *before* the event leaves the thread and saved. That allows more accurate processing in the
 /// destination thread.  
-pub trait AbstractTimestamp: Copy + Sub<Output = Duration> {
+pub trait AbstractTimestamp: Copy + Sub<Output = Duration> + std::fmt::Debug {
     /// Creates a timestamp corresponding to "now".
     fn now() -> Self;
 }
 
 /// A timestamp that does nothing and takes no space.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct NoopTimestamp;
 
 impl AbstractTimestamp for NoopTimestamp {
