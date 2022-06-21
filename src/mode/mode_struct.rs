@@ -110,7 +110,7 @@ pub struct ModeSettings<T: Transformation> {
     pub discrete_target_value_interval: Interval<u32>,
     /// Negative increments represent fractions (throttling), e.g. -2 fires an increment every
     /// 2nd time only.
-    pub step_count_interval: Interval<DiscreteIncrement>,
+    pub step_factor_interval: Interval<DiscreteIncrement>,
     pub step_size_interval: Interval<UnitValue>,
     pub jump_interval: Interval<UnitValue>,
     pub discrete_jump_interval: Interval<u32>,
@@ -175,7 +175,7 @@ impl<T: Transformation> Default for ModeSettings<T> {
             target_value_interval: full_unit_interval(),
             discrete_target_value_interval: full_discrete_interval(),
             step_size_interval: default_step_size_interval(),
-            step_count_interval: default_step_count_interval(),
+            step_factor_interval: default_step_count_interval(),
             jump_interval: full_unit_interval(),
             discrete_jump_interval: full_discrete_interval(),
             takeover_mode: Default::default(),
@@ -1923,7 +1923,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     ) -> Option<DiscreteIncrement> {
         let mut inc = original_inc;
         // Process speed (step count)
-        let factor = inc.clamp_to_interval(&self.settings.step_count_interval);
+        let factor = inc.clamp_to_interval(&self.settings.step_factor_interval);
         inc = if factor.is_positive() {
             factor
         } else {
@@ -1972,7 +1972,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 MinIsMaxBehavior::PreferOne,
                 BASE_EPSILON,
             )
-            .denormalize_discrete_increment(&self.settings.step_count_interval);
+            .denormalize_discrete_increment(&self.settings.step_factor_interval);
         // This mode supports positive increment only.
         let discrete_value = if factor.is_positive() {
             factor.to_value()
@@ -6156,7 +6156,7 @@ mod tests {
             let mut mode: TestMode = Mode::new(ModeSettings {
                 // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                 target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
-                step_count_interval: create_discrete_increment_interval(10, 10),
+                step_factor_interval: create_discrete_increment_interval(10, 10),
                 absolute_mode: AbsoluteMode::MakeRelative,
                 ..Default::default()
             });
@@ -6369,7 +6369,7 @@ mod tests {
             fn trigger_target() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
-                    step_count_interval: create_discrete_increment_interval(-2, 100),
+                    step_factor_interval: create_discrete_increment_interval(-2, 100),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -6932,7 +6932,7 @@ mod tests {
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
-                    step_count_interval: create_discrete_increment_interval(1, 5),
+                    step_factor_interval: create_discrete_increment_interval(1, 5),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -6979,7 +6979,7 @@ mod tests {
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     // Should be translated to set of 0.0, 0.2, 0.4, 0.5, 0.9!
                     target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
-                    step_count_interval: create_discrete_increment_interval(1, 5),
+                    step_factor_interval: create_discrete_increment_interval(1, 5),
                     rotate: true,
                     ..Default::default()
                 });
@@ -7179,7 +7179,7 @@ mod tests {
                 fn min_step_count_1() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        step_factor_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -7225,7 +7225,7 @@ mod tests {
                 fn min_step_count_2() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        step_factor_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -7260,7 +7260,7 @@ mod tests {
                 fn max_step_count_1() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(1, 2),
+                        step_factor_interval: create_discrete_increment_interval(1, 2),
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -7293,7 +7293,7 @@ mod tests {
                 fn max_step_count_throttle() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(-2, -2),
+                        step_factor_interval: create_discrete_increment_interval(-2, -2),
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -7331,7 +7331,7 @@ mod tests {
                 fn max_step_count_2() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(1, 2),
+                        step_factor_interval: create_discrete_increment_interval(1, 2),
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -7589,7 +7589,7 @@ mod tests {
                 fn target_interval_step_interval_current_target_value_out_of_range() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(1, 100),
+                        step_factor_interval: create_discrete_increment_interval(1, 100),
                         target_value_interval: create_unit_value_interval(0.2, 0.8),
                         ..Default::default()
                     });
@@ -7632,7 +7632,7 @@ mod tests {
                 fn target_interval_snaps_to_target_step_size() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(1, 1),
+                        step_factor_interval: create_discrete_increment_interval(1, 1),
                         target_value_interval: create_unit_value_interval(0.2, 0.71),
                         ..Default::default()
                     });
@@ -7940,7 +7940,7 @@ mod tests {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
                         use_discrete_processing: true,
-                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        step_factor_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -7981,7 +7981,7 @@ mod tests {
                 fn min_step_count_2() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
-                        step_count_interval: create_discrete_increment_interval(4, 100),
+                        step_factor_interval: create_discrete_increment_interval(4, 100),
                         ..Default::default()
                     });
                     let target = TestTarget {
@@ -8431,7 +8431,7 @@ mod tests {
             fn min_step_count() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
-                    step_count_interval: create_discrete_increment_interval(2, 100),
+                    step_factor_interval: create_discrete_increment_interval(2, 100),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -8470,7 +8470,7 @@ mod tests {
             fn min_step_count_throttle() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
-                    step_count_interval: create_discrete_increment_interval(-4, 100),
+                    step_factor_interval: create_discrete_increment_interval(-4, 100),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -8527,7 +8527,7 @@ mod tests {
             fn max_step_count() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
-                    step_count_interval: create_discrete_increment_interval(1, 2),
+                    step_factor_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -8566,7 +8566,7 @@ mod tests {
             fn max_step_count_throttle() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
-                    step_count_interval: create_discrete_increment_interval(-10, -4),
+                    step_factor_interval: create_discrete_increment_interval(-10, -4),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9360,7 +9360,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(4, 8),
+                    step_factor_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9392,7 +9392,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(-4, -4),
+                    step_factor_interval: create_discrete_increment_interval(-4, -4),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9424,7 +9424,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(4, 8),
+                    step_factor_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9447,7 +9447,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(1, 8),
+                    step_factor_interval: create_discrete_increment_interval(1, 8),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9479,7 +9479,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(1, 2),
+                    step_factor_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9547,7 +9547,7 @@ mod tests {
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
-                    step_count_interval: create_discrete_increment_interval(4, 8),
+                    step_factor_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9754,7 +9754,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(1, 100),
+                    step_factor_interval: create_discrete_increment_interval(1, 100),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -9786,7 +9786,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(1, 100),
+                    step_factor_interval: create_discrete_increment_interval(1, 100),
                     target_value_interval: create_unit_value_interval(0.2, 0.8),
                     ..Default::default()
                 });
@@ -9984,7 +9984,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(2, 8),
+                    step_factor_interval: create_discrete_increment_interval(2, 8),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -10013,7 +10013,7 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
-                    step_count_interval: create_discrete_increment_interval(1, 2),
+                    step_factor_interval: create_discrete_increment_interval(1, 2),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -10069,7 +10069,7 @@ mod tests {
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     absolute_mode: AbsoluteMode::IncrementalButton,
                     source_value_interval: create_unit_value_interval(0.5, 1.0),
-                    step_count_interval: create_discrete_increment_interval(4, 8),
+                    step_factor_interval: create_discrete_increment_interval(4, 8),
                     ..Default::default()
                 });
                 let target = TestTarget {

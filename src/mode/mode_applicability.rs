@@ -80,9 +80,9 @@ pub enum ModeParameter {
     #[display(fmt = "Step size max")]
     StepSizeMax,
     #[display(fmt = "Speed min")]
-    SpeedMin,
+    StepFactorMin,
     #[display(fmt = "Speed max")]
-    SpeedMax,
+    StepFactorMax,
     #[display(fmt = "Relative filter")]
     RelativeFilter,
     #[display(fmt = "Wrap")]
@@ -446,7 +446,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 HasNoEffect
             }
         }
-        StepSizeMin | SpeedMin => {
+        StepSizeMin | StepFactorMin => {
             if input.is_feedback {
                 HasNoEffect
             } else {
@@ -496,7 +496,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 }
             }
         }
-        StepSizeMax | SpeedMax => {
+        StepSizeMax | StepFactorMax => {
             if input.is_feedback {
                 HasNoEffect
             } else {
