@@ -1320,6 +1320,25 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             | AbsoluteContinuousRoundable { .. }
             // TODO-low Controlling a switch/trigger target with +/- n doesn't make sense.
             | AbsoluteContinuousRetriggerable => {
+                let current_target_value = match target.current_value(context.into()) {
+                    None => {
+                        // We couldn't obtain the current target value.
+                        if control_type != ControlType::AbsoluteContinuousRetriggerable {
+                            // Target is not trigger-like, there's nothing we can do.
+                            return None;
+                        }
+                        // https://github.com/helgoboss/realearn/issues/613
+                        // Target is like a trigger, so we don't actually need to know its
+                        // value to trigger it. We consider a encoder movement as triggering!
+                        // However, we also should support decreasing the encoder sensitivity, so
+                        // we pep up the increment first to see if we need to fire.
+                        self.pep_up_increment(increment)?;
+                        return Some(ModeControlResult::HitTarget {
+                            value: ControlValue::AbsoluteContinuous(UnitValue::MAX)
+                        });
+                    }
+                    Some(t) => t,
+                };
                 // Continuous target
                 //
                 // Settings which are always necessary:
@@ -1344,30 +1363,14 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                         unit_increment.clamp_to_interval(&self.settings.step_size_interval)?
                     }
                 };
-                match target.current_value(context.into()) {
-                    None => {
-                        if control_type == ControlType::AbsoluteContinuousRetriggerable {
-                            // If the target is like a trigger, we don't actually need to know its
-                            // value to trigger it. Just consider encoder movements as triggering!
-                            // https://github.com/helgoboss/realearn/issues/613
-                            Some(ModeControlResult::HitTarget {
-                                value: ControlValue::AbsoluteContinuous(UnitValue::MAX)
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                    Some(current_target_value) => {
-                        self.hit_target_absolutely_with_unit_increment(
-                            final_unit_increment,
-                            // We don't want to adjust to a grid, target min/max are more important
-                            // (see #577).
-                            None,
-                            current_target_value.to_unit_value(),
-                            options,
-                        )
-                    }
-                }
+                self.hit_target_absolutely_with_unit_increment(
+                    final_unit_increment,
+                    // We don't want to adjust to a grid, target min/max are more important
+                    // (see #577).
+                    None,
+                    current_target_value.to_unit_value(),
+                    options,
+                )
             }
             AbsoluteDiscrete { atomic_step_size, .. } => {
                 // Discrete target
@@ -6366,6 +6369,7 @@ mod tests {
             fn trigger_target() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
+                    step_count_interval: create_discrete_increment_interval(-2, 100),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -6375,19 +6379,17 @@ mod tests {
                 // When
                 // Then
                 assert_abs_diff_eq!(
-                    mode.control(rel_dis_evt(-10), &target, ()).unwrap(),
+                    mode.control(rel_dis_evt(-1), &target, ()).unwrap(),
                     abs_con_val(1.0)
                 );
+                assert!(mode.control(rel_dis_evt(-1), &target, ()).is_none());
                 assert_abs_diff_eq!(
                     mode.control(rel_dis_evt(-1), &target, ()).unwrap(),
                     abs_con_val(1.0)
                 );
+                assert!(mode.control(rel_dis_evt(1), &target, ()).is_none());
                 assert_abs_diff_eq!(
                     mode.control(rel_dis_evt(1), &target, ()).unwrap(),
-                    abs_con_val(1.0)
-                );
-                assert_abs_diff_eq!(
-                    mode.control(rel_dis_evt(10), &target, ()).unwrap(),
                     abs_con_val(1.0)
                 );
             }
