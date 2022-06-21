@@ -1344,14 +1344,30 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                         unit_increment.clamp_to_interval(&self.settings.step_size_interval)?
                     }
                 };
-                self.hit_target_absolutely_with_unit_increment(
-                    final_unit_increment,
-                    // We don't want to adjust to a grid, target min/max are more important
-                    // (see #577).
-                    None,
-                    target.current_value(context.into())?.to_unit_value(),
-                    options,
-                )
+                match target.current_value(context.into()) {
+                    None => {
+                        if control_type == ControlType::AbsoluteContinuousRetriggerable {
+                            // If the target is like a trigger, we don't actually need to know its
+                            // value to trigger it. Just consider encoder movements as triggering!
+                            // https://github.com/helgoboss/realearn/issues/613
+                            Some(ModeControlResult::HitTarget {
+                                value: ControlValue::AbsoluteContinuous(UnitValue::MAX)
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    Some(current_target_value) => {
+                        self.hit_target_absolutely_with_unit_increment(
+                            final_unit_increment,
+                            // We don't want to adjust to a grid, target min/max are more important
+                            // (see #577).
+                            None,
+                            current_target_value.to_unit_value(),
+                            options,
+                        )
+                    }
+                }
             }
             AbsoluteDiscrete { atomic_step_size, .. } => {
                 // Discrete target
@@ -6344,6 +6360,36 @@ mod tests {
                 assert!(mode.control(rel_dis_evt(1), &target, ()).is_none());
                 assert!(mode.control(rel_dis_evt(2), &target, ()).is_none());
                 assert!(mode.control(rel_dis_evt(10), &target, ()).is_none());
+            }
+
+            #[test]
+            fn trigger_target() {
+                // Given
+                let mut mode: TestMode = Mode::new(ModeSettings {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: None,
+                    control_type: ControlType::AbsoluteContinuousRetriggerable,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(rel_dis_evt(-10), &target, ()).unwrap(),
+                    abs_con_val(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(rel_dis_evt(-1), &target, ()).unwrap(),
+                    abs_con_val(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(rel_dis_evt(1), &target, ()).unwrap(),
+                    abs_con_val(1.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(rel_dis_evt(10), &target, ()).unwrap(),
+                    abs_con_val(1.0)
+                );
             }
 
             #[test]

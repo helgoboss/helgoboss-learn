@@ -7,6 +7,11 @@ pub enum ControlType {
     AbsoluteContinuous,
     /// The only difference to AbsoluteContinuous is that it gets retriggered even it already has
     /// the desired target value.
+    ///
+    /// This is commonly used for targets that can be triggered only instead of having a possible
+    /// range of values (e.g. load FX snapshot). But it can also be used for targets that can be
+    /// triggered with different values and still are somehow "trigger-like"
+    /// (e.g. send MIDI message).
     AbsoluteContinuousRetriggerable,
     /// Imagine a "tempo" target: Musical tempo is continuous in nature and still you might want to
     /// offer the possibility to round on fraction-less bpm values. Discrete and continuous at the
