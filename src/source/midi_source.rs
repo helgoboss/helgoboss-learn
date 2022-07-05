@@ -566,12 +566,23 @@ impl<S: MidiSourceScript> MidiSource<S> {
     }
 
     /// Determines the appropriate control value from the given MIDI source value. If this source
-    /// doesn't process values of that type, it returns None.
+    /// doesn't process values of that type or just consumes the value without leading to a
+    /// control value (e.g. relative-zero), it returns None.
     pub fn control(&self, value: &MidiSourceValue<impl ShortMessage>) -> Option<ControlValue> {
+        match self.control_flexible(value)? {
+            ControlResult::Consumed => None,
+            ControlResult::Processed(v) => Some(v),
+        }
+    }
+
+    pub fn control_flexible(
+        &self,
+        value: &MidiSourceValue<impl ShortMessage>,
+    ) -> Option<ControlResult> {
         use MidiSource as S;
         use MidiSourceValue::*;
         use StructuredShortMessage::*;
-        match self {
+        let control_value = match self {
             S::NoteVelocity {
                 channel,
                 key_number,
@@ -667,7 +678,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         controller_number: cn,
                         control_value,
                     } if matches(ch, *channel) && matches(cn, *controller_number) => {
-                        calc_control_value_from_n_bit_cc(*custom_character, control_value, 7).ok()
+                        let control_outcome =
+                            calc_control_value_from_n_bit_cc(*custom_character, control_value, 7)
+                                .map(ControlResult::Processed);
+                        return Some(control_outcome.unwrap_or(ControlResult::Consumed));
                     }
                     _ => None,
                 },
@@ -756,7 +770,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             // Feedback-only forever.
             S::Script { .. } | S::Display { .. } => None,
-        }
+        };
+        control_value.map(ControlResult::Processed)
     }
 
     /// Checks if this source consumes the given MIDI message. This is for sources whose events are
@@ -1228,6 +1243,19 @@ impl<S: MidiSourceScript> MidiSource<S> {
     }
 }
 
+pub enum ControlResult {
+    /// The value is consumed but doesn't emit a control value.
+    ///
+    /// Currently, the only example are neutral relative values
+    /// (e.g. 64 when using relative mode 2). They don't produce a `ControlValue` because
+    /// [`DiscreteIncrement`] doesn't permit the zero increment (which is debatable but at least
+    /// makes sure on type level that zero increments are discarded very early in the processing
+    /// chain instead of being processed a long way just to lead to no effect when they arrive at
+    /// the target).
+    Consumed,
+    Processed(ControlValue),
+}
+
 fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> bool {
     match configured_value {
         None => true,
@@ -1235,6 +1263,9 @@ fn matches<T: PartialEq + Eq>(actual_value: T, configured_value: Option<T>) -> b
     }
 }
 
+/// Returns an error if the source character is relative (one of the encoders types) but the
+/// value is neutral (neither an increment nor a decrement), in which case you can discard the
+/// value.
 fn calc_control_value_from_n_bit_cc<T: Into<u32>>(
     character: SourceCharacter,
     cc_control_value: T,
