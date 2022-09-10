@@ -1003,6 +1003,25 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             .flatten()
                             .collect()
                     }
+                    DisplaySpec::SlKeyboard { scope } => {
+                        let mut ascii_chars = filter_ascii_chars(&value.text);
+                        scope
+                            .destinations()
+                            .iter()
+                            .map(move |dest| {
+                                let line_length = dest.line_length();
+                                let body = (0..line_length)
+                                    .map(|_| ascii_chars.next().unwrap_or_default());
+                                let text_sysex = sl_keyboard_display_sysex(
+                                    dest.section_index,
+                                    dest.line_index,
+                                    body,
+                                );
+                                RawMidiEvent::try_from_iter(0, text_sysex).ok()
+                            })
+                            .flatten()
+                            .collect()
+                    }
                     DisplaySpec::MackieSevenSegmentDisplay { scope } => {
                         // Reverse because we want right-aligned
                         let mut peekable_chars = value.text.chars().rev().peekable();
@@ -1428,6 +1447,37 @@ fn sinicon_e24_sysex(
     start.into_iter().chain(body).chain(end())
 }
 
+fn sl_keyboard_display_sysex(
+    section_index: u8,
+    line_index: u8,
+    body: impl Iterator<Item = u8>,
+) -> impl Iterator<Item = u8> {
+    let start = [
+        // Device
+        0xF0, 0x00, 0x20, 0x1A, 0x00, // Display changes
+        0x02,
+    ];
+    let display_prefix = match (section_index, line_index) {
+        (0, 0 | 1) => [0x01, 0x00, 0x0E],
+        (1, 0) => [0x18, 0x00, 0x0B],
+        (1, 1) => [0x48, 0x00, 0x0A],
+        (2, 0) => [0x24, 0x00, 0x0B],
+        (2, 1) => [0x53, 0x00, 0x0A],
+        (3, 0) => [0x30, 0x00, 0x0B],
+        (3, 1) => [0x5E, 0x00, 0x0A],
+        (4, 0) => [0x3C, 0x00, 0x0B],
+        (4, 1) => [0x69, 0x00, 0x0A],
+        x => panic!("unsupported combination of section and line: {:?}", x),
+    };
+    let expanded_body = body.flat_map(|ch| [ch, 0x00]);
+    let end = [0x00, 0x00, 0xF7];
+    start
+        .into_iter()
+        .chain(display_prefix)
+        .chain(expanded_body)
+        .chain(end)
+}
+
 fn launchpad_pro_scrolling_text_sysex(
     color: RgbColor,
     looped: bool,
@@ -1485,6 +1535,9 @@ pub enum DisplayType {
     #[cfg_attr(feature = "serde", serde(rename = "launchpad-pro-scrolling-text"))]
     #[display(fmt = "Launchpad Pro - Scrolling text")]
     LaunchpadProScrollingText,
+    #[cfg_attr(feature = "serde", serde(rename = "sl-keyboard"))]
+    #[display(fmt = "Studiologic SL Keyboard display")]
+    SlKeyboardDisplay,
 }
 
 impl DisplayType {
@@ -1494,6 +1547,7 @@ impl DisplayType {
             MackieLcd => MackieLcdScope::CHANNEL_COUNT,
             MackieXtLcd => MackieLcdScope::CHANNEL_COUNT,
             SiniConE24 => SiniConE24Scope::CELL_COUNT,
+            SlKeyboardDisplay => 5,
             // Not applicable
             MackieSevenSegmentDisplay | LaunchpadProScrollingText => 0,
         }
@@ -1505,6 +1559,7 @@ impl DisplayType {
             MackieLcd => MackieLcdScope::LINE_COUNT,
             MackieXtLcd => MackieLcdScope::LINE_COUNT,
             SiniConE24 => SiniConE24Scope::ITEM_COUNT,
+            SlKeyboardDisplay => 2,
             // Not applicable
             MackieSevenSegmentDisplay | LaunchpadProScrollingText => 1,
         }
@@ -1523,6 +1578,9 @@ pub enum DisplaySpec {
     MackieLcd {
         scope: MackieLcdScope,
         extender_index: u8,
+    },
+    SlKeyboard {
+        scope: SlKeyboardDisplayScope,
     },
     MackieSevenSegmentDisplay {
         scope: MackieSevenSegmentDisplayScope,
@@ -1544,6 +1602,9 @@ pub enum DisplaySpecAddress {
     MackieSevenSegmentDisplay {
         scope: MackieSevenSegmentDisplayScope,
     },
+    SlKeyboardDisplay {
+        scope: SlKeyboardDisplayScope,
+    },
     SiniConE24 {
         scope: SiniConE24Scope,
     },
@@ -1564,6 +1625,7 @@ impl From<DisplaySpec> for DisplaySpecAddress {
             MackieSevenSegmentDisplay { scope } => Self::MackieSevenSegmentDisplay { scope },
             SiniConE24 { scope, .. } => Self::SiniConE24 { scope },
             LaunchpadProScrollingText => Self::LaunchpadProScrollingText,
+            SlKeyboard { scope } => Self::SlKeyboardDisplay { scope },
         }
     }
 }
@@ -1666,6 +1728,43 @@ impl MackieLcdScope {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct SlKeyboardDisplayScope {
+    pub section: Option<u8>,
+    pub line: Option<u8>,
+}
+
+impl SlKeyboardDisplayScope {
+    const SECTION_COUNT: u8 = 5;
+    /// The first display (the main display) has 1 line only, but for simplicity we treat the
+    /// second line like the first line.
+    const LINE_COUNT: u8 = 2;
+
+    pub fn new(section: Option<u8>, line: Option<u8>) -> Self {
+        Self {
+            section: section.map(|s| s.min(Self::SECTION_COUNT - 1)),
+            line: line.map(|l| l.min(Self::LINE_COUNT - 1)),
+        }
+    }
+
+    pub fn destinations(&self) -> Vec<SlKeyboardDisplayDestination> {
+        match (self.section, self.line) {
+            (None, None) => (0..Self::SECTION_COUNT)
+                .flat_map(|s| {
+                    (0..Self::LINE_COUNT).map(move |l| SlKeyboardDisplayDestination::new(s, l))
+                })
+                .collect(),
+            (None, Some(l)) => (0..Self::SECTION_COUNT)
+                .map(|s| SlKeyboardDisplayDestination::new(s, l))
+                .collect(),
+            (Some(s), None) => (0..Self::LINE_COUNT)
+                .map(|l| SlKeyboardDisplayDestination::new(s, l))
+                .collect(),
+            (Some(s), Some(l)) => vec![SlKeyboardDisplayDestination::new(s, l)],
+        }
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct SiniConE24Scope {
     pub cell_index: Option<u8>,
     pub item_index: Option<u8>,
@@ -1750,6 +1849,30 @@ impl SiniConE24Destination {
         match self.item_index {
             0 | 1 | 2 => 16,
             3 => 9,
+            _ => 0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SlKeyboardDisplayDestination {
+    pub section_index: u8,
+    pub line_index: u8,
+}
+
+impl SlKeyboardDisplayDestination {
+    pub fn new(section_index: u8, line_index: u8) -> Self {
+        Self {
+            section_index,
+            line_index,
+        }
+    }
+
+    pub fn line_length(&self) -> u8 {
+        match (self.section_index, self.line_index) {
+            (0, 0) => 13,
+            (1..=3, 0) => 10,
+            (1..=3, 1) => 9,
             _ => 0,
         }
     }
