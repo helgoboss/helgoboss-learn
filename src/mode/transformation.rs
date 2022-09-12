@@ -93,6 +93,8 @@ pub enum TransformationOutput<T> {
     None,
     /// A control value.
     Control(T),
+    /// A combination of Control and Stop.
+    ControlAndStop(T),
 }
 
 impl<T: Copy> TransformationOutput<T> {
@@ -101,12 +103,13 @@ impl<T: Copy> TransformationOutput<T> {
             TransformationOutput::Stop => TransformationOutput::Stop,
             TransformationOutput::None => TransformationOutput::None,
             TransformationOutput::Control(v) => TransformationOutput::Control(f(*v)),
+            TransformationOutput::ControlAndStop(v) => TransformationOutput::ControlAndStop(f(*v)),
         }
     }
 
     pub fn value(&self) -> Option<T> {
         match self {
-            TransformationOutput::Control(v) => Some(*v),
+            TransformationOutput::Control(v) | TransformationOutput::ControlAndStop(v) => Some(*v),
             TransformationOutput::Stop | TransformationOutput::None => None,
         }
     }

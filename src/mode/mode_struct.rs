@@ -739,6 +739,12 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             }
             TransformationOutput::None => None,
             TransformationOutput::Control(v) => Some(v),
+            TransformationOutput::ControlAndStop(v) => {
+                // Resetting the previous event will stop polling until the next mapping
+                // invocation.
+                self.state.previous_absolute_value_event = None;
+                Some(v)
+            }
         }
     }
 
