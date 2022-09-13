@@ -1587,7 +1587,7 @@ pub enum DisplayType {
     #[display(fmt = "Mackie 7-segment display")]
     MackieSevenSegmentDisplay,
     #[cfg_attr(feature = "serde", serde(rename = "sinicon-e24"))]
-    #[display(fmt = "SiniCon E24")]
+    #[display(fmt = "SiniCon E24 display")]
     SiniConE24,
     #[cfg_attr(feature = "serde", serde(rename = "launchpad-pro-scrolling-text"))]
     #[display(fmt = "Launchpad Pro - Scrolling text")]
