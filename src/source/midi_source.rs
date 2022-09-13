@@ -2,7 +2,8 @@ use crate::{
     create_raw_midi_events_singleton, format_percentage_without_unit,
     parse_percentage_without_unit, AbsoluteValue, Bpm, ControlValue, DetailedSourceCharacter,
     DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
-    RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents, RawMidiPattern, RgbColor, UnitValue,
+    RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents, RawMidiPattern, RgbColor, SourceContext,
+    TextualFeedbackValue, UnitValue,
 };
 use core::iter;
 use derivative::Derivative;
@@ -11,6 +12,7 @@ use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::cell::Cell;
 
+use crate::source::color_util::find_closest_color_in_palette;
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, ControllerNumber, DataType, KeyNumber,
     ParameterNumberMessage, RawShortMessage, ShortMessage, ShortMessageFactory, ShortMessageType,
@@ -819,9 +821,20 @@ impl<S: MidiSourceScript> MidiSource<S> {
 
     /// Returns an appropriate MIDI source value for the given feedback value if feedback is
     /// supported by this source.
-    pub fn feedback<M: ShortMessage + ShortMessageFactory>(
+    ///
+    /// Sometimes, it's not possible to determine the correct source feedback message just by
+    /// looking at the incoming feedback value and the type and settings of the source alone.
+    /// We might need access to a more global state. This is where [`SourceContext`] comes in.
+    ///
+    /// Passing in a mutable reference to the source context here allows us to keep the
+    /// responsibility of figuring out the correct MIDI source values solely here at this place.
+    /// I think this keeps the API more straightforward and is better than moving parts of that
+    /// logic to the much more global struct which manages the source contexts. That would probably
+    /// cause much fragmentation.
+    pub fn feedback_flexible<M: ShortMessage + ShortMessageFactory>(
         &self,
         feedback_value: FeedbackValue,
+        context: &mut SourceContext,
     ) -> Option<MidiSourceValue<'static, M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
@@ -940,20 +953,58 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     DisplaySpec::MackieLcd {
                         scope,
                         extender_index,
+                    } => feedback_mackie_lcd(&value, scope, *extender_index).collect(),
+                    DisplaySpec::XTouchMackieLcd {
+                        scope,
+                        extender_index,
                     } => {
-                        let mut ascii_chars = filter_ascii_chars(&value.text);
-                        scope
-                            .lcd_portions()
-                            .iter()
-                            .filter_map(|range| {
-                                let body = range
-                                    .clone()
-                                    .map(|_| ascii_chars.next().unwrap_or(ASCII_SPACE));
-                                let sysex =
-                                    mackie_lcd_sysex(0x14 + extender_index, range.start, body);
-                                RawMidiEvent::try_from_iter(0, sysex).ok()
-                            })
-                            .collect()
+                        // TODO-high CONTINUE Issues with this approach:
+                        //  - Let's assume we have 5 mappings addressing different displays
+                        //    on the same XTouch device. In that case, we will have 5 separate
+                        //    messages. They will all be correct but actually, 1 (the last one)
+                        //    would have sufficed.
+                        //  - Let's assume we switch off feedback for one display because it's
+                        //    unused. The text is handled correctly because its location is
+                        //    part of the feedback address and can be set specifically. But the
+                        //    colors can only be set all at once. So if "off" feedback is *created*
+                        //    BEFORE creating the new feedback but *sent* AFTER, we get the wrong
+                        //    order!
+                        //  -  ... DAMN, we should probably return the color requests in a neutral
+                        //    way, without modifying global state. Something like
+                        //    ChangeColorOfDisplayXToY. Then, when all feedback values are
+                        //    collected, those each special one should be applied to the global state
+                        //    shortly before it would be sent. It should be applied
+                        //    *in the order of sending* (so OFF messages should not be applied yet
+                        //    because their sending is deferred!). After applying, the real final
+                        //    MIDI message should be created and sent.
+                        // Color events
+                        let channels = match scope.channel {
+                            None => (0..MackieLcdScope::CHANNEL_COUNT),
+                            Some(ch) => (ch..ch + 1),
+                        };
+                        let mut at_least_one_color_change = false;
+                        for ch in channels {
+                            let changed = context.x_touch_mackie_lcd_state.notify_color_requested(
+                                *extender_index,
+                                ch,
+                                style.color,
+                            );
+                            if changed {
+                                at_least_one_color_change = true;
+                            }
+                        }
+                        // Text events (same like pure Mackie MCU)
+                        let text_events = feedback_mackie_lcd(&value, scope, *extender_index);
+                        // Combine
+                        if at_least_one_color_change {
+                            let color_sysex =
+                                context.x_touch_mackie_lcd_state.sysex(*extender_index);
+                            let color_events =
+                                RawMidiEvent::try_from_iter(0, color_sysex).into_iter();
+                            color_events.chain(text_events).collect()
+                        } else {
+                            text_events.collect()
+                        }
                     }
                     DisplaySpec::SiniConE24 {
                         scope,
@@ -1066,6 +1117,15 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
             _ => None,
         }
+    }
+
+    #[cfg(test)]
+    fn feedback<M: ShortMessage + ShortMessageFactory>(
+        &self,
+        feedback_value: FeedbackValue,
+    ) -> Option<MidiSourceValue<'static, M>> {
+        let mut context = SourceContext::default();
+        self.feedback_flexible(feedback_value, &mut context)
     }
 
     /// Formats the given absolute control value.
@@ -1260,6 +1320,24 @@ impl<S: MidiSourceScript> MidiSource<S> {
             }
         }
     }
+}
+
+fn feedback_mackie_lcd<'a, 'b>(
+    value: &'a TextualFeedbackValue,
+    scope: &'b MackieLcdScope,
+    extender_index: u8,
+) -> impl Iterator<Item = RawMidiEvent> + 'a
+where
+    'a: 'b,
+{
+    let mut ascii_chars = filter_ascii_chars(&value.text);
+    scope.lcd_portions().into_iter().filter_map(move |range| {
+        let body = range
+            .clone()
+            .map(|_| ascii_chars.next().unwrap_or(ASCII_SPACE));
+        let sysex = mackie_lcd_sysex(0x14 + extender_index, range.start, body);
+        RawMidiEvent::try_from_iter(0, sysex).ok()
+    })
 }
 
 pub enum ControlResult {
@@ -1526,6 +1604,12 @@ pub enum DisplayType {
     #[cfg_attr(feature = "serde", serde(rename = "mackie-xt-lcd"))]
     #[display(fmt = "Mackie XT LCD")]
     MackieXtLcd,
+    #[cfg_attr(feature = "serde", serde(rename = "x-touch-mackie-lcd"))]
+    #[display(fmt = "XTouch Mackie LCD")]
+    XTouchMackieLcd,
+    #[cfg_attr(feature = "serde", serde(rename = "x-touch-mackie-xt-lcd"))]
+    #[display(fmt = "XTouch Mackie XT LCD")]
+    XTouchMackieXtLcd,
     #[cfg_attr(feature = "serde", serde(rename = "mackie-seven"))]
     #[display(fmt = "Mackie 7-segment display")]
     MackieSevenSegmentDisplay,
@@ -1544,8 +1628,9 @@ impl DisplayType {
     pub fn display_count(self) -> u8 {
         use DisplayType::*;
         match self {
-            MackieLcd => MackieLcdScope::CHANNEL_COUNT,
-            MackieXtLcd => MackieLcdScope::CHANNEL_COUNT,
+            MackieLcd | MackieXtLcd | XTouchMackieLcd | XTouchMackieXtLcd => {
+                MackieLcdScope::CHANNEL_COUNT
+            }
             SiniConE24 => SiniConE24Scope::CELL_COUNT,
             SlKeyboardDisplay => 5,
             // Not applicable
@@ -1556,8 +1641,9 @@ impl DisplayType {
     pub fn line_count(self) -> u8 {
         use DisplayType::*;
         match self {
-            MackieLcd => MackieLcdScope::LINE_COUNT,
-            MackieXtLcd => MackieLcdScope::LINE_COUNT,
+            MackieLcd | MackieXtLcd | XTouchMackieLcd | XTouchMackieXtLcd => {
+                MackieLcdScope::LINE_COUNT
+            }
             SiniConE24 => SiniConE24Scope::ITEM_COUNT,
             SlKeyboardDisplay => 2,
             // Not applicable
@@ -1579,11 +1665,15 @@ pub enum DisplaySpec {
         scope: MackieLcdScope,
         extender_index: u8,
     },
-    SlKeyboard {
-        scope: SlKeyboardDisplayScope,
+    XTouchMackieLcd {
+        scope: MackieLcdScope,
+        extender_index: u8,
     },
     MackieSevenSegmentDisplay {
         scope: MackieSevenSegmentDisplayScope,
+    },
+    SlKeyboard {
+        scope: SlKeyboardDisplayScope,
     },
     SiniConE24 {
         scope: SiniConE24Scope,
@@ -1616,6 +1706,10 @@ impl From<DisplaySpec> for DisplaySpecAddress {
         use DisplaySpec::*;
         match spec {
             MackieLcd {
+                scope,
+                extender_index,
+            }
+            | XTouchMackieLcd {
                 scope,
                 extender_index,
             } => Self::MackieLcd {
@@ -1692,7 +1786,7 @@ pub struct MackieLcdScope {
 
 impl MackieLcdScope {
     const CHANNEL_LEN: u8 = 7;
-    const CHANNEL_COUNT: u8 = 8;
+    pub const CHANNEL_COUNT: u8 = 8;
     const LINE_COUNT: u8 = 2;
     const LINE_LEN: u8 = Self::CHANNEL_COUNT * Self::CHANNEL_LEN;
 
@@ -1829,6 +1923,10 @@ impl LcdPortions {
     pub fn iter(&self) -> impl Iterator<Item = &Range<u8>> + '_ {
         self.ranges.iter()
     }
+
+    pub fn into_iter(self) -> impl Iterator<Item = Range<u8>> {
+        self.ranges.into_iter()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -1925,26 +2023,6 @@ fn convert_to_7_segment_code(ch: char, next_ch: Option<char>, reverse: bool) -> 
 struct ConversionResult {
     code: Option<u8>,
     consumed_one_more: bool,
-}
-// Initially taken from https://github.com/jamesmunns/launch-rs/blob/master/lib/src/color.rs
-fn find_closest_color_in_palette(color: RgbColor, palette: &[RgbColor]) -> u8 {
-    let (red, green, blue) = (color.r(), color.g(), color.b());
-    let mut ifurthest = 0usize;
-    let mut furthest = 3 * 255_i32.pow(2) + 1;
-    for (i, c) in palette.iter().enumerate() {
-        if red == c.r() && green == c.g() && blue == c.b() {
-            // Exact match
-            return i as u8;
-        }
-        let distance = (red as i32 - c.r() as i32).pow(2)
-            + (green as i32 - c.g() as i32).pow(2)
-            + (blue as i32 - c.b() as i32).pow(2);
-        if distance < furthest {
-            furthest = distance;
-            ifurthest = i;
-        }
-    }
-    ifurthest as u8
 }
 
 const ASCII_SPACE: u8 = b' ';

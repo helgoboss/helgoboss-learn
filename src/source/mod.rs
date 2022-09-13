@@ -13,6 +13,11 @@ pub use raw_midi::*;
 mod midi_source_script;
 pub use midi_source_script::*;
 
+mod source_context;
+pub use source_context::*;
+
+mod color_util;
+
 #[cfg(test)]
 mod test_util;
 
