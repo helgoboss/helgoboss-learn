@@ -2,18 +2,22 @@ use crate::source::color_util::find_closest_color_in_palette;
 use crate::{MackieLcdScope, RgbColor};
 use std::collections::HashMap;
 
-// TODO-high CONTINUE
-const COLOR_PALETTE: [RgbColor; 8] = [
-    // 0..64
-    RgbColor::new(0, 0, 0),    // 0
-    RgbColor::new(0, 0, 255),  // 1 - Blue
-    RgbColor::new(0, 21, 255), // 2 - Blue (Green Rising)
-    RgbColor::new(0, 34, 255), //
-    RgbColor::new(0, 46, 255), //
-    RgbColor::new(0, 59, 255), //
-    RgbColor::new(0, 68, 255), //
-    RgbColor::new(0, 80, 255),
-];
+mod colors {
+    use crate::RgbColor;
+
+    pub const BLANK: RgbColor = RgbColor::new(0, 0, 0);
+    pub const RED: RgbColor = RgbColor::new(255, 0, 0);
+    pub const GREEN: RgbColor = RgbColor::new(0, 255, 0);
+    pub const YELLOW: RgbColor = RgbColor::new(255, 255, 0);
+    pub const BLUE: RgbColor = RgbColor::new(0, 0, 255);
+    pub const PURPLE: RgbColor = RgbColor::new(128, 0, 128);
+    pub const CYAN: RgbColor = RgbColor::new(0, 255, 255);
+    pub const WHITE: RgbColor = RgbColor::new(255, 255, 255);
+}
+
+use colors::*;
+
+const COLOR_PALETTE: [RgbColor; 8] = [BLANK, RED, GREEN, YELLOW, BLUE, PURPLE, CYAN, WHITE];
 
 /// Global state for a particular Behringer X-Touch device.
 ///

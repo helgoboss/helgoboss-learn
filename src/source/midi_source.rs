@@ -4,6 +4,7 @@ use crate::{
     DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
     PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents,
     RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
+    XTouchMackieLcdColorRequest,
 };
 use core::iter;
 use derivative::Derivative;
@@ -12,6 +13,7 @@ use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::cell::Cell;
 
+use crate::devices::x_touch::get_x_touch_color_index_for_color;
 use crate::source::color_util::find_closest_color_in_palette;
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, ControllerNumber, DataType, KeyNumber,
@@ -942,19 +944,27 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Display { spec } => {
                 let value = feedback_value.to_textual();
                 let style = value.style;
-                let events: RawMidiEvents = match spec {
+                let (events, non_final): (RawMidiEvents, _) = match spec {
                     DisplaySpec::MackieLcd {
                         scope,
                         extender_index,
-                    } => feedback_mackie_lcd(&value, scope, *extender_index).collect(),
+                    } => (
+                        feedback_mackie_lcd(&value, scope, *extender_index).collect(),
+                        None,
+                    ),
                     DisplaySpec::XTouchMackieLcd {
                         scope,
                         extender_index,
                     } => {
-                        // Color event
-                        // TODO-high CONTINUE
-                        // Text events (same like pure Mackie MCU)
-                        feedback_mackie_lcd(&value, scope, *extender_index).collect()
+                        let x_touch_color_request = XTouchMackieLcdColorRequest {
+                            extender_index: *extender_index,
+                            channel: scope.channel,
+                            color_index: style.color.map(get_x_touch_color_index_for_color),
+                        };
+                        (
+                            feedback_mackie_lcd(&value, scope, *extender_index).collect(),
+                            Some(x_touch_color_request),
+                        )
                     }
                     DisplaySpec::SiniConE24 {
                         scope,
@@ -967,7 +977,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                             previous_background_color.replace(Some(background_color));
                         let update_background = Some(background_color) != previous_background_color;
                         let mut ascii_chars = filter_ascii_chars(&value.text);
-                        scope
+                        let events = scope
                             .destinations()
                             .iter()
                             .flat_map(move |dest| {
@@ -1002,11 +1012,12 @@ impl<S: MidiSourceScript> MidiSource<S> {
                                 [background_event, text_event]
                             })
                             .flatten()
-                            .collect()
+                            .collect();
+                        (events, None)
                     }
                     DisplaySpec::SlKeyboard { scope } => {
                         let mut ascii_chars = filter_ascii_chars(&value.text);
-                        scope
+                        let events = scope
                             .destinations()
                             .iter()
                             .map(move |dest| {
@@ -1021,7 +1032,8 @@ impl<S: MidiSourceScript> MidiSource<S> {
                                 RawMidiEvent::try_from_iter(0, text_sysex).ok()
                             })
                             .flatten()
-                            .collect()
+                            .collect();
+                        (events, None)
                     }
                     DisplaySpec::MackieSevenSegmentDisplay { scope } => {
                         // Reverse because we want right-aligned
@@ -1039,21 +1051,22 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         .fuse();
                         // Reverse because we want right-aligned
                         let positions = scope.positions();
-                        positions
+                        let events = positions
                             .iter()
                             .rev()
                             .map(|pos| {
                                 let bytes = [0xB0, 0x40 + pos, codes.next().unwrap_or(ASCII_SPACE)];
                                 RawMidiEvent::try_from_iter(0, bytes.into_iter()).unwrap()
                             })
-                            .collect()
+                            .collect();
+                        (events, None)
                     }
                     DisplaySpec::LaunchpadProScrollingText => {
                         let body = filter_ascii_chars(&value.text);
                         let color = style.color.unwrap_or(RgbColor::WHITE);
                         let sysex = launchpad_pro_scrolling_text_sysex(color, true, body);
                         let event = RawMidiEvent::try_from_iter(0, sysex).ok()?;
-                        create_raw_midi_events_singleton(event)
+                        (create_raw_midi_events_singleton(event), None)
                     }
                 };
                 let feedback_info = RawFeedbackAddressInfo::Display {
@@ -1063,11 +1076,17 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     feedback_address_info: Some(feedback_info),
                     events,
                 };
-                Some(raw_value)
+                return Some(PreliminaryMidiSourceFeedbackValue {
+                    final_value: raw_value,
+                    x_touch_mackie_lcd_color_request: non_final,
+                });
             }
             _ => None,
-        };
-        concrete_value.map(PreliminaryMidiSourceFeedbackValue::Final)
+        }?;
+        Some(PreliminaryMidiSourceFeedbackValue {
+            final_value: concrete_value,
+            x_touch_mackie_lcd_color_request: None,
+        })
     }
 
     #[cfg(test)]
@@ -1076,10 +1095,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
         feedback_value: FeedbackValue,
     ) -> Option<MidiSourceValue<'static, M>> {
         let context = SourceContext::default();
-        match self.feedback_flexible(feedback_value, &context)? {
-            PreliminaryMidiSourceFeedbackValue::Final(v) => Some(v),
-            PreliminaryMidiSourceFeedbackValue::XTouchMackieLcdColor(_) => None,
-        }
+        Some(
+            self.feedback_flexible(feedback_value, &context)?
+                .final_value,
+        )
     }
 
     /// Formats the given absolute control value.
@@ -1653,6 +1672,9 @@ pub enum DisplaySpecAddress {
         scope: SiniConE24Scope,
     },
     LaunchpadProScrollingText,
+    XTouchMackieLcdColors {
+        extender_index: u8,
+    },
 }
 
 impl From<DisplaySpec> for DisplaySpecAddress {
