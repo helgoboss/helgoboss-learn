@@ -1578,10 +1578,10 @@ pub enum DisplayType {
     #[display(fmt = "Mackie XT LCD")]
     MackieXtLcd,
     #[cfg_attr(feature = "serde", serde(rename = "x-touch-mackie-lcd"))]
-    #[display(fmt = "XTouch Mackie LCD")]
+    #[display(fmt = "X-Touch Mackie LCD")]
     XTouchMackieLcd,
     #[cfg_attr(feature = "serde", serde(rename = "x-touch-mackie-xt-lcd"))]
-    #[display(fmt = "XTouch Mackie XT LCD")]
+    #[display(fmt = "X-Touch Mackie XT LCD")]
     XTouchMackieXtLcd,
     #[cfg_attr(feature = "serde", serde(rename = "mackie-seven"))]
     #[display(fmt = "Mackie 7-segment display")]
