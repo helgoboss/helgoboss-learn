@@ -822,19 +822,12 @@ impl<S: MidiSourceScript> MidiSource<S> {
     /// Returns an appropriate MIDI source value for the given feedback value if feedback is
     /// supported by this source.
     ///
-    /// Sometimes, it's not possible to determine the correct source feedback message just by
-    /// looking at the incoming feedback value and the type and settings of the source alone.
-    /// We might need access to a more global state. This is where [`SourceContext`] comes in.
-    ///
-    /// Passing in a mutable reference to the source context here allows us to keep the
-    /// responsibility of figuring out the correct MIDI source values solely here at this place.
-    /// I think this keeps the API more straightforward and is better than moving parts of that
-    /// logic to the much more global struct which manages the source contexts. That would probably
-    /// cause much fragmentation.
+    /// The source context allows us to pass in more global state, e.g. about the connected device.
+    /// At the moment not used.
     pub fn feedback_flexible<M: ShortMessage + ShortMessageFactory>(
         &self,
         feedback_value: FeedbackValue,
-        context: &mut SourceContext,
+        _: &SourceContext,
     ) -> Option<MidiSourceValue<'static, M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
@@ -958,53 +951,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         scope,
                         extender_index,
                     } => {
-                        // TODO-high CONTINUE Issues with this approach:
-                        //  - Let's assume we have 5 mappings addressing different displays
-                        //    on the same XTouch device. In that case, we will have 5 separate
-                        //    messages. They will all be correct but actually, 1 (the last one)
-                        //    would have sufficed.
-                        //  - Let's assume we switch off feedback for one display because it's
-                        //    unused. The text is handled correctly because its location is
-                        //    part of the feedback address and can be set specifically. But the
-                        //    colors can only be set all at once. So if "off" feedback is *created*
-                        //    BEFORE creating the new feedback but *sent* AFTER, we get the wrong
-                        //    order!
-                        //  -  ... DAMN, we should probably return the color requests in a neutral
-                        //    way, without modifying global state. Something like
-                        //    ChangeColorOfDisplayXToY. Then, when all feedback values are
-                        //    collected, those each special one should be applied to the global state
-                        //    shortly before it would be sent. It should be applied
-                        //    *in the order of sending* (so OFF messages should not be applied yet
-                        //    because their sending is deferred!). After applying, the real final
-                        //    MIDI message should be created and sent.
                         // Color events
-                        let channels = match scope.channel {
-                            None => (0..MackieLcdScope::CHANNEL_COUNT),
-                            Some(ch) => (ch..ch + 1),
-                        };
-                        let mut at_least_one_color_change = false;
-                        for ch in channels {
-                            let changed = context.x_touch_mackie_lcd_state.notify_color_requested(
-                                *extender_index,
-                                ch,
-                                style.color,
-                            );
-                            if changed {
-                                at_least_one_color_change = true;
-                            }
-                        }
+                        // TODO-high CONTINUE
                         // Text events (same like pure Mackie MCU)
-                        let text_events = feedback_mackie_lcd(&value, scope, *extender_index);
-                        // Combine
-                        if at_least_one_color_change {
-                            let color_sysex =
-                                context.x_touch_mackie_lcd_state.sysex(*extender_index);
-                            let color_events =
-                                RawMidiEvent::try_from_iter(0, color_sysex).into_iter();
-                            color_events.chain(text_events).collect()
-                        } else {
-                            text_events.collect()
-                        }
+                        feedback_mackie_lcd(&value, scope, *extender_index).collect()
                     }
                     DisplaySpec::SiniConE24 {
                         scope,

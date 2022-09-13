@@ -21,4 +21,4 @@ mod color_util;
 #[cfg(test)]
 mod test_util;
 
-mod devices;
+pub mod devices;
