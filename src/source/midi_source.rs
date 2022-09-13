@@ -2,8 +2,8 @@ use crate::{
     create_raw_midi_events_singleton, format_percentage_without_unit,
     parse_percentage_without_unit, AbsoluteValue, Bpm, ControlValue, DetailedSourceCharacter,
     DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
-    RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents, RawMidiPattern, RgbColor, SourceContext,
-    TextualFeedbackValue, UnitValue,
+    PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents,
+    RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
 };
 use core::iter;
 use derivative::Derivative;
@@ -828,10 +828,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
         &self,
         feedback_value: FeedbackValue,
         _: &SourceContext,
-    ) -> Option<MidiSourceValue<'static, M>> {
+    ) -> Option<PreliminaryMidiSourceFeedbackValue<'static, M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
-        match self {
+        let concrete_value = match self {
             NoteVelocity {
                 channel: Some(ch),
                 key_number: Some(kn),
@@ -951,7 +951,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         scope,
                         extender_index,
                     } => {
-                        // Color events
+                        // Color event
                         // TODO-high CONTINUE
                         // Text events (same like pure Mackie MCU)
                         feedback_mackie_lcd(&value, scope, *extender_index).collect()
@@ -1066,16 +1066,20 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Some(raw_value)
             }
             _ => None,
-        }
+        };
+        concrete_value.map(PreliminaryMidiSourceFeedbackValue::Final)
     }
 
     #[cfg(test)]
-    fn feedback<M: ShortMessage + ShortMessageFactory>(
+    fn test_feedback<M: ShortMessage + ShortMessageFactory>(
         &self,
         feedback_value: FeedbackValue,
     ) -> Option<MidiSourceValue<'static, M>> {
-        let mut context = SourceContext::default();
-        self.feedback_flexible(feedback_value, &mut context)
+        let context = SourceContext::default();
+        match self.feedback_flexible(feedback_value, &context)? {
+            PreliminaryMidiSourceFeedbackValue::Final(v) => Some(v),
+            PreliminaryMidiSourceFeedbackValue::XTouchMackieLcdColor(_) => None,
+        }
     }
 
     /// Formats the given absolute control value.
@@ -2057,7 +2061,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -2088,7 +2092,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(note_off(15, 20, 100,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(note_on(4, 20, 64)))
         );
     }
@@ -2148,7 +2152,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -2179,7 +2183,7 @@ mod tests {
         assert_eq!(source.control(&plain(note_off(0, 20, 100,))), None);
         assert_eq!(source.control(&plain(note_on(4, 20, 0,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(note_on(1, 64, 127)))
         );
     }
@@ -2248,7 +2252,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -2284,7 +2288,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(channel_pressure(3, 79,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(polyphonic_key_pressure(1, 53, 64)))
         );
     }
@@ -2342,7 +2346,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -2369,24 +2373,24 @@ mod tests {
             None
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.0)),
+            source.test_feedback::<RawShortMessage>(fv(0.0)),
             Some(plain(control_change(1, 64, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.25)),
+            source.test_feedback::<RawShortMessage>(fv(0.25)),
             Some(plain(control_change(1, 64, 32)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(control_change(1, 64, 64)))
         );
         // In a center-oriented mapping this would yield 96 instead of 95
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.75)),
+            source.test_feedback::<RawShortMessage>(fv(0.75)),
             Some(plain(control_change(1, 64, 95)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(1.0)),
+            source.test_feedback::<RawShortMessage>(fv(1.0)),
             Some(plain(control_change(1, 64, 127)))
         );
     }
@@ -2452,7 +2456,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -2481,7 +2485,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(program_change(6, 127,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(program_change(10, 64)))
         );
     }
@@ -2547,7 +2551,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "64"
@@ -2584,7 +2588,7 @@ mod tests {
             None
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(channel_pressure(15, 64)))
         );
     }
@@ -2690,7 +2694,7 @@ mod tests {
             None
         );
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "0"
@@ -2719,23 +2723,23 @@ mod tests {
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.0)),
+            source.test_feedback::<RawShortMessage>(fv(0.0)),
             Some(plain(pitch_bend_change(3, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.25)),
+            source.test_feedback::<RawShortMessage>(fv(0.25)),
             Some(plain(pitch_bend_change(3, 4096)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(plain(pitch_bend_change(3, 8192)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.75)),
+            source.test_feedback::<RawShortMessage>(fv(0.75)),
             Some(plain(pitch_bend_change(3, 12288)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(1.0)),
+            source.test_feedback::<RawShortMessage>(fv(1.0)),
             Some(plain(pitch_bend_change(3, 16383)))
         );
     }
@@ -2806,7 +2810,7 @@ mod tests {
         assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "8192"
@@ -2844,24 +2848,24 @@ mod tests {
             frac(16383, 16383)
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.0)),
+            source.test_feedback::<RawShortMessage>(fv(0.0)),
             Some(cc(control_change_14_bit(1, 7, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.25)),
+            source.test_feedback::<RawShortMessage>(fv(0.25)),
             Some(cc(control_change_14_bit(1, 7, 4096)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(cc(control_change_14_bit(1, 7, 8192)))
         );
         // In a center-oriented mapping this would yield 12288 instead of 12287
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.75)),
+            source.test_feedback::<RawShortMessage>(fv(0.75)),
             Some(cc(control_change_14_bit(1, 7, 12287)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(1.0)),
+            source.test_feedback::<RawShortMessage>(fv(1.0)),
             Some(cc(control_change_14_bit(1, 7, 16383)))
         );
     }
@@ -2955,7 +2959,7 @@ mod tests {
         );
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert!(source.format_control_value(abs(0.5)).is_err());
     }
 
@@ -2994,24 +2998,24 @@ mod tests {
         assert_eq!(source.control(&pn(nrpn_14_bit(7, 3000, 45))), None);
         assert_eq!(source.control(&pn(nrpn(7, 3000, 24))), None);
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.0)),
+            source.test_feedback::<RawShortMessage>(fv(0.0)),
             Some(pn(rpn(7, 3000, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.25)),
+            source.test_feedback::<RawShortMessage>(fv(0.25)),
             Some(pn(rpn(7, 3000, 32)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(pn(rpn(7, 3000, 64)))
         );
         // In a center-oriented mapping this would yield 96 instead of 95
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.75)),
+            source.test_feedback::<RawShortMessage>(fv(0.75)),
             Some(pn(rpn(7, 3000, 95)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(1.0)),
+            source.test_feedback::<RawShortMessage>(fv(1.0)),
             Some(pn(rpn(7, 3000, 127)))
         );
         assert_eq!(
@@ -3083,24 +3087,24 @@ mod tests {
         // When
         // Then
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.0)),
+            source.test_feedback::<RawShortMessage>(fv(0.0)),
             Some(pn(rpn_14_bit(7, 3000, 0)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.25)),
+            source.test_feedback::<RawShortMessage>(fv(0.25)),
             Some(pn(rpn_14_bit(7, 3000, 4096)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.5)),
+            source.test_feedback::<RawShortMessage>(fv(0.5)),
             Some(pn(rpn_14_bit(7, 3000, 8192)))
         );
         // In a center-oriented mapping this would yield 12288 instead of 12287
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(0.75)),
+            source.test_feedback::<RawShortMessage>(fv(0.75)),
             Some(pn(rpn_14_bit(7, 3000, 12287)))
         );
         assert_eq!(
-            source.feedback::<RawShortMessage>(fv(1.0)),
+            source.test_feedback::<RawShortMessage>(fv(1.0)),
             Some(pn(rpn_14_bit(7, 3000, 16383)))
         );
         assert_eq!(
@@ -3154,7 +3158,7 @@ mod tests {
             source.control(&tempo(120.0)).unwrap(),
             abs(0.12408759124087591)
         );
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert_eq!(
             source.format_control_value(abs(0.5)).expect("bad").as_str(),
             "480.50"
@@ -3213,7 +3217,7 @@ mod tests {
         assert_eq!(source.control(&pn(nrpn(1, 520, 24))), None);
         assert_eq!(source.control(&plain(pitch_bend_change(6, 8192,))), None);
         assert_eq!(source.control(&tempo(120.0)), None);
-        assert_eq!(source.feedback::<RawShortMessage>(fv(0.5)), None);
+        assert_eq!(source.test_feedback::<RawShortMessage>(fv(0.5)), None);
         assert!(source.format_control_value(abs(0.5)).is_err());
     }
 

@@ -9,7 +9,30 @@ use std::ops::RangeInclusive;
 
 pub type RawMidiEvents = Vec<RawMidiEvent>;
 
-/// Incoming value which might be used to control something
+/// Values produced when asking for feedback from MIDI sources.
+#[derive(Clone, PartialEq, Debug)]
+pub enum PreliminaryMidiSourceFeedbackValue<'a, M: ShortMessage> {
+    /// A concrete MIDI message.
+    ///
+    /// MIDI sources most often produce these.
+    Final(MidiSourceValue<'a, M>),
+    /// Request to set the color of one particular XTouch channel display.
+    ///
+    /// The XTouch doesn't provide a way to set the color for one particular channel, only one to
+    /// set the colors of all channels at once. That means we need to keep the current color of
+    /// each channel around as state, "integrate" these requests after collecting them from the
+    /// sources and then build the final sys-ex message.
+    XTouchMackieLcdColor(XTouchMackieLcdColorRequest),
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct XTouchMackieLcdColorRequest {
+    pub extender_index: u8,
+    pub channel: Option<u8>,
+    pub color_index: Option<u8>,
+}
+
+/// Incoming or outgoing value which might be used to control something or send feedback.
 #[derive(Clone, PartialEq, Debug)]
 pub enum MidiSourceValue<'a, M: ShortMessage> {
     // Feedback and control

@@ -59,10 +59,9 @@ impl XTouchMackieLcdState {
         &mut self,
         extender_index: u8,
         channel: u8,
-        color: Option<RgbColor>,
+        color_index: Option<u8>,
     ) -> bool {
         let extender_state = self.state_by_extender.entry(extender_index).or_default();
-        let color_index = color.map(get_x_touch_color_index_for_color);
         let previous_color_index = extender_state.color_index_by_channel[channel as usize];
         extender_state.color_index_by_channel[channel as usize] = color_index;
         color_index != previous_color_index
@@ -86,7 +85,7 @@ impl XTouchMackieLcdState {
     }
 }
 
-fn get_x_touch_color_index_for_color(color: RgbColor) -> u8 {
+pub fn get_x_touch_color_index_for_color(color: RgbColor) -> u8 {
     find_closest_color_in_palette(color, &COLOR_PALETTE)
 }
 
