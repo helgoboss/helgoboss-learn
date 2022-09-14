@@ -1933,7 +1933,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         inc = if factor.is_positive() {
             factor
         } else {
-            let nth = factor.get().abs() as u32;
+            let nth = factor.get().unsigned_abs();
             let (fire, new_counter_value) = self.its_time_to_fire(nth, inc.signum());
             self.state.increment_counter = new_counter_value;
             if !fire {
@@ -1955,7 +1955,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             // Initial fire
             return (true, direction_signum);
         }
-        let positive_increment_counter = self.state.increment_counter.abs() as u32;
+        let positive_increment_counter = self.state.increment_counter.unsigned_abs();
         if positive_increment_counter >= nth {
             // After having waited for a few increments, fire again.
             return (true, direction_signum);
@@ -1983,7 +1983,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         let discrete_value = if factor.is_positive() {
             factor.to_value()
         } else {
-            let nth = factor.get().abs() as u32;
+            let nth = factor.get().unsigned_abs();
             let (fire, new_counter_value) = self.its_time_to_fire(nth, 1);
             self.state.increment_counter = new_counter_value;
             if !fire {

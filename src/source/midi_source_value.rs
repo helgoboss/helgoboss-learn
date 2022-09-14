@@ -26,7 +26,7 @@ pub struct PreliminaryMidiSourceFeedbackValue<'a, M: ShortMessage> {
     pub x_touch_mackie_lcd_color_request: Option<XTouchMackieLcdColorRequest>,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct XTouchMackieLcdColorRequest {
     pub extender_index: u8,
     pub channel: Option<u8>,
@@ -53,7 +53,7 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
 
 /// For being able to reconstructing the source address for feedback purposes (in particular,
 /// source takeover).
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum RawFeedbackAddressInfo {
     Raw {
         variable_range: Option<RangeInclusive<usize>>,

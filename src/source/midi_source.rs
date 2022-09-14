@@ -1020,7 +1020,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         let events = scope
                             .destinations()
                             .iter()
-                            .map(move |dest| {
+                            .flat_map(move |dest| {
                                 let line_length = dest.line_length();
                                 let body = (0..line_length)
                                     .map(|_| ascii_chars.next().unwrap_or_default());
@@ -1031,7 +1031,6 @@ impl<S: MidiSourceScript> MidiSource<S> {
                                 );
                                 RawMidiEvent::try_from_iter(0, text_sysex).ok()
                             })
-                            .flatten()
                             .collect();
                         (events, None)
                     }
@@ -1899,8 +1898,13 @@ impl LcdPortions {
     pub fn iter(&self) -> impl Iterator<Item = &Range<u8>> + '_ {
         self.ranges.iter()
     }
+}
 
-    pub fn into_iter(self) -> impl Iterator<Item = Range<u8>> {
+impl IntoIterator for LcdPortions {
+    type Item = Range<u8>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
         self.ranges.into_iter()
     }
 }

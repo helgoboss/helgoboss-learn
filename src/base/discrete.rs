@@ -178,7 +178,7 @@ impl DiscreteIncrement {
         // 2 => 5
         // 7 => 10
         // 8 => 10
-        let positive_increment = self.0.abs() as u32;
+        let positive_increment = self.0.unsigned_abs();
         let min: i32 = interval.min_val().get();
         let max: i32 = interval.max_val().get();
         let count: u32 = if min < 0 && max > 0 {
@@ -195,7 +195,7 @@ impl DiscreteIncrement {
 
     /// Converts this discrete increment into a discrete value thereby "losing" its direction.
     pub fn to_value(self) -> DiscreteValue {
-        DiscreteValue::new(self.0.abs() as u32)
+        DiscreteValue::new(self.0.unsigned_abs())
     }
 
     /// Switches the direction of this increment (makes a positive one negative and vice versa).

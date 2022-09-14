@@ -42,7 +42,7 @@ impl AbstractTimestamp for Instant {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ControlEvent<P, T: AbstractTimestamp> {
     payload: P,
     timestamp: T,
@@ -498,7 +498,7 @@ impl AbsoluteValue {
         use AbsoluteValue::*;
         match (self, rhs) {
             (Discrete(f1), Discrete(f2)) => {
-                let distance = (f2.actual() as i32 - f1.actual() as i32).abs() as u32;
+                let distance = (f2.actual() as i32 - f1.actual() as i32).unsigned_abs();
                 Self::Discrete(Fraction::new_max(distance))
             }
             _ => {

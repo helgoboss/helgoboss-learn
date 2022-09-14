@@ -3,7 +3,7 @@ use core::fmt;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum FeedbackValue<'a> {
     Off,
     Numeric(NumericFeedbackValue),
@@ -12,7 +12,7 @@ pub enum FeedbackValue<'a> {
     Textual(TextualFeedbackValue<'a>),
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct NumericFeedbackValue {
     pub style: FeedbackStyle,
     pub value: AbsoluteValue,
@@ -24,7 +24,7 @@ impl NumericFeedbackValue {
     }
 }
 
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
 pub struct TextualFeedbackValue<'a> {
     pub style: FeedbackStyle,
     pub text: Cow<'a, str>,
@@ -36,7 +36,7 @@ impl<'a> TextualFeedbackValue<'a> {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
 pub struct FeedbackStyle {
     pub color: Option<RgbColor>,
     pub background_color: Option<RgbColor>,

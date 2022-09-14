@@ -53,13 +53,13 @@ pub fn parse_entries(input: &str) -> IResult<&str, Vec<RawEntry>> {
     parser(input)
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug)]
 pub enum RawEntry<'a> {
     SingleValue(&'a str),
     Range(RawFullRange<'a>),
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct RawFullRange<'a> {
     pub simple_range: RawSimpleRange<'a>,
     pub step_size: Option<&'a str>,
@@ -74,7 +74,7 @@ impl<'a> RawFullRange<'a> {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct RawSimpleRange<'a> {
     pub from: &'a str,
     pub to: &'a str,

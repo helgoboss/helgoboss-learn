@@ -30,7 +30,7 @@ pub struct OscSource {
     feedback_args: Vec<OscFeedbackProp>,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, EnumString, strum_macros::Display)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, strum_macros::Display)]
 #[cfg_attr(feature = "serde_with", derive(SerializeDisplay, DeserializeFromStr))]
 pub enum OscFeedbackProp {
     // Floats

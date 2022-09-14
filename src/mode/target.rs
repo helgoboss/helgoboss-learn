@@ -1,6 +1,6 @@
 use crate::{AbsoluteValue, UnitValue};
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum ControlType {
     /// Targets which don't have a step size, targets that have just on/off states and trigger
     /// targets.
