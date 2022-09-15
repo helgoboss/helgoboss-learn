@@ -768,15 +768,30 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     }
 
     /// This function should be called regularly if the features are needed that are driven by a
-    /// timer (fire on length min, turbo, etc.). Returns a target control value whenever it's time
-    /// to fire.
+    /// timer (fire on length min, turbo, transitions, etc.). Returns a target control value
+    /// whenever it's time to fire.
     pub fn poll<'a, C: Copy + TransformationInputProvider<T::AdditionalInput> + Into<TC>, TC>(
         &mut self,
         target: &impl Target<'a, Context = TC>,
         context: C,
         timestamp: S,
     ) -> Option<ModeControlResult<ControlValue>> {
-        // If we have a transformation which depends on the current timestamp, we poll this one.
+        // Let the press duration processor do its job. We do that even if we a transition because
+        // the press might restart the transition. We want single press and fire after timeout to
+        // still work even when using transitions. It has priority even.
+        if let Some(control_value) = self.state.press_duration_processor.poll() {
+            return self.control_absolute(
+                ControlEvent::new(control_value, timestamp),
+                target,
+                context,
+                false,
+                ModeControlOptions::default(),
+                // Polling is only for buttons. "Performance control" mode is only for range elements.
+                None,
+            );
+        };
+        // If we have a transition (a transformation which depends on the current timestamp), we
+        // poll this one as well.
         if let Some(transformation) = &self.settings.control_transformation {
             if transformation.wants_to_be_polled() {
                 let evt = self.state.previous_absolute_value_event?;
@@ -795,17 +810,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 return Some(ModeControlResult::hit_target(v));
             }
         }
-        // If not, we let the press duration processor do its job.
-        let control_value = self.state.press_duration_processor.poll()?;
-        self.control_absolute(
-            ControlEvent::new(control_value, timestamp),
-            target,
-            context,
-            false,
-            ModeControlOptions::default(),
-            // Polling is only for buttons. "Performance control" mode is only for range elements.
-            None,
-        )
+        None
     }
 
     /// This should be called when the containing mapping gets deactivated.
