@@ -102,6 +102,14 @@ impl<'a> FeedbackValue<'a> {
 
 impl<'a> Display for FeedbackValue<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(self.to_textual().text.as_ref())
+        let textual = self.to_textual();
+        f.write_str(textual.text.as_ref())?;
+        if let Some(c) = textual.style.color {
+            write!(f, " with color {}", c)?;
+        }
+        if let Some(c) = textual.style.background_color {
+            write!(f, " with background color {}", c)?;
+        }
+        Ok(())
     }
 }

@@ -363,6 +363,12 @@ pub enum PropValue {
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct RgbColor(u8, u8, u8);
 
+impl Display for RgbColor {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "rgb({}, {}, {})", self.0, self.1, self.2)
+    }
+}
+
 impl RgbColor {
     pub const BLACK: Self = Self::new(0x00, 0x00, 0x00);
     pub const WHITE: Self = Self::new(0xFF, 0xFF, 0xFF);
