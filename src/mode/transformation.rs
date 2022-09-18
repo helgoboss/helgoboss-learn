@@ -48,6 +48,7 @@ pub trait Transformation {
     }
 }
 
+#[derive(Default)]
 pub struct TransformationInput<T> {
     pub value: T,
     pub meta_data: TransformationInputMetaData,
@@ -59,7 +60,7 @@ impl<T> TransformationInput<T> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct TransformationInputMetaData {
     pub rel_time: Duration,
 }
