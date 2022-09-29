@@ -1119,6 +1119,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                     None,
                     target.current_value(context.into())?.to_unit_value(),
                     options,
+                    control_type
                 )
             }
             AbsoluteDiscrete { atomic_step_size, .. } => {
@@ -1387,6 +1388,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                     None,
                     current_target_value.to_unit_value(),
                     options,
+                    control_type
                 )
             }
             AbsoluteDiscrete { atomic_step_size, .. } => {
@@ -1800,6 +1802,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                         Some(target_step_size),
                         current_value()?.to_unit_value(),
                         options,
+                        control_type,
                     )
                 }
                 AbsoluteValue::Discrete(f) => {
@@ -1821,6 +1824,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 Some(target_step_size),
                 current_value()?.to_unit_value(),
                 options,
+                control_type,
             )
         }
     }
@@ -1835,6 +1839,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         grid_interval_size: Option<UnitValue>,
         current_target_value: UnitValue,
         options: ModeControlOptions,
+        control_type: ControlType,
     ) -> Option<ModeControlResult<ControlValue>> {
         let mut v = current_target_value;
         let mut target_value_interval = self.settings.target_value_interval;
@@ -1866,15 +1871,12 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         } else {
             v.add_clamping(increment, &target_value_interval, BASE_EPSILON)
         };
-        if v == current_target_value {
-            // Desired value is equal to current target value. No reason to hit the target.
-            return Some(ModeControlResult::LeaveTargetUntouched(
-                ControlValue::AbsoluteContinuous(v),
-            ));
-        }
-        Some(ModeControlResult::HitTarget {
-            value: ControlValue::AbsoluteContinuous(v),
-        })
+        let final_value = self.hit_if_changed(
+            AbsoluteValue::Continuous(v),
+            AbsoluteValue::Continuous(current_target_value),
+            control_type,
+        )?;
+        Some(final_value.map(ControlValue::from_absolute))
     }
 
     fn hit_target_absolutely_with_discrete_increment(
