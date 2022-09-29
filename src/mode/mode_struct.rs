@@ -6412,6 +6412,25 @@ mod tests {
             }
 
             #[test]
+            fn retriggerable_with_value_target() {
+                // Given
+                let mut mode: TestMode = Mode::new(ModeSettings {
+                    step_factor_interval: create_discrete_increment_interval(1, 1),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(1.0)),
+                    control_type: ControlType::AbsoluteContinuousRetriggerable,
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(rel_dis_evt(1), &target, ()).unwrap(),
+                    abs_con_val(1.0)
+                );
+            }
+
+            #[test]
             fn min_step_size_1() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
