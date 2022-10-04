@@ -114,4 +114,8 @@ impl<T: Copy> TransformationOutput<T> {
             TransformationOutput::Stop | TransformationOutput::None => None,
         }
     }
+
+    pub fn is_stop(&self) -> bool {
+        matches!(self, Self::Stop | Self::ControlAndStop(_))
+    }
 }
