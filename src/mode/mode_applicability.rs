@@ -1,3 +1,4 @@
+use crate::AbsoluteMode::PerformanceControl;
 use crate::{AbsoluteMode, FireMode, GroupInteraction, OutOfRangeBehavior};
 use derive_more::Display;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -34,6 +35,7 @@ impl DetailedSourceCharacter {
 pub struct ModeApplicabilityCheckInput {
     pub target_is_virtual: bool,
     pub target_supports_discrete_values: bool,
+    pub control_transformation_uses_time: bool,
     pub is_feedback: bool,
     pub make_absolute: bool,
     pub use_textual_feedback: bool,
@@ -342,6 +344,8 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 || input.absolute_mode == crate::AbsoluteMode::MakeRelative
             {
                 HasNoEffect
+            } else if input.control_transformation_uses_time {
+                MakesNoSenseUseDefault
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
@@ -707,6 +711,8 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
         SpecificAbsoluteMode(m) => {
             if input.is_feedback {
                 HasNoEffect
+            } else if input.control_transformation_uses_time && m == PerformanceControl {
+                MakesNoSenseUseDefault
             } else {
                 use crate::AbsoluteMode::*;
                 use DetailedSourceCharacter::*;
