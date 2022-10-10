@@ -811,7 +811,10 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                         context.additional_input(),
                     )
                     .ok()?;
-                let v = self.process_control_transformation_output(output)?;
+                let mut v = self.process_control_transformation_output(output)?;
+                let control_type = target.control_type(context.into());
+                v = self.apply_reverse(control_type, v);
+                v = self.apply_rounded_target_interval_or_target_sequence(control_type, v);
                 let v = ControlValue::from_absolute(v);
                 return Some(ModeControlResult::hit_target(v));
             }
@@ -1524,53 +1527,67 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         } else {
             // No performance control
             // 3. Apply reverse
-            if self.settings.reverse {
-                // We must normalize the target value value and use it in the inversion operation.
-                // As an alternative, we could BEFORE doing all that stuff homogenize the source and
-                // target intervals to have the same (minimum) size?
-                let normalized_max_discrete_target_value = control_type.discrete_max().map(|m| {
-                    self.settings
-                        .discrete_target_value_interval
-                        .normalize_to_min(m)
-                });
-                // If this is a discrete target (which reports a discrete maximum) and discrete
-                // processing is disabled, the reverse operation must use a "scaling reverse", not a
-                // "subtraction reverse". Therefore we must turn a discrete control value into a
-                // continuous value in this case before applying the reverse operation.
-                if normalized_max_discrete_target_value.is_some()
-                    && !self.settings.use_discrete_processing
-                {
-                    v = v.to_continuous_value();
-                }
-                v = v.inverse(normalized_max_discrete_target_value);
-            };
+            v = self.apply_reverse(control_type, v);
             // 4. Apply target interval and rounding OR target value sequence
-            if self.state.unpacked_target_value_sequence.is_empty() {
-                // We don't have a target value sequence. Apply target interval and rounding.
-                v = v.denormalize(
-                    &self.settings.target_value_interval,
-                    &self.settings.discrete_target_value_interval,
-                    self.settings.use_discrete_processing,
-                    control_type.discrete_max(),
-                );
-                if self.settings.round_target_value {
-                    v = v.round(control_type);
-                };
-            } else {
-                // We have a target value sequence. Apply it.
-                let max_index = self.state.unpacked_target_value_sequence.len() - 1;
-                let seq_index = (v.to_unit_value().get() * max_index as f64).round() as usize;
-                let unit_value = self
-                    .state
-                    .unpacked_target_value_sequence
-                    .get(seq_index)
-                    .copied()
-                    .unwrap_or_default();
-                v = AbsoluteValue::Continuous(unit_value)
-            }
+            v = self.apply_rounded_target_interval_or_target_sequence(control_type, v);
         }
         // Return
         Some(v)
+    }
+
+    fn apply_rounded_target_interval_or_target_sequence(
+        &self,
+        control_type: ControlType,
+        mut v: AbsoluteValue,
+    ) -> AbsoluteValue {
+        if self.state.unpacked_target_value_sequence.is_empty() {
+            // We don't have a target value sequence. Apply target interval and rounding.
+            v = v.denormalize(
+                &self.settings.target_value_interval,
+                &self.settings.discrete_target_value_interval,
+                self.settings.use_discrete_processing,
+                control_type.discrete_max(),
+            );
+            if self.settings.round_target_value {
+                v = v.round(control_type);
+            };
+        } else {
+            // We have a target value sequence. Apply it.
+            let max_index = self.state.unpacked_target_value_sequence.len() - 1;
+            let seq_index = (v.to_unit_value().get() * max_index as f64).round() as usize;
+            let unit_value = self
+                .state
+                .unpacked_target_value_sequence
+                .get(seq_index)
+                .copied()
+                .unwrap_or_default();
+            v = AbsoluteValue::Continuous(unit_value);
+        }
+        v
+    }
+
+    fn apply_reverse(&self, control_type: ControlType, mut v: AbsoluteValue) -> AbsoluteValue {
+        if !self.settings.reverse {
+            return v;
+        }
+        // We must normalize the target value value and use it in the inversion operation.
+        // As an alternative, we could BEFORE doing all that stuff homogenize the source and
+        // target intervals to have the same (minimum) size?
+        let normalized_max_discrete_target_value = control_type.discrete_max().map(|m| {
+            self.settings
+                .discrete_target_value_interval
+                .normalize_to_min(m)
+        });
+        // If this is a discrete target (which reports a discrete maximum) and discrete
+        // processing is disabled, the reverse operation must use a "scaling reverse", not a
+        // "subtraction reverse". Therefore we must turn a discrete control value into a
+        // continuous value in this case before applying the reverse operation.
+        if normalized_max_discrete_target_value.is_some() && !self.settings.use_discrete_processing
+        {
+            v = v.to_continuous_value();
+        }
+        v = v.inverse(normalized_max_discrete_target_value);
+        v
     }
 
     fn hitting_target_considering_max_jump(
