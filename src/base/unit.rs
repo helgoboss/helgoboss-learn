@@ -141,6 +141,14 @@ impl UnitValue {
         UnitValue(number)
     }
 
+    pub fn try_new(number: f64) -> Option<UnitValue> {
+        if Self::is_valid(number) {
+            Some(Self(number))
+        } else {
+            None
+        }
+    }
+
     pub fn new_clamped(number: f64) -> UnitValue {
         let actual_number = if number > 1.0 {
             1.0
