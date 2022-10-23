@@ -104,7 +104,7 @@ pub mod target_prop_keys {
     ///
     /// - Track: Volume → "-6.00 dB"
     /// - Track: Mute/unmute → "Mute"
-    /// - Project: Navigate within tracks → "Guitar"
+    /// - Project: Browse tracks → "Guitar"
     pub const TEXT_VALUE: &str = "text_value";
 
     /// Non-normalized representing the current target value as a *human-friendly number*
@@ -120,14 +120,14 @@ pub mod target_prop_keys {
     ///
     /// - Track: Volume → -6.00
     /// - Track: Mute/unmute → 1.0
-    /// - Project: Navigate within tracks → 5
+    /// - Project: Browse tracks → 5
     pub const NUMERIC_VALUE: &str = "numeric_value";
 
     /// Unit of the non-normalized number in human-friendly form.
     ///
     /// - Track: Volume → "dB"
     /// - Track: Mute/unmute → ""
-    /// - Project: Navigate within tracks → ""
+    /// - Project: Browse tracks → ""
     pub const NUMERIC_VALUE_UNIT: &str = "numeric_value.unit";
 
     /// Normalized value in the unit interval. You can think of it as a percentage.
@@ -140,6 +140,6 @@ pub mod target_prop_keys {
     ///
     /// - Track: Volume → 0.5
     /// - Track: Mute/unmute → 0.0
-    /// - Project: Navigate within tracks → 0.7
+    /// - Project: Browse tracks → 0.7
     pub const NORMALIZED_VALUE: &str = "normalized_value";
 }
