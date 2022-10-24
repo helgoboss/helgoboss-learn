@@ -986,12 +986,12 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             (control_value, MinIsMaxBehavior::PreferOne)
         } else {
             // Control value is outside source value interval
-            // TODO-high Check if the lack of `use_discrete_processing` is a problem here (that
+            // TODO-high-discrete Check if the lack of `use_discrete_processing` is a problem here (that
             //  we use the discrete interval although it's not currently set). It shouldn't
             //  cause an issue because it only has an effect if source min/max are non-default
             //  and then this will be normalized to 0.0 or 1.0 anyway in the next step.
             //  However, we should make this more clear.
-            // TODO-high Having all the dead code for the discrete processing logic is not good.
+            // TODO-high-discrete Having all the dead code for the discrete processing logic is not good.
             //  That code needs to grow with the rest. Idea: Unlock discrete processing at first
             //  with only a few very simple operators. Hide the rest.
             //  Unlock more complicated ones later if necessary.
