@@ -1622,134 +1622,138 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         } else {
             pepped_up_control_value.calc_distance_from(current_target_value.to_continuous_value())
         };
-        if distance.is_greater_than(
-            self.settings.jump_interval.max_val(),
-            self.settings.discrete_jump_interval.max_val(),
-        ) {
-            // Distance is too large
-            use TakeoverMode::*;
-            return match self.settings.takeover_mode {
-                Pickup => {
-                    // Scaling not desired. Do nothing.
+        let in_sync = false;
+        let distance_is_too_large = || {
+            distance.is_greater_than(
+                self.settings.jump_interval.max_val(),
+                self.settings.discrete_jump_interval.max_val(),
+            )
+        };
+        if in_sync || !distance_is_too_large() {
+            // No parameter jump expected.
+            // Check if distance to small.
+            if distance.is_lower_than(
+                self.settings.jump_interval.min_val(),
+                self.settings.discrete_jump_interval.min_val(),
+            ) {
+                return None;
+            }
+            // Distance is not too small
+            return self.hit_if_changed(
+                pepped_up_control_value,
+                current_target_value,
+                control_type,
+            );
+        }
+        // A parameter jump is expected. Deal with it according to takeover mode.
+        match self.settings.takeover_mode {
+            TakeoverMode::Pickup => {
+                // Scaling not desired. Do nothing.
+                None
+            }
+            TakeoverMode::Parallel => {
+                // TODO-high-discrete Implement advanced takeover modes for discrete values, too
+                if let Some(prev) = prev_source_normalized_control_event {
+                    let relative_increment =
+                        source_normalized_control_event.payload().to_unit_value()
+                            - prev.payload().to_unit_value();
+                    if relative_increment == 0.0 {
+                        None
+                    } else {
+                        let relative_increment = UnitIncrement::new_clamped(relative_increment);
+                        let restrained_increment =
+                            relative_increment.clamp_to_interval(&self.settings.jump_interval)?;
+                        let final_target_value = current_target_value.to_unit_value().add_clamping(
+                            restrained_increment,
+                            &self.settings.target_value_interval,
+                            BASE_EPSILON,
+                        );
+                        self.hit_if_changed(
+                            AbsoluteValue::Continuous(final_target_value),
+                            current_target_value,
+                            control_type,
+                        )
+                    }
+                } else {
+                    // We can't know the direction if we don't have a previous value.
+                    // Wait for next incoming value.
                     None
                 }
-                Parallel => {
-                    // TODO-high-discrete Implement advanced takeover modes for discrete values, too
-                    if let Some(prev) = prev_source_normalized_control_event {
-                        let relative_increment =
-                            source_normalized_control_event.payload().to_unit_value()
-                                - prev.payload().to_unit_value();
-                        if relative_increment == 0.0 {
+            }
+            TakeoverMode::LongTimeNoSee => {
+                let approach_distance = distance.denormalize(
+                    &self.settings.jump_interval,
+                    &self.settings.discrete_jump_interval,
+                    self.settings.use_discrete_processing,
+                    control_type.discrete_max(),
+                );
+                let approach_increment =
+                    approach_distance.to_unit_value().to_increment(negative_if(
+                        pepped_up_control_value.to_unit_value()
+                            < current_target_value.to_unit_value(),
+                    ))?;
+                let final_target_value = current_target_value.to_unit_value().add_clamping(
+                    approach_increment,
+                    &self.settings.target_value_interval,
+                    BASE_EPSILON,
+                );
+                self.hit_if_changed(
+                    AbsoluteValue::Continuous(final_target_value),
+                    current_target_value,
+                    control_type,
+                )
+            }
+            TakeoverMode::CatchUp => {
+                if let Some(prev) = prev_source_normalized_control_event {
+                    let prev = prev.payload().to_unit_value();
+                    let relative_increment =
+                        source_normalized_control_event.payload().to_unit_value() - prev;
+                    if relative_increment == 0.0 {
+                        None
+                    } else {
+                        let goes_up = relative_increment.is_sign_positive();
+                        // We already normalized the prev/current control values on the source
+                        // interval, so we can use 0.0..=1.0 at this point.
+                        let source_distance_from_bound = if goes_up {
+                            1.0 - prev.get()
+                        } else {
+                            prev.get()
+                        };
+                        let current_target_value = current_target_value.to_unit_value();
+                        let target_distance_from_bound = if goes_up {
+                            self.settings.target_value_interval.max_val() - current_target_value
+                        } else {
+                            current_target_value - self.settings.target_value_interval.min_val()
+                        }
+                        .max(0.0);
+                        if source_distance_from_bound == 0.0 || target_distance_from_bound == 0.0 {
                             None
                         } else {
-                            let relative_increment = UnitIncrement::new_clamped(relative_increment);
-                            let restrained_increment = relative_increment
-                                .clamp_to_interval(&self.settings.jump_interval)?;
-                            let final_target_value =
-                                current_target_value.to_unit_value().add_clamping(
-                                    restrained_increment,
-                                    &self.settings.target_value_interval,
-                                    BASE_EPSILON,
-                                );
+                            // => -55484347409216.99
+                            let scaled_increment = relative_increment * target_distance_from_bound
+                                / source_distance_from_bound;
+                            let scaled_increment = UnitIncrement::new_clamped(scaled_increment);
+                            let restrained_increment =
+                                scaled_increment.clamp_to_interval(&self.settings.jump_interval)?;
+                            let final_target_value = current_target_value.add_clamping(
+                                restrained_increment,
+                                &self.settings.target_value_interval,
+                                BASE_EPSILON,
+                            );
                             self.hit_if_changed(
                                 AbsoluteValue::Continuous(final_target_value),
-                                current_target_value,
+                                AbsoluteValue::Continuous(current_target_value),
                                 control_type,
                             )
                         }
-                    } else {
-                        // We can't know the direction if we don't have a previous value.
-                        // Wait for next incoming value.
-                        None
                     }
+                } else {
+                    // We can't know the direction if we don't have a previous value.
+                    // Wait for next incoming value.
+                    None
                 }
-                LongTimeNoSee => {
-                    let approach_distance = distance.denormalize(
-                        &self.settings.jump_interval,
-                        &self.settings.discrete_jump_interval,
-                        self.settings.use_discrete_processing,
-                        control_type.discrete_max(),
-                    );
-                    let approach_increment =
-                        approach_distance.to_unit_value().to_increment(negative_if(
-                            pepped_up_control_value.to_unit_value()
-                                < current_target_value.to_unit_value(),
-                        ))?;
-                    let final_target_value = current_target_value.to_unit_value().add_clamping(
-                        approach_increment,
-                        &self.settings.target_value_interval,
-                        BASE_EPSILON,
-                    );
-                    self.hit_if_changed(
-                        AbsoluteValue::Continuous(final_target_value),
-                        current_target_value,
-                        control_type,
-                    )
-                }
-                CatchUp => {
-                    if let Some(prev) = prev_source_normalized_control_event {
-                        let prev = prev.payload().to_unit_value();
-                        let relative_increment =
-                            source_normalized_control_event.payload().to_unit_value() - prev;
-                        if relative_increment == 0.0 {
-                            None
-                        } else {
-                            let goes_up = relative_increment.is_sign_positive();
-                            // We already normalized the prev/current control values on the source
-                            // interval, so we can use 0.0..=1.0 at this point.
-                            let source_distance_from_bound = if goes_up {
-                                1.0 - prev.get()
-                            } else {
-                                prev.get()
-                            };
-                            let current_target_value = current_target_value.to_unit_value();
-                            let target_distance_from_bound = if goes_up {
-                                self.settings.target_value_interval.max_val() - current_target_value
-                            } else {
-                                current_target_value - self.settings.target_value_interval.min_val()
-                            }
-                            .max(0.0);
-                            if source_distance_from_bound == 0.0
-                                || target_distance_from_bound == 0.0
-                            {
-                                None
-                            } else {
-                                // => -55484347409216.99
-                                let scaled_increment = relative_increment
-                                    * target_distance_from_bound
-                                    / source_distance_from_bound;
-                                let scaled_increment = UnitIncrement::new_clamped(scaled_increment);
-                                let restrained_increment = scaled_increment
-                                    .clamp_to_interval(&self.settings.jump_interval)?;
-                                let final_target_value = current_target_value.add_clamping(
-                                    restrained_increment,
-                                    &self.settings.target_value_interval,
-                                    BASE_EPSILON,
-                                );
-                                self.hit_if_changed(
-                                    AbsoluteValue::Continuous(final_target_value),
-                                    AbsoluteValue::Continuous(current_target_value),
-                                    control_type,
-                                )
-                            }
-                        }
-                    } else {
-                        // We can't know the direction if we don't have a previous value.
-                        // Wait for next incoming value.
-                        None
-                    }
-                }
-            };
+            }
         }
-        // Distance is not too large
-        if distance.is_lower_than(
-            self.settings.jump_interval.min_val(),
-            self.settings.discrete_jump_interval.min_val(),
-        ) {
-            return None;
-        }
-        // Distance is also not too small
-        self.hit_if_changed(pepped_up_control_value, current_target_value, control_type)
     }
 
     fn hit_if_changed(
