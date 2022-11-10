@@ -1,9 +1,3 @@
-use crate::AbsoluteMode::{
-    IncrementalButton, MakeRelative, Normal, PerformanceControl, ToggleButton,
-};
-use crate::ControlType::{
-    AbsoluteContinuous, AbsoluteContinuousRetriggerable, Relative, VirtualButton, VirtualMulti,
-};
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
@@ -1763,8 +1757,6 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             return result;
         }
         // Check for controller jumps
-        let control_has_jumped =
-            is_new_move && (current_control_value - prev_control_value).abs() > jump_max.get();
         let result = match self.settings.takeover_mode {
             TakeoverMode::Pickup => {
                 // Scaling not desired. Do nothing.
@@ -1772,33 +1764,26 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             }
             TakeoverMode::Parallel => {
                 // TODO-high-discrete Implement advanced takeover modes for discrete values, too
-                if control_has_jumped {
-                    // If an absolute control is pointed to a different target, physically moved, then pointed
-                    // back to this target, it may be in a completely different place. Ignore the first message
-                    // and wait until we can establish direction again.
+                // We look at source-normalized values, not pepped up values. Because we are
+                // interested in the relative movement of the fader/knob, not the more
+                // processed values that eventually will hit the target.
+                let relative_increment = current_control_value - prev_control_value;
+                if relative_increment == 0.0 {
                     None
                 } else {
-                    // We look at source-normalized values, not pepped up values. Because we are
-                    // interested in the relative movement of the fader/knob, not the more
-                    // processed values that eventually will hit the target.
-                    let relative_increment = current_control_value - prev_control_value;
-                    if relative_increment == 0.0 {
-                        None
-                    } else {
-                        let relative_increment = UnitIncrement::new_clamped(relative_increment);
-                        let restrained_increment =
-                            relative_increment.clamp_to_interval(&self.settings.jump_interval)?;
-                        let final_target_value = current_target_value.to_unit_value().add_clamping(
-                            restrained_increment,
-                            &self.settings.target_value_interval,
-                            BASE_EPSILON,
-                        );
-                        self.hit_if_changed(
-                            AbsoluteValue::Continuous(final_target_value),
-                            current_target_value,
-                            control_type,
-                        )
-                    }
+                    let relative_increment = UnitIncrement::new_clamped(relative_increment);
+                    let restrained_increment =
+                        relative_increment.clamp_to_interval(&self.settings.jump_interval)?;
+                    let final_target_value = current_target_value.to_unit_value().add_clamping(
+                        restrained_increment,
+                        &self.settings.target_value_interval,
+                        BASE_EPSILON,
+                    );
+                    self.hit_if_changed(
+                        AbsoluteValue::Continuous(final_target_value),
+                        current_target_value,
+                        control_type,
+                    )
                 }
             }
             TakeoverMode::LongTimeNoSee => {
@@ -1825,48 +1810,44 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                 )
             }
             TakeoverMode::CatchUp => {
-                if control_has_jumped {
+                let relative_increment = current_control_value - prev_control_value;
+                if relative_increment == 0.0 {
                     None
                 } else {
-                    let relative_increment = current_control_value - prev_control_value;
-                    if relative_increment == 0.0 {
+                    let goes_up = relative_increment.is_sign_positive();
+                    // We already normalized the prev/current control values on the source
+                    // interval, so we can use 0.0..=1.0 at this point.
+                    let source_distance_from_bound = if goes_up {
+                        1.0 - prev_control_value.get()
+                    } else {
+                        prev_control_value.get()
+                    };
+                    let current_target_value = current_target_value.to_unit_value();
+                    let target_distance_from_bound = if goes_up {
+                        self.settings.target_value_interval.max_val() - current_target_value
+                    } else {
+                        current_target_value - self.settings.target_value_interval.min_val()
+                    }
+                    .max(0.0);
+                    if source_distance_from_bound == 0.0 || target_distance_from_bound == 0.0 {
                         None
                     } else {
-                        let goes_up = relative_increment.is_sign_positive();
-                        // We already normalized the prev/current control values on the source
-                        // interval, so we can use 0.0..=1.0 at this point.
-                        let source_distance_from_bound = if goes_up {
-                            1.0 - prev_control_value.get()
-                        } else {
-                            prev_control_value.get()
-                        };
-                        let current_target_value = current_target_value.to_unit_value();
-                        let target_distance_from_bound = if goes_up {
-                            self.settings.target_value_interval.max_val() - current_target_value
-                        } else {
-                            current_target_value - self.settings.target_value_interval.min_val()
-                        }
-                        .max(0.0);
-                        if source_distance_from_bound == 0.0 || target_distance_from_bound == 0.0 {
-                            None
-                        } else {
-                            // => -55484347409216.99
-                            let scaled_increment = relative_increment * target_distance_from_bound
-                                / source_distance_from_bound;
-                            let scaled_increment = UnitIncrement::new_clamped(scaled_increment);
-                            let restrained_increment =
-                                scaled_increment.clamp_to_interval(&self.settings.jump_interval)?;
-                            let final_target_value = current_target_value.add_clamping(
-                                restrained_increment,
-                                &self.settings.target_value_interval,
-                                BASE_EPSILON,
-                            );
-                            self.hit_if_changed(
-                                AbsoluteValue::Continuous(final_target_value),
-                                AbsoluteValue::Continuous(current_target_value),
-                                control_type,
-                            )
-                        }
+                        // => -55484347409216.99
+                        let scaled_increment = relative_increment * target_distance_from_bound
+                            / source_distance_from_bound;
+                        let scaled_increment = UnitIncrement::new_clamped(scaled_increment);
+                        let restrained_increment =
+                            scaled_increment.clamp_to_interval(&self.settings.jump_interval)?;
+                        let final_target_value = current_target_value.add_clamping(
+                            restrained_increment,
+                            &self.settings.target_value_interval,
+                            BASE_EPSILON,
+                        );
+                        self.hit_if_changed(
+                            AbsoluteValue::Continuous(final_target_value),
+                            AbsoluteValue::Continuous(current_target_value),
+                            control_type,
+                        )
                     }
                 }
             }
