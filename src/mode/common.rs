@@ -211,6 +211,12 @@ impl Default for FireMode {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum TakeoverMode {
+    #[cfg_attr(feature = "serde", serde(rename = "normal"))]
+    #[display(fmt = "Normal (jumps possible)")]
+    Normal,
+    #[cfg_attr(feature = "serde", serde(rename = "pickup-tolerant"))]
+    #[display(fmt = "Pick up (tolerant)")]
+    PickupTolerant,
     #[cfg_attr(feature = "serde", serde(rename = "pickup"))]
     #[display(fmt = "Pick up")]
     Pickup,
@@ -227,10 +233,7 @@ pub enum TakeoverMode {
 
 impl TakeoverMode {
     pub fn prevents_jumps(&self) -> bool {
-        matches!(
-            self,
-            Self::Pickup | Self::LongTimeNoSee | Self::Parallel | Self::CatchUp
-        )
+        *self != Self::Normal
     }
 }
 

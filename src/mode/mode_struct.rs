@@ -876,6 +876,10 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     }
 
     pub fn wants_to_know_final_target_value(&self) -> bool {
+        self.has_jump_restrictions()
+    }
+
+    fn has_jump_restrictions(&self) -> bool {
         self.settings.takeover_mode.prevents_jumps() && !self.settings.jump_interval.is_full()
     }
 
@@ -1662,7 +1666,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             Some(v) => v,
         };
         // If there are no jump restrictions whatsoever, we can skip the logic below!
-        if self.settings.jump_interval.is_full() {
+        if !self.has_jump_restrictions() {
             return self.hit_if_changed(prepped_control_value, current_target_value, control_type);
         }
         // When we are here, we know we have jump restrictions.
@@ -1684,9 +1688,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         // At this point, the previous source-normalized event should also always be available!
         let prev_control_event = prev_control_event?;
         // In tolerant pickup mode, always accept if the target was last invoked by us
-        // TODO-high CONTINUE Add tolerant pickup mode.
-        if false {
-            // if self.settings.takeover_mode == TakeoverMode::Pickup {
+        if self.settings.takeover_mode == TakeoverMode::PickupTolerant {
             let last_target_value = self
                 .state
                 .final_target_value_from_previous_control
@@ -1758,7 +1760,8 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         }
         // Check for controller jumps
         let result = match self.settings.takeover_mode {
-            TakeoverMode::Pickup => {
+            TakeoverMode::Normal => unreachable!(),
+            TakeoverMode::Pickup | TakeoverMode::PickupTolerant => {
                 // Scaling not desired. Do nothing.
                 None
             }
