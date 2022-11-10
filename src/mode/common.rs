@@ -225,6 +225,15 @@ pub enum TakeoverMode {
     CatchUp,
 }
 
+impl TakeoverMode {
+    pub fn prevents_jumps(&self) -> bool {
+        matches!(
+            self,
+            Self::Pickup | Self::LongTimeNoSee | Self::Parallel | Self::CatchUp
+        )
+    }
+}
+
 impl Default for TakeoverMode {
     fn default() -> Self {
         Self::Pickup

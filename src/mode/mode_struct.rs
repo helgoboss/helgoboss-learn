@@ -1,3 +1,9 @@
+use crate::AbsoluteMode::{
+    IncrementalButton, MakeRelative, Normal, PerformanceControl, ToggleButton,
+};
+use crate::ControlType::{
+    AbsoluteContinuous, AbsoluteContinuousRetriggerable, Relative, VirtualButton, VirtualMulti,
+};
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
@@ -241,15 +247,56 @@ struct ModeState<S: AbstractTimestamp> {
     /// when the last change was a positive increment and negative when the last change was a
     /// negative increment.
     increment_counter: i32,
-    /// Used in absolute control for "make relative" and certain takeover modes to calculate the
+    /// This contains the previous control event at a very early stage of processing
+    /// (right after normalization in terms of source min/max).
+    ///
+    /// Used in absolute control for "make relative" and advanced takeover modes to calculate the
     /// next value based on the previous one.
-    previous_absolute_value_event: Option<ControlEvent<AbsoluteValue, S>>,
-    // For absolute control
+    previous_source_normalized_control_event: Option<ControlEvent<AbsoluteValue, S>>,
+    previous_jump_prevention_state: Option<JumpPreventionState<S>>,
+    /// For absolute control
     unpacked_target_value_sequence: Vec<UnitValue>,
-    // For relative control
+    /// For relative control
     unpacked_target_value_set: BTreeSet<UnitValue>,
-    // For textual feedback
+    /// For textual feedback
     feedback_props_in_use: HashSet<String>,
+    /// Supposed to contain the final target value after the last control with this mode.
+    ///
+    /// The mode knows the value that it produced for the consumer, so the consumer sends it
+    /// to the target. But the target might end up with another value actually.  
+    final_target_value_from_previous_control: Option<AbsoluteValue>,
+}
+
+#[derive(Copy, Clone, Debug)]
+struct JumpPreventionState<S: AbstractTimestamp> {
+    /// This contains the previous control event at a later stage of processing
+    /// (right after pepping up, e.g. applying control transformation and reverse).
+    ///
+    /// Used in absolute control for ensuring smooth takeover modes.
+    pepped_up_control_event: ControlEvent<AbsoluteValue, S>,
+    /// Used in absolute control for takeover modes to "hold on" during continuous movements.
+    takeover_in_sync: bool,
+    /// Resulting target value.
+    ///
+    /// Once `Some`, it should remain `Some`! Only `None` in the beginning.
+    last_emitted_target_value: Option<AbsoluteValue>,
+}
+
+impl<S: AbstractTimestamp> JumpPreventionState<S> {
+    pub fn new(
+        pepped_up_control_event: ControlEvent<AbsoluteValue, S>,
+        takeover_in_sync: bool,
+        result: Option<ModeControlResult<AbsoluteValue>>,
+        prev_jump_state: &Self,
+    ) -> Self {
+        Self {
+            pepped_up_control_event,
+            takeover_in_sync,
+            last_emitted_target_value: result
+                .map(|r| r.value())
+                .or(prev_jump_state.last_emitted_target_value),
+        }
+    }
 }
 
 impl<S: AbstractTimestamp> Default for ModeState<S> {
@@ -259,10 +306,12 @@ impl<S: AbstractTimestamp> Default for ModeState<S> {
             current_absolute_value: Default::default(),
             discrete_current_absolute_value: 0,
             increment_counter: 0,
-            previous_absolute_value_event: None,
+            previous_source_normalized_control_event: None,
+            previous_jump_prevention_state: None,
             unpacked_target_value_sequence: vec![],
             unpacked_target_value_set: Default::default(),
             feedback_props_in_use: Default::default(),
+            final_target_value_from_previous_control: None,
         }
     }
 }
@@ -740,7 +789,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             TransformationOutput::Stop => {
                 // Resetting the previous event will stop polling until the next mapping
                 // invocation.
-                self.state.previous_absolute_value_event = None;
+                self.state.previous_source_normalized_control_event = None;
                 None
             }
             TransformationOutput::None => None,
@@ -748,7 +797,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             TransformationOutput::ControlAndStop(v) => {
                 // Resetting the previous event will stop polling until the next mapping
                 // invocation.
-                self.state.previous_absolute_value_event = None;
+                self.state.previous_source_normalized_control_event = None;
                 Some(v)
             }
         }
@@ -757,7 +806,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     fn transformation_input_meta_data(&self) -> TransformationInputMetaData {
         let rel_time = self
             .state
-            .previous_absolute_value_event
+            .previous_source_normalized_control_event
             .map(|evt| S::now() - evt.timestamp())
             .unwrap_or_default();
         TransformationInputMetaData { rel_time }
@@ -800,7 +849,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         // poll this one as well.
         if let Some(transformation) = &self.settings.control_transformation {
             if transformation.wants_to_be_polled() {
-                let evt = self.state.previous_absolute_value_event?;
+                let evt = self.state.previous_source_normalized_control_event?;
                 let output = evt
                     .payload()
                     .transform(
@@ -829,7 +878,15 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     pub fn on_deactivate(&mut self) {
         // Clear the previous absolute value so we don't get jumps when using "Make relative"
         // and using this mapping next time it's active again.
-        self.state.previous_absolute_value_event = None;
+        self.state.previous_source_normalized_control_event = None;
+    }
+
+    pub fn wants_to_know_final_target_value(&self) -> bool {
+        self.settings.takeover_mode.prevents_jumps() && !self.settings.jump_interval.is_full()
+    }
+
+    pub fn report_final_target_value_of_last_control(&mut self, value: AbsoluteValue) {
+        self.state.final_target_value_from_previous_control = Some(value);
     }
 
     /// Gives the mode the opportunity to update internal state when it's being connected to a
@@ -849,6 +906,8 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             .unpack(default_step_size);
         self.state.unpacked_target_value_set = unpacked_sequence.iter().copied().collect();
         self.state.unpacked_target_value_sequence = unpacked_sequence;
+        self.state.previous_jump_prevention_state = None;
+        self.state.final_target_value_from_previous_control = None;
     }
 
     fn control_relative<
@@ -1014,7 +1073,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         // Memorize as previous value for next control cycle.
         let prev_absolute_control_event = self
             .state
-            .previous_absolute_value_event
+            .previous_source_normalized_control_event
             .replace(control_event.with_payload(source_normalized_control_value));
         let res = AbsolutePreProcessingResult {
             control_event: control_event.with_payload(source_normalized_control_value),
@@ -1598,8 +1657,9 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         source_normalized_control_event: ControlEvent<AbsoluteValue, S>,
         prev_source_normalized_control_event: Option<ControlEvent<AbsoluteValue, S>>,
     ) -> Option<ModeControlResult<AbsoluteValue>> {
+        // If there's no target value available ... just deliver! Virtual targets take this
+        // shortcut.
         let current_target_value = match current_target_value {
-            // No target value available ... just deliver! Virtual targets take this shortcut.
             None => {
                 let final_absolute_value =
                     self.get_final_absolute_value(pepped_up_control_value, control_type);
@@ -1607,46 +1667,90 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             }
             Some(v) => v,
         };
+        // If there are no jump restrictions whatsoever, we can skip the logic below!
         if (!self.settings.use_discrete_processing || pepped_up_control_value.is_continuous())
             && self.settings.jump_interval.is_full()
         {
-            // No jump restrictions whatsoever
             return self.hit_if_changed(
                 pepped_up_control_value,
                 current_target_value,
                 control_type,
             );
+        }
+        // When we are here, we know we have jump restrictions.
+        let pepped_up_control_event =
+            source_normalized_control_event.with_payload(pepped_up_control_value);
+        let prev_jump_state = match self.state.previous_jump_prevention_state {
+            None => {
+                // First control of this target. We don't have a meaningful previous control value
+                // to relate to. Memorize the current but don't do anything.
+                let fresh_state = JumpPreventionState {
+                    pepped_up_control_event,
+                    takeover_in_sync: false,
+                    last_emitted_target_value: None,
+                };
+                self.state.previous_jump_prevention_state = Some(fresh_state);
+                return None;
+            }
+            Some(s) => s,
+        };
+        // Always accept if target was last invoked by us
+        let last_target_value = self
+            .state
+            .final_target_value_from_previous_control
+            .or_else(|| prev_jump_state.last_emitted_target_value);
+        let target_was_last_invoked_by_us = match last_target_value {
+            None => false,
+            Some(v) => current_target_value == v,
+        };
+        if target_was_last_invoked_by_us {
+            let result =
+                self.hit_if_changed(pepped_up_control_value, current_target_value, control_type);
+            self.state.previous_jump_prevention_state = Some(JumpPreventionState::new(
+                pepped_up_control_event,
+                prev_jump_state.takeover_in_sync,
+                result,
+                &prev_jump_state,
+            ));
+            return result;
         }
         let distance = if self.settings.use_discrete_processing {
             pepped_up_control_value.calc_distance_from(current_target_value)
         } else {
             pepped_up_control_value.calc_distance_from(current_target_value.to_continuous_value())
         };
-        let in_sync = false;
-        let distance_is_too_large = || {
-            distance.is_greater_than(
-                self.settings.jump_interval.max_val(),
-                self.settings.discrete_jump_interval.max_val(),
-            )
-        };
-        if in_sync || !distance_is_too_large() {
-            // No parameter jump expected.
-            // Check if distance to small.
+        let elapsed = pepped_up_control_event.timestamp()
+            - prev_jump_state.pepped_up_control_event.timestamp();
+        let time_expired = elapsed > CONTROL_MOVE_TIMEOUT;
+        let takeover_in_sync = self.takeover_is_in_sync(
+            prev_jump_state.pepped_up_control_event.payload(),
+            pepped_up_control_value,
+            current_target_value,
+            prev_jump_state.takeover_in_sync,
+            time_expired,
+        );
+        if takeover_in_sync {
+            // No parameter jump to be expected.
+            // Check if distance too small.
             if distance.is_lower_than(
                 self.settings.jump_interval.min_val(),
                 self.settings.discrete_jump_interval.min_val(),
             ) {
                 return None;
             }
-            // Distance is not too small
-            return self.hit_if_changed(
-                pepped_up_control_value,
-                current_target_value,
-                control_type,
-            );
+            // Distance is not too small. Hit target!
+            let result =
+                self.hit_if_changed(pepped_up_control_value, current_target_value, control_type);
+            self.state.previous_jump_prevention_state = Some(JumpPreventionState::new(
+                pepped_up_control_event,
+                takeover_in_sync,
+                result,
+                &prev_jump_state,
+            ));
+            return result;
         }
         // A parameter jump is expected. Deal with it according to takeover mode.
-        match self.settings.takeover_mode {
+        let result = match self.settings.takeover_mode {
             TakeoverMode::Pickup => {
                 // Scaling not desired. Do nothing.
                 None
@@ -1753,7 +1857,55 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
                     None
                 }
             }
+        };
+        self.state.previous_jump_prevention_state = Some(JumpPreventionState::new(
+            pepped_up_control_event,
+            takeover_in_sync,
+            result,
+            &prev_jump_state,
+        ));
+        result
+    }
+
+    /// This is largely based on the PR by mdmayfield: https://github.com/helgoboss/helgoboss-learn/pull/2/files
+    /// He in turn took inspiration from `controllers/softtakeover.cpp` in the Mixxx DJ project.
+    fn takeover_is_in_sync(
+        &self,
+        prev_value: AbsoluteValue,
+        current_value: AbsoluteValue,
+        target_value: AbsoluteValue,
+        was_in_sync_before: bool,
+        time_expired: bool,
+    ) -> bool {
+        // If jump max is 100%, we are in sync by definition.
+        let jump_max = self.settings.jump_interval.max_val();
+        if jump_max.is_one() {
+            return true;
         }
+        // Prepare
+        let prev_value = prev_value.to_unit_value();
+        let current_value = current_value.to_unit_value();
+        let target_value = target_value.to_unit_value();
+        // Check if this invocation still belongs to the same "movement" as the previous invocation.
+        // We consider it as being the same movement if the time difference is very small.
+        // If we were in sync before and we are still in the same move, stay in sync.
+        let still_same_move = !time_expired;
+        if was_in_sync_before && still_same_move {
+            return true;
+        }
+        // Check whether we crossed the target value or are still on the same side
+        let current_distance_to_target = current_value - target_value;
+        let prev_distance_to_target = prev_value - target_value;
+        let crossed_target =
+            current_distance_to_target.signum() != prev_distance_to_target.signum();
+        // Check if we are still approaching the target or moving away from it
+        let still_approaching_target =
+            !crossed_target && (current_distance_to_target.abs() < prev_distance_to_target.abs());
+        if still_approaching_target {
+            // Avoid awkward "backwards" jump when approaching the target.
+            return false;
+        }
+        current_distance_to_target.abs() <= jump_max.get() || (crossed_target && still_same_move)
     }
 
     fn hit_if_changed(
@@ -2029,6 +2181,19 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
     }
 }
 
+/// Time in ms between CC messages to assume they are part of the one motion.
+/// I tried with 100ms and it caused issues when rapidly turning a fader all the way down to the
+/// bottom (causing quite large steps greater than a typical allowed jump of 3% but okay because
+/// it's a continuous movement) and immediately cranking it up again. That direction change took a
+/// bit more than 100ms though, so it considered it to be a new movement. But the step of the
+/// first upward movement was also very large, so the target value got stuck at 0%.
+// TODO-high If one waits a bit at the bottom and then cranks up, this can still happen. Simply
+//  because some faders (in this case the X-Touch One fader) seems to skip values when moved
+//  rapidly - which is a good thing, I think. Another way to solve this could be to actually
+//  accept all changes, even they create big jumps. But to put things out of sync whenever we know
+//  the target value was possibly changed by something else (e.g. NOT by our mapping). Interesting!
+const CONTROL_MOVE_TIMEOUT: Duration = Duration::from_millis(200);
+
 struct AbsolutePreProcessingResult<S: AbstractTimestamp> {
     control_event: ControlEvent<AbsoluteValue, S>,
     prev_control_event: Option<ControlEvent<AbsoluteValue, S>>,
@@ -2050,7 +2215,7 @@ pub fn default_step_count_interval() -> Interval<DiscreteIncrement> {
 
 /// If something like this is returned from the mode, it already means that the source value
 /// was not filtered out (e.g. because of button filter).
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ModeControlResult<T> {
     /// Target should be hit with the given value.
     HitTarget { value: T },
@@ -2059,7 +2224,7 @@ pub enum ModeControlResult<T> {
     LeaveTargetUntouched(T),
 }
 
-impl<T> ModeControlResult<T> {
+impl<T: Copy> ModeControlResult<T> {
     pub fn hit_target(value: T) -> Self {
         Self::HitTarget { value }
     }
@@ -2069,6 +2234,13 @@ impl<T> ModeControlResult<T> {
         match self {
             HitTarget { value } => HitTarget { value: f(value) },
             LeaveTargetUntouched(v) => LeaveTargetUntouched(f(v)),
+        }
+    }
+
+    pub fn value(&self) -> T {
+        match self {
+            ModeControlResult::HitTarget { value } => *value,
+            ModeControlResult::LeaveTargetUntouched(value) => *value,
         }
     }
 }
@@ -10402,6 +10574,7 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
     fn perf_test(
         mode: &mut TestMode,
         target: &TestTarget,
