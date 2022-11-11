@@ -1692,7 +1692,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             let last_target_value = self
                 .state
                 .final_target_value_from_previous_control
-                .or_else(|| prev_jump_state.last_emitted_target_value);
+                .or(prev_jump_state.last_emitted_target_value);
             let target_was_last_invoked_by_us = match last_target_value {
                 None => false,
                 Some(v) => current_target_value == v,
@@ -1760,7 +1760,7 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         }
         // Check for controller jumps
         let result = match self.settings.takeover_mode {
-            TakeoverMode::Normal => unreachable!(),
+            TakeoverMode::Off => unreachable!(),
             TakeoverMode::Pickup | TakeoverMode::PickupTolerant => {
                 // Scaling not desired. Do nothing.
                 None
