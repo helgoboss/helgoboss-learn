@@ -239,7 +239,7 @@ impl TakeoverMode {
 
 impl Default for TakeoverMode {
     fn default() -> Self {
-        Self::Pickup
+        Self::Normal
     }
 }
 
