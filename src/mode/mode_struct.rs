@@ -2960,6 +2960,7 @@ mod tests {
             fn jump_interval_max_pickup() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
+                    takeover_mode: TakeoverMode::Pickup,
                     jump_interval: create_unit_value_interval(0.0, 0.2),
                     ..Default::default()
                 });
@@ -2991,6 +2992,7 @@ mod tests {
             fn jump_interval_max_pickup_with_target_interval() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
+                    takeover_mode: TakeoverMode::Pickup,
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.0, 0.5),
                     ..Default::default()
@@ -3019,6 +3021,7 @@ mod tests {
             fn jump_interval_max_pickup_with_target_interval_out_of_range() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
+                    takeover_mode: TakeoverMode::Pickup,
                     jump_interval: create_unit_value_interval(0.0, 0.1),
                     target_value_interval: create_unit_value_interval(0.0, 0.5),
                     ..Default::default()
@@ -3047,6 +3050,7 @@ mod tests {
             fn jump_interval_min() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
+                    takeover_mode: TakeoverMode::Pickup,
                     jump_interval: create_unit_value_interval(0.1, 1.0),
                     ..Default::default()
                 });
