@@ -149,6 +149,11 @@ pub enum MidiSource<S: MidiSourceScript> {
     ProgramChangeNumber {
         channel: Option<Channel>,
     },
+    // ShortMessageType::ProgramChange
+    SpecificProgramChange {
+        channel: Option<Channel>,
+        program_number: Option<U7>,
+    },
     // ShortMessageType::ChannelPressure
     ChannelPressureAmount {
         channel: Option<Channel>,
@@ -460,6 +465,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             | PolyphonicKeyPressureAmount { channel, .. }
             | ControlChangeValue { channel, .. }
             | ProgramChangeNumber { channel }
+            | SpecificProgramChange { channel, .. }
             | ChannelPressureAmount { channel }
             | PitchBendChangeValue { channel }
             | ControlChange14BitValue { channel, .. }
@@ -475,7 +481,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
         match self {
             NoteVelocity { .. } => SourceCharacter::MomentaryButton,
             // TODO-low Introduce new character "Trigger"
-            ClockTransport { .. } => SourceCharacter::MomentaryButton,
+            ClockTransport { .. } | SpecificProgramChange { .. } => {
+                SourceCharacter::MomentaryButton
+            }
             Raw {
                 custom_character, ..
             }
@@ -506,7 +514,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
                 DetailedSourceCharacter::MomentaryOnOffButton,
             ],
-            ClockTransport { .. } => vec![DetailedSourceCharacter::PressOnlyButton],
+            ClockTransport { .. } | SpecificProgramChange { .. } => {
+                vec![DetailedSourceCharacter::PressOnlyButton]
+            }
             // User can choose.
             Raw {
                 custom_character, ..
@@ -651,6 +661,21 @@ impl<S: MidiSourceScript> MidiSource<S> {
                         channel: ch,
                         program_number,
                     } if matches(ch, *channel) => Some(abs(normalize_7_bit(program_number))),
+                    _ => None,
+                },
+                _ => None,
+            },
+            S::SpecificProgramChange {
+                channel,
+                program_number,
+            } => match value {
+                Plain(msg) => match msg.to_structured() {
+                    ProgramChange {
+                        channel: ch,
+                        program_number: pn,
+                    } if matches(ch, *channel) && matches(pn, *program_number) => {
+                        Some(abs(Fraction::new_max(1)))
+                    }
                     _ => None,
                 },
                 _ => None,
@@ -1198,7 +1223,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 }
             },
             Raw { pattern, .. } => v.to_discrete(pattern.max_discrete_value()) as _,
-            ClockTempo | ClockTransport { .. } | Script { .. } | Display { .. } => {
+            ClockTempo
+            | ClockTransport { .. }
+            | SpecificProgramChange { .. }
+            | Script { .. }
+            | Display { .. } => {
                 return Err("not supported");
             }
         };
@@ -1241,7 +1270,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 }
                 Fraction::new(value as _, pattern.max_discrete_value() as _)
             }
-            ClockTempo | ClockTransport { .. } | Script { .. } | Display { .. } => {
+            ClockTempo
+            | ClockTransport { .. }
+            | SpecificProgramChange { .. }
+            | Script { .. }
+            | Display { .. } => {
                 return Err("not supported");
             }
         };
@@ -1279,7 +1312,11 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     Some(127)
                 }
             }
-            ClockTempo | ClockTransport { .. } | Script { .. } | Display { .. } => None,
+            ClockTempo
+            | ClockTransport { .. }
+            | SpecificProgramChange { .. }
+            | Script { .. }
+            | Display { .. } => None,
             Raw {
                 custom_character,
                 pattern,
