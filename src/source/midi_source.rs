@@ -1581,7 +1581,7 @@ fn launchpad_pro_scrolling_text_sysex(
         0x10,
         0x14,
         color_code,
-        if looped { 0x01 } else { 0x00 },
+        u8::from(looped),
     ];
     start.into_iter().chain(body).chain(end())
 }
