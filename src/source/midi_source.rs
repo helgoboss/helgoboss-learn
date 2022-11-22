@@ -431,8 +431,12 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 controller_number: Some(controller_number),
                 custom_character: custom_character_hint.unwrap_or_default(),
             },
-            ProgramChange { channel, .. } => MidiSource::ProgramChangeNumber {
+            ProgramChange {
+                channel,
+                program_number,
+            } => MidiSource::SpecificProgramChange {
                 channel: Some(channel),
+                program_number: Some(program_number),
             },
             ChannelPressure { channel, .. } => MidiSource::ChannelPressureAmount {
                 channel: Some(channel),
