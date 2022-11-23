@@ -13,8 +13,8 @@ pub enum DetailedSourceCharacter {
     #[display(fmt = "Momentary on/off button")]
     MomentaryOnOffButton,
     /// Doesn't send message on release ("Toggle-only button").
-    #[display(fmt = "Press-only button (doesn't fire on release)")]
-    PressOnlyButton,
+    #[display(fmt = "Trigger (doesn't fire on release)")]
+    Trigger,
     #[display(fmt = "Range control element (e.g. knob or fader)")]
     RangeControl,
     #[display(fmt = "Relative control element (e.g. encoder)")]
@@ -26,7 +26,7 @@ impl DetailedSourceCharacter {
         use DetailedSourceCharacter::*;
         matches!(
             self,
-            MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton
+            MomentaryOnOffButton | MomentaryVelocitySensitiveButton | Trigger
         )
     }
 }
@@ -171,17 +171,22 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             if input.is_feedback {
                 if input.use_textual_feedback {
                     HasNoEffect
-                } else if input.source_is_button() {
-                    MakesSense("Changes off/on LED colors.")
                 } else {
-                    MakesSense("Changes lowest/highest position of motorized fader or LED ring.")
+                    use DetailedSourceCharacter::*;
+                    match input.source_character {
+                        MomentaryVelocitySensitiveButton | MomentaryOnOffButton => {
+                            MakesSense("Changes off/on LED colors.")
+                        }
+                        Trigger => MakesNoSenseUseDefault,
+                        RangeControl | Relative => MakesSense(
+                            "Changes lowest/highest position of motorized fader or LED ring.",
+                        ),
+                    }
                 }
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    PressOnlyButton => Awkward(
-                        "This must be at 100%, otherwise button presses will be ignored and this is entirely pointless.",
-                    ),
+                    Trigger => MakesNoSenseUseDefault,
                     MomentaryOnOffButton => {
                         if input.absolute_mode == crate::AbsoluteMode::Normal {
                             Awkward(
@@ -220,7 +225,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
+                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | Trigger => {
                         match input.absolute_mode {
                             crate::AbsoluteMode::Normal => MakesSense(
                                 "If enabled, switches the target off when pressed and on when released.",
@@ -257,7 +262,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    PressOnlyButton => HasNoEffect,
+                    Trigger => HasNoEffect,
                     MomentaryOnOffButton | MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::Normal {
                             MakesSense("-")
@@ -290,7 +295,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 match input.source_character {
                     // Doesn't have an effect if source max is at 100% (which is a basic requirement
                     // and mentioned in the source min/max description).
-                    PressOnlyButton => HasNoEffect,
+                    Trigger => HasNoEffect,
                     MomentaryOnOffButton => {
                         if input.absolute_mode == crate::AbsoluteMode::Normal {
                             match b {
@@ -349,7 +354,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | PressOnlyButton => MakesNoSenseUseDefault,
+                    MomentaryOnOffButton | Trigger => MakesNoSenseUseDefault,
                     MomentaryVelocitySensitiveButton | RangeControl | Relative => {
                         if (input.source_character == MomentaryVelocitySensitiveButton
                             && input.absolute_mode != crate::AbsoluteMode::Normal)
@@ -374,7 +379,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | PressOnlyButton => {
+                    MomentaryOnOffButton | Trigger => {
                         if input.absolute_mode == crate::AbsoluteMode::Normal {
                             MakesSense(
                                 "Defines via EEL how to transform incoming button presses or releases. Interesting use case for buttons: Stepping through a list of predefined target values. You can access the current target value as normalized value y (where 0.0 <= y <= 1.0). Example: a = 0.0; b = 0.2; c = 0.6; y = y == a ? b : (y == b ? c : a);",
@@ -456,7 +461,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | PressOnlyButton | MomentaryVelocitySensitiveButton => {
+                    MomentaryOnOffButton | Trigger | MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
                             if input.source_character == MomentaryVelocitySensitiveButton {
                                 if input.mode_parameter == StepSizeMin {
@@ -506,7 +511,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | PressOnlyButton => MakesNoSenseUseDefault,
+                    MomentaryOnOffButton | Trigger => MakesNoSenseUseDefault,
                     MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
                             if input.mode_parameter == StepSizeMax {
@@ -557,7 +562,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
+                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | Trigger => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
                             MakesSense(
                                 "If enabled, jumps from max target value to min target value (or opposite if reverse enabled). Was called \"Rotate\" before.",
@@ -602,7 +607,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             use crate::FireMode::*;
             match m {
                 Normal => {
-                    if input.source_character == DetailedSourceCharacter::PressOnlyButton {
+                    if input.source_character == DetailedSourceCharacter::Trigger {
                         MakesNoSenseParentTakesCareOfDefault
                     } else {
                         MakesSense(
@@ -611,7 +616,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     }
                 }
                 AfterTimeout => {
-                    if input.source_character == DetailedSourceCharacter::PressOnlyButton {
+                    if input.source_character == DetailedSourceCharacter::Trigger {
                         MakesSense("Fires after the specified timeout instead of immediately.")
                     } else {
                         MakesSense(
@@ -620,7 +625,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     }
                 }
                 AfterTimeoutKeepFiring => {
-                    if input.source_character == DetailedSourceCharacter::PressOnlyButton {
+                    if input.source_character == DetailedSourceCharacter::Trigger {
                         // What sense does it make if we can't turn the turbo off again ...
                         MakesNoSenseParentTakesCareOfDefault
                     } else {
@@ -648,7 +653,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             "Defines whether to process button presses only, releases only or both.",
                         )
                     }
-                    RangeControl | PressOnlyButton => MakesNoSenseUseDefault,
+                    RangeControl | Trigger => MakesNoSenseUseDefault,
                     _ => HasNoEffect,
                 }
             }
@@ -681,7 +686,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
             } else {
                 use DetailedSourceCharacter::*;
                 let makes_sense = match input.source_character {
-                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | PressOnlyButton => {
+                    MomentaryOnOffButton | MomentaryVelocitySensitiveButton | Trigger => {
                         input.absolute_mode == crate::AbsoluteMode::Normal
                     }
                     RangeControl => input.absolute_mode != crate::AbsoluteMode::MakeRelative,
@@ -717,7 +722,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 use crate::AbsoluteMode::*;
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | PressOnlyButton | MomentaryVelocitySensitiveButton => {
+                    MomentaryOnOffButton | Trigger | MomentaryVelocitySensitiveButton => {
                         match m {
                             Normal => {
                                 if input.source_character == MomentaryVelocitySensitiveButton {
@@ -814,7 +819,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     InverseTargetValue => {
                         use DetailedSourceCharacter::*;
                         match input.source_character {
-                            MomentaryOnOffButton | PressOnlyButton  => {
+                            MomentaryOnOffButton | Trigger => {
                                 MakesSense("Other non-virtual mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. Great for making something exclusive within a group!")
                             }
                             RangeControl | Relative | MomentaryVelocitySensitiveButton => {

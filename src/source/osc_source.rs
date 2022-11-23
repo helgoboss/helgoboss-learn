@@ -1,4 +1,4 @@
-use crate::DetailedSourceCharacter::PressOnlyButton;
+use crate::DetailedSourceCharacter::Trigger;
 use std::cmp;
 
 use crate::{
@@ -429,16 +429,13 @@ impl OscSource {
                         DetailedSourceCharacter::RangeControl,
                         DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
                         DetailedSourceCharacter::MomentaryOnOffButton,
-                        DetailedSourceCharacter::PressOnlyButton,
+                        DetailedSourceCharacter::Trigger,
                     ],
-                    _ => vec![
-                        DetailedSourceCharacter::MomentaryOnOffButton,
-                        PressOnlyButton,
-                    ],
+                    _ => vec![DetailedSourceCharacter::MomentaryOnOffButton, Trigger],
                 }
             }
         } else {
-            vec![DetailedSourceCharacter::PressOnlyButton]
+            vec![DetailedSourceCharacter::Trigger]
         }
     }
 

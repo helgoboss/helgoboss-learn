@@ -82,7 +82,7 @@ impl SourceCharacter {
                 DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
             ],
             Encoder1 | Encoder2 | Encoder3 => vec![DetailedSourceCharacter::Relative],
-            ToggleButton => vec![DetailedSourceCharacter::PressOnlyButton],
+            ToggleButton => vec![DetailedSourceCharacter::Trigger],
         }
     }
 }
@@ -519,7 +519,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 DetailedSourceCharacter::MomentaryOnOffButton,
             ],
             ClockTransport { .. } | SpecificProgramChange { .. } => {
-                vec![DetailedSourceCharacter::PressOnlyButton]
+                vec![DetailedSourceCharacter::Trigger]
             }
             // User can choose.
             Raw {
@@ -548,7 +548,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             ProgramChangeNumber { .. } | ChannelPressureAmount { .. } => vec![
                 DetailedSourceCharacter::RangeControl,
                 DetailedSourceCharacter::MomentaryOnOffButton,
-                DetailedSourceCharacter::PressOnlyButton,
+                DetailedSourceCharacter::Trigger,
             ],
             // Usually a range control but could also be a velocity-sensitive button.
             PolyphonicKeyPressureAmount { .. } | PitchBendChangeValue { .. } => {
@@ -556,7 +556,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     DetailedSourceCharacter::RangeControl,
                     DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
                     DetailedSourceCharacter::MomentaryOnOffButton,
-                    DetailedSourceCharacter::PressOnlyButton,
+                    DetailedSourceCharacter::Trigger,
                 ]
             }
             // We exposed this as range-only ("key range") before but this actually also works as
@@ -564,7 +564,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             NoteKeyNumber { .. } => {
                 vec![
                     DetailedSourceCharacter::RangeControl,
-                    DetailedSourceCharacter::PressOnlyButton,
+                    DetailedSourceCharacter::Trigger,
                 ]
             }
             // Special targets for which we can safely say it's a range.
@@ -575,7 +575,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
                     DetailedSourceCharacter::RangeControl,
                     DetailedSourceCharacter::MomentaryVelocitySensitiveButton,
                     DetailedSourceCharacter::MomentaryOnOffButton,
-                    DetailedSourceCharacter::PressOnlyButton,
+                    DetailedSourceCharacter::Trigger,
                 ]
             }
             // Feedback-only but characters also matter for feedback.
@@ -897,6 +897,17 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 *ch,
                 denormalize_7_bit(feedback_value.to_numeric()?.value),
             ))),
+            SpecificProgramChange {
+                channel: Some(ch),
+                program_number,
+            } => {
+                let program_number = (*program_number)?;
+                if feedback_value.to_numeric()?.value.is_on() {
+                    Some(V::Plain(M::program_change(*ch, program_number)))
+                } else {
+                    None
+                }
+            }
             ChannelPressureAmount { channel: Some(ch) } => Some(V::Plain(M::channel_pressure(
                 *ch,
                 denormalize_7_bit(feedback_value.to_numeric()?.value),
