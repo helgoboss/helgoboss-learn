@@ -276,6 +276,9 @@ pub enum GroupInteraction {
     #[cfg_attr(feature = "serde", serde(rename = "inverse-target-value-on-only"))]
     #[display(fmt = "Inverse target value (on only)")]
     InverseTargetValueOnOnly,
+    #[cfg_attr(feature = "serde", serde(rename = "inverse-target-value-off-only"))]
+    #[display(fmt = "Inverse target value (off only)")]
+    InverseTargetValueOffOnly,
 }
 
 impl Default for GroupInteraction {
@@ -294,7 +297,10 @@ impl GroupInteraction {
         use GroupInteraction::*;
         matches!(
             self,
-            InverseControl | InverseTargetValue | InverseTargetValueOnOnly
+            InverseControl
+                | InverseTargetValue
+                | InverseTargetValueOnOnly
+                | InverseTargetValueOffOnly
         )
     }
 }
