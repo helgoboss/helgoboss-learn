@@ -74,7 +74,7 @@ impl<T: Copy> TransformationInput<T> {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum TransformationOutput<T> {
     /// This stops repeated invocation of the formula until the mapping is triggered again.
     ///
