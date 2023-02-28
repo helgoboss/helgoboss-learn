@@ -1,6 +1,6 @@
 pub fn format_percentage_without_unit(value: f64) -> String {
     let percentage = value * 100.0;
-    format!("{:.4}", percentage)
+    format!("{percentage:.4}")
 }
 
 pub fn parse_percentage_without_unit(text: &str) -> Result<f64, &'static str> {

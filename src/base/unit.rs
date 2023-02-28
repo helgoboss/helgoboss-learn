@@ -133,11 +133,7 @@ impl UnitValue {
 
     /// Creates the unit value. Panics if the given number is not within the positive unit interval.
     pub fn new(number: f64) -> UnitValue {
-        assert!(
-            Self::is_valid(number),
-            "{} is not a valid unit value",
-            number
-        );
+        assert!(Self::is_valid(number), "{number} is not a valid unit value",);
         UnitValue(number)
     }
 
@@ -169,11 +165,7 @@ impl UnitValue {
     ///
     /// You need to make sure that the given number is a valid unit value.
     pub unsafe fn new_unchecked(number: f64) -> UnitValue {
-        debug_assert!(
-            Self::is_valid(number),
-            "{} is not a valid unit value",
-            number
-        );
+        debug_assert!(Self::is_valid(number), "{number} is not a valid unit value",);
         UnitValue(number)
     }
 
@@ -509,8 +501,7 @@ impl UnitIncrement {
     pub fn new(number: f64) -> UnitIncrement {
         assert!(
             Self::is_valid(number),
-            "{} is not a valid unit increment",
-            number
+            "{number} is not a valid unit increment",
         );
         UnitIncrement(number)
     }
@@ -542,8 +533,7 @@ impl UnitIncrement {
     pub unsafe fn new_unchecked(number: f64) -> UnitIncrement {
         debug_assert!(
             Self::is_valid(number),
-            "{} is not a valid unit increment",
-            number
+            "{number} is not a valid unit increment",
         );
         UnitIncrement(number)
     }

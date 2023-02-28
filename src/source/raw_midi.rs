@@ -287,7 +287,7 @@ impl Display for RawMidiPatternEntry {
         use RawMidiPatternEntry::*;
         match self {
             FixedByte(byte) => write!(f, "{:02X}", *byte),
-            PotentiallyVariableByte(pattern) => write!(f, "[{}]", pattern),
+            PotentiallyVariableByte(pattern) => write!(f, "[{pattern}]"),
         }
     }
 }

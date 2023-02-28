@@ -6,7 +6,7 @@ use crate::{
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
 use std::fmt;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Debug, Display, Formatter, Write};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 #[cfg_attr(feature = "serde_with", derive(SerializeDisplay, DeserializeFromStr))]
@@ -253,7 +253,7 @@ pub struct UnitValueIo;
 
 impl ValueFormatter for UnitValueIo {
     fn format_value(&self, value: UnitValue, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", value)
+        write!(f, "{value}")
     }
 
     fn format_step(&self, value: UnitValue, f: &mut Formatter) -> fmt::Result {

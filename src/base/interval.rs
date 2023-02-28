@@ -16,12 +16,7 @@ impl<T: PartialOrd + Copy> Interval<T> {
     where
         T: Debug,
     {
-        assert!(
-            min <= max,
-            "min = {:?} is greater than max = {:?}",
-            min,
-            max
-        );
+        assert!(min <= max, "min = {min:?} is greater than max = {max:?}",);
         Interval { min, max }
     }
 
@@ -30,7 +25,7 @@ impl<T: PartialOrd + Copy> Interval<T> {
         T: Debug,
     {
         if min > max {
-            return Err(format!("min = {:?} is greater than max = {:?}", min, max));
+            return Err(format!("min = {min:?} is greater than max = {max:?}"));
         }
         Ok(Interval { min, max })
     }

@@ -1569,7 +1569,7 @@ fn sl_keyboard_display_sysex(
         (3, 1) => [0x5E, 0x00, 0x0A],
         (4, 0) => [0x3C, 0x00, 0x0B],
         (4, 1) => [0x69, 0x00, 0x0A],
-        x => panic!("unsupported combination of section and line: {:?}", x),
+        x => panic!("unsupported combination of section and line: {x:?}"),
     };
     let expanded_body = body.flat_map(|ch| [ch, 0x00]);
     let end = [0x00, 0x00, 0xF7];

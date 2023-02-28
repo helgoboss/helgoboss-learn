@@ -61,7 +61,7 @@ pub enum ModeParameter {
     Reverse,
     #[display(fmt = "Out-of-range behavior")]
     OutOfRangeBehavior,
-    #[display(fmt = "Out-of-range behavior \"{}\"", _0)]
+    #[display(fmt = "Out-of-range behavior \"{_0}\"")]
     SpecificOutOfRangeBehavior(OutOfRangeBehavior),
     #[display(fmt = "Jump min/max")]
     JumpMinMax,
@@ -91,7 +91,7 @@ pub enum ModeParameter {
     Rotate,
     #[display(fmt = "Fire mode")]
     FireMode,
-    #[display(fmt = "Fire mode \"{}\"", _0)]
+    #[display(fmt = "Fire mode \"{_0}\"")]
     SpecificFireMode(FireMode),
     #[display(fmt = "Button filter")]
     ButtonFilter,
@@ -103,11 +103,11 @@ pub enum ModeParameter {
     RoundTargetValue,
     #[display(fmt = "Absolute mode")]
     AbsoluteMode,
-    #[display(fmt = "Absolute mode \"{}\"", _0)]
+    #[display(fmt = "Absolute mode \"{_0}\"")]
     SpecificAbsoluteMode(AbsoluteMode),
     #[display(fmt = "Group interaction")]
     GroupInteraction,
-    #[display(fmt = "Group interaction \"{}\"", _0)]
+    #[display(fmt = "Group interaction \"{_0}\"")]
     SpecificGroupInteraction(GroupInteraction),
 }
 

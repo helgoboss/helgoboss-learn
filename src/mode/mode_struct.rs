@@ -64,8 +64,8 @@ pub enum FeedbackValueTable {
 }
 
 impl FeedbackValueTable {
-    pub fn transform_value<'a, 'b, 'c>(
-        &'b self,
+    pub fn transform_value<'a, 'c>(
+        &self,
         value: Cow<'a, FeedbackValue<'c>>,
     ) -> Option<Cow<'a, FeedbackValue<'c>>> {
         match self {
@@ -456,7 +456,7 @@ impl PropValue {
             Numeric(v) => v.into_textual().into(),
             Index(i) => i.to_string().into(),
             Text(text) => text,
-            Color(color) => format!("{:?}", color).into(),
+            Color(color) => format!("{color:?}").into(),
         }
     }
 }
@@ -465,7 +465,7 @@ impl NumericValue {
     pub fn into_textual(self) -> String {
         use NumericValue::*;
         match self {
-            Decimal(v) => format!("{:.2}", v),
+            Decimal(v) => format!("{v:.2}"),
             Discrete(v) => v.to_string(),
         }
     }
@@ -659,8 +659,8 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
 
     /// Takes a target value, interprets and transforms it conforming to mode rules and
     /// maybe returns an appropriate source value that should be sent to the source.
-    pub fn feedback_with_options_detail<'a, 'b, 'c>(
-        &'b self,
+    pub fn feedback_with_options_detail<'a, 'c>(
+        &self,
         target_value: Cow<'a, FeedbackValue<'c>>,
         options: ModeFeedbackOptions,
         additional_transformation_input: T::AdditionalInput,
@@ -2234,10 +2234,10 @@ impl<T: Display> Display for ModeControlResult<T> {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
             ModeControlResult::HitTarget { value } => {
-                write!(f, "Hit target with value {}", value)
+                write!(f, "Hit target with value {value}")
             }
             ModeControlResult::LeaveTargetUntouched(v) => {
-                write!(f, "Leave target untouched with value {}", v)
+                write!(f, "Leave target untouched with value {v}")
             }
         }
     }
