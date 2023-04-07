@@ -418,7 +418,13 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                 } else {
                     MakesSense("Defines the relevant target value range.")
                 }
-            } else if input.target_value_sequence_is_set {
+            } else if input.target_value_sequence_is_set
+                && check_mode_applicability(ModeApplicabilityCheckInput {
+                    mode_parameter: TargetValueSequence,
+                    ..input
+                })
+                .is_relevant()
+            {
                 HasNoEffect
             } else {
                 MakesSense("Makes sure the target value will end up in the specified range.")
