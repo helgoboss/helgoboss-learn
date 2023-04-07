@@ -41,7 +41,6 @@ pub struct ModeApplicabilityCheckInput {
     pub use_textual_feedback: bool,
     pub source_character: DetailedSourceCharacter,
     pub absolute_mode: AbsoluteMode,
-    pub mode_parameter: ModeParameter,
     pub target_value_sequence_is_set: bool,
 }
 
@@ -156,10 +155,13 @@ const ROTATE_FOR_RANGE_DESC: &str = "If enabled, jumps from max target value to 
 
 const NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC: &str = "Sets target to the value that corresponds to the knob/fader position. Proportionally maps from source to target range.";
 
-pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeApplicability {
+pub fn check_mode_applicability(
+    mode_parameter: ModeParameter,
+    input: ModeApplicabilityCheckInput,
+) -> ModeApplicability {
     use ModeApplicability::*;
     use ModeParameter::*;
-    match input.mode_parameter {
+    match mode_parameter {
         UseDiscreteProcessing => {
             if input.target_supports_discrete_values {
                 MakesSense("By default, ReaLearn uses continuous processing logic. That means it considers all values as percentages and scales (stretches/squeezes) them as needed. If your target is discrete, you can enable discrete processing, which will prevent scaling and deliver your control value to the target as discrete integer (and vice versa in the feedback direction).")
@@ -361,7 +363,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                             || (input.source_character == Relative && !input.make_absolute)
                         {
                             HasNoEffect
-                        } else if input.mode_parameter == JumpMinMax {
+                        } else if mode_parameter == JumpMinMax {
                             MakesSense(
                                 "Sets the min/max allowed target parameter jump (set max very low for takeover).",
                             )
@@ -419,11 +421,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     MakesSense("Defines the relevant target value range.")
                 }
             } else if input.target_value_sequence_is_set
-                && check_mode_applicability(ModeApplicabilityCheckInput {
-                    mode_parameter: TargetValueSequence,
-                    ..input
-                })
-                .is_relevant()
+                && check_mode_applicability(TargetValueSequence, input).is_relevant()
             {
                 HasNoEffect
             } else {
@@ -470,7 +468,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     MomentaryOnOffButton | Trigger | MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
                             if input.source_character == MomentaryVelocitySensitiveButton {
-                                if input.mode_parameter == StepSizeMin {
+                                if mode_parameter == StepSizeMin {
                                     MakesSense(
                                         "Sets the target value change amount when button pressed with lowest velocity.",
                                     )
@@ -479,7 +477,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                                         "Sets the number of target increments when button pressed with lowest velocity.",
                                     )
                                 }
-                            } else if input.mode_parameter == StepSizeMin {
+                            } else if mode_parameter == StepSizeMin {
                                 MakesSense(
                                     "Sets the target value change amount when button pressed.",
                                 )
@@ -495,14 +493,14 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     RangeControl => HasNoEffect,
                     Relative => {
                         if input.make_absolute {
-                            if input.mode_parameter == StepSizeMin {
+                            if mode_parameter == StepSizeMin {
                                 MakesSense(
                                     "Sets the amount added/subtracted to calculate the absolute value from an incoming non-accelerated increment/decrement.",
                                 )
                             } else {
                                 HasNoEffect
                             }
-                        } else if input.mode_parameter == StepSizeMin {
+                        } else if mode_parameter == StepSizeMin {
                             MakesSense(STEP_SIZE_MIN_FOR_RANGE_DESC)
                         } else {
                             MakesSense(SPEED_MIN_FOR_RANGE_DESC)
@@ -520,7 +518,7 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     MomentaryOnOffButton | Trigger => MakesNoSenseUseDefault,
                     MomentaryVelocitySensitiveButton => {
                         if input.absolute_mode == crate::AbsoluteMode::IncrementalButton {
-                            if input.mode_parameter == StepSizeMax {
+                            if mode_parameter == StepSizeMax {
                                 MakesSense(
                                     "Sets the target value change amount when button pressed with highest velocity.",
                                 )
@@ -536,14 +534,14 @@ pub fn check_mode_applicability(input: ModeApplicabilityCheckInput) -> ModeAppli
                     RangeControl => HasNoEffect,
                     Relative => {
                         if input.make_absolute {
-                            if input.mode_parameter == StepSizeMax {
+                            if mode_parameter == StepSizeMax {
                                 MakesSense(
                                     "Sets the amount added/subtracted to calculate the absolute value from an incoming most accelerated increment/decrement.",
                                 )
                             } else {
                                 HasNoEffect
                             }
-                        } else if input.mode_parameter == StepSizeMin {
+                        } else if mode_parameter == StepSizeMin {
                             MakesSense(STEP_SIZE_MAX_FOR_RANGE_DESC)
                         } else {
                             MakesSense(SPEED_MAX_FOR_RANGE_DESC)
