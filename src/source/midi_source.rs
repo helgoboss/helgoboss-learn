@@ -34,6 +34,7 @@ use std::ops::Range;
     PartialEq,
     Eq,
     Hash,
+    Default,
     IntoEnumIterator,
     TryFromPrimitive,
     IntoPrimitive,
@@ -42,6 +43,7 @@ use std::ops::Range;
 #[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum SourceCharacter {
+    #[default]
     #[display(fmt = "Range element (knob, fader, etc.)")]
     RangeElement = 0,
     #[display(fmt = "Button (momentary)")]
@@ -57,12 +59,6 @@ pub enum SourceCharacter {
     /// hardware toggle is switching to off.   
     #[display(fmt = "Toggle-only button (avoid!)")]
     ToggleButton = 5,
-}
-
-impl Default for SourceCharacter {
-    fn default() -> Self {
-        SourceCharacter::RangeElement
-    }
 }
 
 impl SourceCharacter {
@@ -94,6 +90,7 @@ impl SourceCharacter {
     PartialEq,
     Eq,
     Hash,
+    Default,
     IntoEnumIterator,
     TryFromPrimitive,
     IntoPrimitive,
@@ -102,15 +99,10 @@ impl SourceCharacter {
 #[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum MidiClockTransportMessage {
+    #[default]
     Start = 0,
     Continue = 1,
     Stop = 2,
-}
-
-impl Default for MidiClockTransportMessage {
-    fn default() -> Self {
-        MidiClockTransportMessage::Start
-    }
 }
 
 impl From<MidiClockTransportMessage> for ShortMessageType {
@@ -1614,6 +1606,7 @@ fn filter_ascii_chars(text: &str) -> impl Iterator<Item = u8> + '_ {
     PartialEq,
     Hash,
     Debug,
+    Default,
     IntoEnumIterator,
     TryFromPrimitive,
     IntoPrimitive,
@@ -1622,6 +1615,7 @@ fn filter_ascii_chars(text: &str) -> impl Iterator<Item = u8> + '_ {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum DisplayType {
+    #[default]
     #[cfg_attr(feature = "serde", serde(rename = "mackie-lcd"))]
     #[display(fmt = "Mackie LCD")]
     MackieLcd,
@@ -1673,12 +1667,6 @@ impl DisplayType {
             // Not applicable
             MackieSevenSegmentDisplay | LaunchpadProScrollingText => 1,
         }
-    }
-}
-
-impl Default for DisplayType {
-    fn default() -> Self {
-        DisplayType::MackieLcd
     }
 }
 
@@ -1758,6 +1746,7 @@ impl From<DisplaySpec> for DisplaySpecAddress {
     PartialEq,
     Hash,
     Debug,
+    Default,
     IntoEnumIterator,
     TryFromPrimitive,
     IntoPrimitive,
@@ -1769,6 +1758,7 @@ impl From<DisplaySpec> for DisplaySpecAddress {
 pub enum MackieSevenSegmentDisplayScope {
     #[display(fmt = "<All>")]
     All = 0,
+    #[default]
     #[display(fmt = "Assignment")]
     Assignment = 1,
     #[display(fmt = "Time code")]
@@ -1796,12 +1786,6 @@ impl MackieSevenSegmentDisplayScope {
             TcFramesTicks => vec![2, 1, 0],
         };
         DisplayPositions::new(positions)
-    }
-}
-
-impl Default for MackieSevenSegmentDisplayScope {
-    fn default() -> Self {
-        MackieSevenSegmentDisplayScope::Assignment
     }
 }
 

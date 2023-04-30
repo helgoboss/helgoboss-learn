@@ -311,11 +311,21 @@ impl<S: AbstractTimestamp> Default for ModeState<S> {
 }
 
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
 )]
 #[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum AbsoluteMode {
+    #[default]
     #[display(fmt = "Normal")]
     Normal = 0,
     #[display(fmt = "Incremental button")]
@@ -328,18 +338,22 @@ pub enum AbsoluteMode {
     PerformanceControl = 4,
 }
 
-impl Default for AbsoluteMode {
-    fn default() -> Self {
-        AbsoluteMode::Normal
-    }
-}
-
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, IntoEnumIterator, TryFromPrimitive, IntoPrimitive, Display,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    IntoEnumIterator,
+    TryFromPrimitive,
+    IntoPrimitive,
+    Display,
 )]
 #[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum FeedbackType {
+    #[default]
     #[display(fmt = "Numeric feedback: Transformation (EEL)")]
     Numerical = 0,
     #[display(fmt = "Textual feedback: Text expression")]
@@ -349,12 +363,6 @@ pub enum FeedbackType {
 impl FeedbackType {
     pub fn is_textual(self) -> bool {
         self == FeedbackType::Textual
-    }
-}
-
-impl Default for FeedbackType {
-    fn default() -> Self {
-        FeedbackType::Numerical
     }
 }
 

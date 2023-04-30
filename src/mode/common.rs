@@ -17,6 +17,7 @@ pub const BASE_EPSILON: f64 = 0.00001;
     PartialEq,
     Hash,
     Debug,
+    Default,
     IntoEnumIterator,
     TryFromPrimitive,
     IntoPrimitive,
@@ -26,6 +27,7 @@ pub const BASE_EPSILON: f64 = 0.00001;
 #[repr(usize)]
 pub enum OutOfRangeBehavior {
     /// Yields range minimum if lower than range minimum and range maximum if greater.
+    #[default]
     #[cfg_attr(feature = "serde", serde(rename = "minOrMax"))]
     #[display(fmt = "Min or max")]
     MinOrMax,
@@ -37,12 +39,6 @@ pub enum OutOfRangeBehavior {
     #[cfg_attr(feature = "serde", serde(rename = "ignore"))]
     #[display(fmt = "Ignore")]
     Ignore,
-}
-
-impl Default for OutOfRangeBehavior {
-    fn default() -> Self {
-        OutOfRangeBehavior::MinOrMax
-    }
 }
 
 impl OutOfRangeBehavior {
@@ -91,6 +87,7 @@ impl OutOfRangeBehavior {
     PartialEq,
     Hash,
     Debug,
+    Default,
     IntoEnumIterator,
     TryFromPrimitive,
     IntoPrimitive,
@@ -99,6 +96,7 @@ impl OutOfRangeBehavior {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum ButtonUsage {
+    #[default]
     #[cfg_attr(feature = "serde", serde(rename = "both"))]
     #[display(fmt = "Press & release")]
     Both,
@@ -110,12 +108,6 @@ pub enum ButtonUsage {
     ReleaseOnly,
 }
 
-impl Default for ButtonUsage {
-    fn default() -> Self {
-        ButtonUsage::Both
-    }
-}
-
 #[derive(
     Copy,
     Clone,
@@ -123,6 +115,7 @@ impl Default for ButtonUsage {
     PartialEq,
     Hash,
     Debug,
+    Default,
     IntoEnumIterator,
     TryFromPrimitive,
     IntoPrimitive,
@@ -131,6 +124,7 @@ impl Default for ButtonUsage {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum EncoderUsage {
+    #[default]
     #[cfg_attr(feature = "serde", serde(rename = "both"))]
     #[display(fmt = "Increment & decrement")]
     Both,
@@ -149,12 +143,6 @@ impl EncoderUsage {
             EncoderUsage::DecrementOnly if i.is_positive() => false,
             _ => true,
         }
-    }
-}
-
-impl Default for EncoderUsage {
-    fn default() -> Self {
-        EncoderUsage::Both
     }
 }
 
