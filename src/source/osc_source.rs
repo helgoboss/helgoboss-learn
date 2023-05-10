@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde_with")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
-use strum_macros::EnumString;
 
 /// With OSC it's easy: The source address is the address!
 pub type OscSourceAddress = String;
@@ -30,7 +29,7 @@ pub struct OscSource {
     feedback_args: Vec<OscFeedbackProp>,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, EnumString, strum_macros::Display)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, strum::EnumString, strum::Display)]
 #[cfg_attr(feature = "serde_with", derive(SerializeDisplay, DeserializeFromStr))]
 pub enum OscFeedbackProp {
     // Floats
