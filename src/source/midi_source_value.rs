@@ -53,6 +53,8 @@ pub enum MidiSourceValue<'a, M: ShortMessage> {
 
 /// For being able to reconstructing the source address for feedback purposes (in particular,
 /// source takeover).
+///
+/// Also important for preventing duplicate feedback.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum RawFeedbackAddressInfo {
     Raw {
@@ -61,6 +63,7 @@ pub enum RawFeedbackAddressInfo {
     Display {
         spec: DisplaySpecAddress,
     },
+    Custom(MidiSourceAddress),
 }
 
 impl<'a, M: ShortMessage> MidiSourceValue<'a, M> {
@@ -163,6 +166,7 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
                 RawFeedbackAddressInfo::Display { spec } => {
                     MidiSourceAddress::Display { spec: spec.clone() }
                 }
+                RawFeedbackAddressInfo::Custom(addr) => addr.clone(),
             },
             // No feedback
             Tempo(_) | BorrowedSysEx(_) => return None,
