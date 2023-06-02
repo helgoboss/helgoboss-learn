@@ -411,6 +411,18 @@ pub enum PropValue {
     Color(RgbColor),
 }
 
+impl From<String> for PropValue {
+    fn from(value: String) -> Self {
+        PropValue::Text(value.into())
+    }
+}
+
+impl From<Cow<'static, str>> for PropValue {
+    fn from(value: Cow<'static, str>) -> Self {
+        PropValue::Text(value)
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
 pub struct RgbColor(u8, u8, u8);
 
