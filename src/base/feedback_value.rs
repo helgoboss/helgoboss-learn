@@ -10,6 +10,19 @@ pub enum FeedbackValue<'a> {
     // This Cow is in case the producer of the feedback value can use the borrowed value. At the
     // moment this is not the case because the target API is designed to return owned strings.
     Textual(TextualFeedbackValue<'a>),
+    Complex(ComplexFeedbackValue),
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
+pub struct ComplexFeedbackValue {
+    pub style: FeedbackStyle,
+    pub value: serde_json::Value,
+}
+
+impl ComplexFeedbackValue {
+    pub fn new(style: FeedbackStyle, value: serde_json::Value) -> Self {
+        Self { style, value }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
@@ -51,14 +64,14 @@ impl<'a> FeedbackValue<'a> {
                 AbsoluteValue::Continuous(UnitValue::MIN),
             )),
             Numeric(v) => Some(*v),
-            Textual(_) => None,
+            Textual(_) | Complex(_) => None,
         }
     }
 
     pub fn to_textual(&self) -> TextualFeedbackValue {
         use FeedbackValue::*;
         match self {
-            Off => Default::default(),
+            Off | Complex(_) => Default::default(),
             Numeric(v) => TextualFeedbackValue::new(
                 v.style,
                 Cow::Owned(format_percentage_without_unit(
@@ -76,8 +89,9 @@ impl<'a> FeedbackValue<'a> {
             Numeric(v) => Numeric(v),
             Textual(v) => {
                 let new = TextualFeedbackValue::new(v.style, Cow::Owned(v.text.into_owned()));
-                FeedbackValue::Textual(new)
+                Textual(new)
             }
+            Complex(v) => Complex(v),
         }
     }
 
@@ -87,6 +101,7 @@ impl<'a> FeedbackValue<'a> {
             Off => None,
             Numeric(v) => v.style.color,
             Textual(v) => v.style.color,
+            Complex(v) => v.style.color,
         }
     }
 
@@ -96,6 +111,7 @@ impl<'a> FeedbackValue<'a> {
             Off => None,
             Numeric(v) => v.style.background_color,
             Textual(v) => v.style.background_color,
+            Complex(v) => v.style.background_color,
         }
     }
 }
