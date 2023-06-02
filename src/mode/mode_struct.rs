@@ -4,9 +4,9 @@ use crate::{
     ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackScript,
     FeedbackScriptInput, FeedbackScriptOutput, FeedbackStyle, FeedbackValue, FireMode, Fraction,
     Increment, Interval, MinIsMaxBehavior, NumericFeedbackValue, OutOfRangeBehavior,
-    PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue, Transformation,
-    TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue, ValueSequence,
-    BASE_EPSILON,
+    PressDurationProcessor, PropProvider, TakeoverMode, Target, TextualFeedbackValue,
+    Transformation, TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue,
+    ValueSequence, BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -149,12 +149,12 @@ pub enum VirtualColor {
 }
 
 impl VirtualColor {
-    fn resolve(&self, get_prop_value: impl Fn(&str) -> Option<PropValue>) -> Option<RgbColor> {
+    fn resolve(&self, prop_provider: &impl PropProvider) -> Option<RgbColor> {
         use VirtualColor::*;
         match self {
             Rgb(color) => Some(*color),
             Prop { prop } => {
-                if let PropValue::Color(color) = get_prop_value(prop)? {
+                if let PropValue::Color(color) = prop_provider.get_prop_value(prop)? {
                     Some(color)
                 } else {
                     None
@@ -649,29 +649,32 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
         &self.state.feedback_props_in_use
     }
 
-    pub fn build_feedback(
-        &self,
-        get_prop_value: &impl Fn(&str) -> Option<PropValue>,
-    ) -> FeedbackValue {
-        let style = self.feedback_style(get_prop_value);
+    pub fn build_feedback(&self, prop_provider: &impl PropProvider) -> FeedbackValue {
+        let style = self.feedback_style(prop_provider);
         match &self.settings.feedback_processor {
             FeedbackProcessor::Numeric => {
                 unreachable!("Numeric feedback processor doesn't need build step");
             }
             FeedbackProcessor::Text { expression } => {
                 let text = if expression.is_empty() {
-                    get_prop_value(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY)
+                    prop_provider
+                        .get_prop_value(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY)
                         .unwrap_or_default()
                         .into_textual()
                 } else {
                     textual_feedback_expression_regex().replace_all(expression, |c: &Captures| {
-                        get_prop_value(&c[1]).unwrap_or_default().into_textual()
+                        prop_provider
+                            .get_prop_value(&c[1])
+                            .unwrap_or_default()
+                            .into_textual()
                     })
                 };
                 FeedbackValue::Textual(TextualFeedbackValue::new(style, text))
             }
             FeedbackProcessor::Dynamic { script } => {
-                let input = FeedbackScriptInput { get_prop_value };
+                let input = FeedbackScriptInput {
+                    prop_provider: prop_provider,
+                };
                 match script.feedback(input) {
                     Ok(o) => o.feedback_value,
                     Err(e) => FeedbackValue::Textual(TextualFeedbackValue::new(
@@ -683,21 +686,18 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
         }
     }
 
-    pub fn feedback_style(
-        &self,
-        get_prop_value: &impl Fn(&str) -> Option<PropValue>,
-    ) -> FeedbackStyle {
+    pub fn feedback_style(&self, prop_provider: &impl PropProvider) -> FeedbackStyle {
         FeedbackStyle {
             color: self
                 .settings
                 .feedback_color
                 .as_ref()
-                .and_then(|c| c.resolve(get_prop_value)),
+                .and_then(|c| c.resolve(prop_provider)),
             background_color: self
                 .settings
                 .feedback_background_color
                 .as_ref()
-                .and_then(|c| c.resolve(get_prop_value)),
+                .and_then(|c| c.resolve(prop_provider)),
         }
     }
 

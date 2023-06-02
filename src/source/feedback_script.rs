@@ -10,8 +10,21 @@ pub trait FeedbackScript {
     fn used_props(&self) -> Vec<String>;
 }
 
+pub trait PropProvider {
+    fn get_prop_value(&self, key: &str) -> Option<PropValue>;
+}
+
+impl<F> PropProvider for F
+where
+    F: Fn(&str) -> Option<PropValue>,
+{
+    fn get_prop_value(&self, key: &str) -> Option<PropValue> {
+        (self)(key)
+    }
+}
+
 pub struct FeedbackScriptInput<'a> {
-    pub get_prop_value: &'a dyn Fn(&str) -> Option<PropValue>,
+    pub prop_provider: &'a dyn PropProvider,
 }
 
 pub struct FeedbackScriptOutput {
