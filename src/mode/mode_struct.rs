@@ -2,11 +2,11 @@ use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
     ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackScript,
-    FeedbackScriptInput, FeedbackScriptOutput, FeedbackStyle, FeedbackValue, FireMode, Fraction,
-    Increment, Interval, MinIsMaxBehavior, NumericFeedbackValue, OutOfRangeBehavior,
-    PressDurationProcessor, PropProvider, TakeoverMode, Target, TextualFeedbackValue,
-    Transformation, TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue,
-    ValueSequence, BASE_EPSILON,
+    FeedbackScriptInput, FeedbackStyle, FeedbackValue, FireMode, Fraction, Increment, Interval,
+    MinIsMaxBehavior, NumericFeedbackValue, OutOfRangeBehavior, PressDurationProcessor,
+    PropProvider, TakeoverMode, Target, TextualFeedbackValue, Transformation,
+    TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue, ValueSequence,
+    BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -534,7 +534,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                     }
                     FeedbackProcessor::Dynamic { script } => {
                         // Dynamic feedback based on a script probably uses target props.
-                        set.extend(script.used_props())
+                        set.extend(script.used_props().unwrap_or_default())
                     }
                 }
                 if let Some(VirtualColor::Prop { prop }) = settings.feedback_color.as_ref() {
@@ -650,12 +650,12 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
     }
 
     pub fn build_feedback(&self, prop_provider: &impl PropProvider) -> FeedbackValue {
-        let style = self.feedback_style(prop_provider);
         match &self.settings.feedback_processor {
             FeedbackProcessor::Numeric => {
                 unreachable!("Numeric feedback processor doesn't need build step");
             }
             FeedbackProcessor::Text { expression } => {
+                let style = self.feedback_style(prop_provider);
                 let text = if expression.is_empty() {
                     prop_provider
                         .get_prop_value(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY)
@@ -672,15 +672,16 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                 FeedbackValue::Textual(TextualFeedbackValue::new(style, text))
             }
             FeedbackProcessor::Dynamic { script } => {
-                let input = FeedbackScriptInput {
-                    prop_provider: prop_provider,
-                };
+                let input = FeedbackScriptInput { prop_provider };
                 match script.feedback(input) {
                     Ok(o) => o.feedback_value,
-                    Err(e) => FeedbackValue::Textual(TextualFeedbackValue::new(
-                        style,
-                        e.to_string().into(),
-                    )),
+                    Err(e) => {
+                        let style = self.feedback_style(prop_provider);
+                        FeedbackValue::Textual(TextualFeedbackValue::new(
+                            style,
+                            e.to_string().into(),
+                        ))
+                    }
                 }
             }
         }

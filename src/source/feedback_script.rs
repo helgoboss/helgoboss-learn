@@ -1,5 +1,6 @@
 use crate::{FeedbackValue, PropValue};
 use std::borrow::Cow;
+use std::error::Error;
 
 pub trait FeedbackScript {
     fn feedback(
@@ -7,7 +8,7 @@ pub trait FeedbackScript {
         input: FeedbackScriptInput,
     ) -> Result<FeedbackScriptOutput, Cow<'static, str>>;
 
-    fn used_props(&self) -> Vec<String>;
+    fn used_props(&self) -> Result<Vec<String>, Box<dyn Error>>;
 }
 
 pub trait PropProvider {
