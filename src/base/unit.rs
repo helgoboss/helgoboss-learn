@@ -1,6 +1,5 @@
 use crate::{DiscreteIncrement, DiscreteValue, Interval, IntervalMatchResult};
 use derive_more::Display;
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
@@ -9,12 +8,8 @@ use std::ops::{Add, Sub};
 
 /// A number that is primarily within the negative and positive unit interval `(-1.0..=1.0)` but
 /// can also take higher values.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(try_from = "f64")
-)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Display, Default, Serialize, Deserialize)]
+#[serde(try_from = "f64")]
 pub struct SoftSymmetricUnitValue(f64);
 
 impl SoftSymmetricUnitValue {
@@ -96,12 +91,8 @@ pub enum MinIsMaxBehavior {
 }
 
 /// A number within the unit interval `(0.0..=1.0)`.
-#[derive(Clone, Copy, Debug, PartialEq, Display, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(try_from = "f64")
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Display, Default, Serialize, Deserialize)]
+#[serde(try_from = "f64")]
 pub struct UnitValue(f64);
 
 impl Eq for UnitValue {}

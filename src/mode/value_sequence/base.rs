@@ -2,14 +2,12 @@ use crate::mode::value_sequence::parser::RawEntry;
 use crate::{
     format_percentage_without_unit, parse_percentage_without_unit, UnitValue, BASE_EPSILON,
 };
-#[cfg(feature = "serde_with")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter, Write};
 
-#[derive(Clone, Eq, PartialEq, Debug, Default)]
-#[cfg_attr(feature = "serde_with", derive(SerializeDisplay, DeserializeFromStr))]
+#[derive(Clone, Eq, PartialEq, Debug, Default, SerializeDisplay, DeserializeFromStr)]
 pub struct ValueSequence {
     entries: Vec<ValueSequenceEntry>,
 }

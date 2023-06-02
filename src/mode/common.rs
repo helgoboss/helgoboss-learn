@@ -2,7 +2,6 @@ use crate::{AbsoluteValue, Increment, Interval, IntervalMatchResult, MinIsMaxBeh
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// This epsilon is used in helgoboss-learn at some places to make floating point comparison
@@ -22,21 +21,22 @@ pub const BASE_EPSILON: f64 = 0.00001;
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum OutOfRangeBehavior {
     /// Yields range minimum if lower than range minimum and range maximum if greater.
     #[default]
-    #[cfg_attr(feature = "serde", serde(rename = "minOrMax"))]
+    #[serde(rename = "minOrMax")]
     #[display(fmt = "Min or max")]
     MinOrMax,
     /// Yields range minimum if out-of-range.
-    #[cfg_attr(feature = "serde", serde(rename = "min"))]
+    #[serde(rename = "min")]
     #[display(fmt = "Min")]
     Min,
     /// Totally ignores out-of-range values.
-    #[cfg_attr(feature = "serde", serde(rename = "ignore"))]
+    #[serde(rename = "ignore")]
     #[display(fmt = "Ignore")]
     Ignore,
 }
@@ -92,18 +92,19 @@ impl OutOfRangeBehavior {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum ButtonUsage {
     #[default]
-    #[cfg_attr(feature = "serde", serde(rename = "both"))]
+    #[serde(rename = "both")]
     #[display(fmt = "Press & release")]
     Both,
-    #[cfg_attr(feature = "serde", serde(rename = "press-only"))]
+    #[serde(rename = "press-only")]
     #[display(fmt = "Press only")]
     PressOnly,
-    #[cfg_attr(feature = "serde", serde(rename = "release-only"))]
+    #[serde(rename = "release-only")]
     #[display(fmt = "Release only")]
     ReleaseOnly,
 }
@@ -120,18 +121,19 @@ pub enum ButtonUsage {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum EncoderUsage {
     #[default]
-    #[cfg_attr(feature = "serde", serde(rename = "both"))]
+    #[serde(rename = "both")]
     #[display(fmt = "Increment & decrement")]
     Both,
-    #[cfg_attr(feature = "serde", serde(rename = "increment-only"))]
+    #[serde(rename = "increment-only")]
     #[display(fmt = "Increment only")]
     IncrementOnly,
-    #[cfg_attr(feature = "serde", serde(rename = "decrement-only"))]
+    #[serde(rename = "decrement-only")]
     #[display(fmt = "Decrement only")]
     DecrementOnly,
 }
@@ -157,23 +159,24 @@ impl EncoderUsage {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum FireMode {
-    #[cfg_attr(feature = "serde", serde(rename = "release"))]
+    #[serde(rename = "release")]
     #[display(fmt = "Fire on press (or release if > 0 ms)")]
     Normal,
-    #[cfg_attr(feature = "serde", serde(rename = "timeout"))]
+    #[serde(rename = "timeout")]
     #[display(fmt = "Fire after timeout")]
     AfterTimeout,
-    #[cfg_attr(feature = "serde", serde(rename = "turbo"))]
+    #[serde(rename = "turbo")]
     #[display(fmt = "Fire after timeout, keep firing (turbo)")]
     AfterTimeoutKeepFiring,
-    #[cfg_attr(feature = "serde", serde(rename = "single"))]
+    #[serde(rename = "single")]
     #[display(fmt = "Fire after single press")]
     OnSinglePress,
-    #[cfg_attr(feature = "serde", serde(rename = "double"))]
+    #[serde(rename = "double")]
     #[display(fmt = "Fire on double press")]
     OnDoublePress,
 }
@@ -195,26 +198,27 @@ impl Default for FireMode {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum TakeoverMode {
-    #[cfg_attr(feature = "serde", serde(rename = "off"))]
+    #[serde(rename = "off")]
     #[display(fmt = "Off (may cause jumps)")]
     Off,
-    #[cfg_attr(feature = "serde", serde(rename = "pickup"))]
+    #[serde(rename = "pickup")]
     #[display(fmt = "Pick up")]
     Pickup,
-    #[cfg_attr(feature = "serde", serde(rename = "pickup-tolerant"))]
+    #[serde(rename = "pickup-tolerant")]
     #[display(fmt = "Pick up (tolerant)")]
     PickupTolerant,
-    #[cfg_attr(feature = "serde", serde(rename = "longTimeNoSee"))]
+    #[serde(rename = "longTimeNoSee")]
     #[display(fmt = "Long time no see")]
     LongTimeNoSee,
-    #[cfg_attr(feature = "serde", serde(rename = "parallel"))]
+    #[serde(rename = "parallel")]
     #[display(fmt = "Parallel")]
     Parallel,
-    #[cfg_attr(feature = "serde", serde(rename = "valueScaling"))]
+    #[serde(rename = "valueScaling")]
     #[display(fmt = "Catch up")]
     CatchUp,
 }
@@ -242,29 +246,30 @@ impl Default for TakeoverMode {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum GroupInteraction {
-    #[cfg_attr(feature = "serde", serde(rename = "none"))]
+    #[serde(rename = "none")]
     #[display(fmt = "None")]
     None,
-    #[cfg_attr(feature = "serde", serde(rename = "same-control"))]
+    #[serde(rename = "same-control")]
     #[display(fmt = "Same control")]
     SameControl,
-    #[cfg_attr(feature = "serde", serde(rename = "same-target-value"))]
+    #[serde(rename = "same-target-value")]
     #[display(fmt = "Same target value")]
     SameTargetValue,
-    #[cfg_attr(feature = "serde", serde(rename = "inverse-control"))]
+    #[serde(rename = "inverse-control")]
     #[display(fmt = "Inverse control")]
     InverseControl,
-    #[cfg_attr(feature = "serde", serde(rename = "inverse-target-value"))]
+    #[serde(rename = "inverse-target-value")]
     #[display(fmt = "Inverse target value")]
     InverseTargetValue,
-    #[cfg_attr(feature = "serde", serde(rename = "inverse-target-value-on-only"))]
+    #[serde(rename = "inverse-target-value-on-only")]
     #[display(fmt = "Inverse target value (on only)")]
     InverseTargetValueOnOnly,
-    #[cfg_attr(feature = "serde", serde(rename = "inverse-target-value-off-only"))]
+    #[serde(rename = "inverse-target-value-off-only")]
     #[display(fmt = "Inverse target value (off only)")]
     InverseTargetValueOffOnly,
 }

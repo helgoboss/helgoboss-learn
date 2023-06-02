@@ -64,12 +64,10 @@ impl Sub for DiscreteValue {
 
 /// A discrete number representing a positive or negative increment, never 0 (otherwise it wouldn't
 /// be an increment after all).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(try_from = "i32")
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
+#[serde(try_from = "i32")]
 pub struct DiscreteIncrement(i32);
 
 impl Display for DiscreteIncrement {

@@ -12,9 +12,7 @@ use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use regex::Captures;
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -320,8 +318,9 @@ impl<S: AbstractTimestamp> Default for ModeState<S> {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize_repr,
+    Deserialize_repr,
 )]
-#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum AbsoluteMode {
     #[default]
@@ -348,8 +347,9 @@ pub enum AbsoluteMode {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize_repr,
+    Deserialize_repr,
 )]
-#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum FeedbackType {
     #[default]

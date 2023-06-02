@@ -10,9 +10,7 @@ use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rosc::{OscColor, OscMessage, OscType};
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "serde_with")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
 
@@ -29,8 +27,17 @@ pub struct OscSource {
     feedback_args: Vec<OscFeedbackProp>,
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, strum::EnumString, strum::Display)]
-#[cfg_attr(feature = "serde_with", derive(SerializeDisplay, DeserializeFromStr))]
+#[derive(
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Debug,
+    strum::EnumString,
+    strum::Display,
+    SerializeDisplay,
+    DeserializeFromStr,
+)]
 pub enum OscFeedbackProp {
     // Floats
     #[strum(serialize = "value.float")]
@@ -169,12 +176,10 @@ fn get_range_value(arg: &OscType) -> Option<f64> {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize, Deserialize),
-    serde(rename_all = "camelCase")
-)]
+#[serde(rename_all = "camelCase")]
 #[repr(usize)]
 // TODO-low Rename. This it not the tag, it's rather the OscType without value.
 pub enum OscTypeTag {

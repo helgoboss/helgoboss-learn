@@ -20,9 +20,7 @@ use helgoboss_midi::{
     ParameterNumberMessage, RawShortMessage, ShortMessage, ShortMessageFactory, ShortMessageType,
     StructuredShortMessage, U14, U7,
 };
-#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "serde_repr")]
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::convert::{TryFrom, TryInto};
 use std::ops::Range;
@@ -39,8 +37,9 @@ use std::ops::Range;
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize_repr,
+    Deserialize_repr,
 )]
-#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum SourceCharacter {
     #[default]
@@ -95,8 +94,9 @@ impl SourceCharacter {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize_repr,
+    Deserialize_repr,
 )]
-#[cfg_attr(feature = "serde_repr", derive(Serialize_repr, Deserialize_repr))]
 #[repr(usize)]
 pub enum MidiClockTransportMessage {
     #[default]
@@ -1609,33 +1609,34 @@ fn filter_ascii_chars(text: &str) -> impl Iterator<Item = u8> + '_ {
     TryFromPrimitive,
     IntoPrimitive,
     Display,
+    Serialize,
+    Deserialize,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(usize)]
 pub enum DisplayType {
     #[default]
-    #[cfg_attr(feature = "serde", serde(rename = "mackie-lcd"))]
+    #[serde(rename = "mackie-lcd")]
     #[display(fmt = "Mackie LCD")]
     MackieLcd,
-    #[cfg_attr(feature = "serde", serde(rename = "mackie-xt-lcd"))]
+    #[serde(rename = "mackie-xt-lcd")]
     #[display(fmt = "Mackie XT LCD")]
     MackieXtLcd,
-    #[cfg_attr(feature = "serde", serde(rename = "x-touch-mackie-lcd"))]
+    #[serde(rename = "x-touch-mackie-lcd")]
     #[display(fmt = "X-Touch Mackie LCD")]
     XTouchMackieLcd,
-    #[cfg_attr(feature = "serde", serde(rename = "x-touch-mackie-xt-lcd"))]
+    #[serde(rename = "x-touch-mackie-xt-lcd")]
     #[display(fmt = "X-Touch Mackie XT LCD")]
     XTouchMackieXtLcd,
-    #[cfg_attr(feature = "serde", serde(rename = "mackie-seven"))]
+    #[serde(rename = "mackie-seven")]
     #[display(fmt = "Mackie 7-segment display")]
     MackieSevenSegmentDisplay,
-    #[cfg_attr(feature = "serde", serde(rename = "sinicon-e24"))]
+    #[serde(rename = "sinicon-e24")]
     #[display(fmt = "SiniCon E24 display")]
     SiniConE24,
-    #[cfg_attr(feature = "serde", serde(rename = "launchpad-pro-scrolling-text"))]
+    #[serde(rename = "launchpad-pro-scrolling-text")]
     #[display(fmt = "Launchpad Pro - Scrolling text")]
     LaunchpadProScrollingText,
-    #[cfg_attr(feature = "serde", serde(rename = "sl-keyboard"))]
+    #[serde(rename = "sl-keyboard")]
     #[display(fmt = "Studiologic SL Keyboard display")]
     SlKeyboardDisplay,
 }
