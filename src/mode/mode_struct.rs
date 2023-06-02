@@ -1,11 +1,12 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
-    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackStyle, FeedbackValue,
-    FireMode, Fraction, Increment, Interval, MinIsMaxBehavior, NumericFeedbackValue,
-    OutOfRangeBehavior, PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue,
-    Transformation, TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue,
-    ValueSequence, BASE_EPSILON,
+    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackScript,
+    FeedbackScriptInput, FeedbackScriptOutput, FeedbackStyle, FeedbackValue, FireMode, Fraction,
+    Increment, Interval, MinIsMaxBehavior, NumericFeedbackValue, OutOfRangeBehavior,
+    PressDurationProcessor, TakeoverMode, Target, TextualFeedbackValue, Transformation,
+    TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue, ValueSequence,
+    BASE_EPSILON,
 };
 use derive_more::Display;
 use enum_iterator::IntoEnumIterator;
@@ -102,7 +103,7 @@ impl Default for FeedbackValueTable {
 }
 
 #[derive(Clone, Debug)]
-pub struct ModeSettings<T: Transformation> {
+pub struct ModeSettings<T: Transformation, F: FeedbackScript> {
     pub absolute_mode: AbsoluteMode,
     pub source_value_interval: Interval<UnitValue>,
     pub discrete_source_value_interval: Interval<u32>,
@@ -132,8 +133,7 @@ pub struct ModeSettings<T: Transformation> {
     pub press_duration_interval: Interval<Duration>,
     pub turbo_rate: Duration,
     pub target_value_sequence: ValueSequence,
-    pub feedback_type: FeedbackType,
-    pub textual_feedback_expression: String,
+    pub feedback_processor: FeedbackProcessor<F>,
     pub feedback_color: Option<VirtualColor>,
     pub feedback_background_color: Option<VirtualColor>,
 }
@@ -166,7 +166,7 @@ impl VirtualColor {
 
 const ZERO_DURATION: Duration = Duration::from_millis(0);
 
-impl<T: Transformation> Default for ModeSettings<T> {
+impl<T: Transformation, F: FeedbackScript> Default for ModeSettings<T, F> {
     fn default() -> Self {
         ModeSettings {
             absolute_mode: AbsoluteMode::Normal,
@@ -193,8 +193,7 @@ impl<T: Transformation> Default for ModeSettings<T> {
             press_duration_interval: Interval::new(ZERO_DURATION, ZERO_DURATION),
             turbo_rate: ZERO_DURATION,
             target_value_sequence: Default::default(),
-            feedback_type: Default::default(),
-            textual_feedback_expression: Default::default(),
+            feedback_processor: FeedbackProcessor::Numeric,
             feedback_color: None,
             feedback_background_color: None,
             feedback_value_table: None,
@@ -222,8 +221,8 @@ impl<T: Transformation> Default for ModeSettings<T> {
 ///         - Displayed as: "{count} x" or "{count}" (former if source emits increments) TODO I
 ///           think now we have only the "x" variant
 #[derive(Clone, Debug)]
-pub struct Mode<T: Transformation, S: AbstractTimestamp> {
-    settings: ModeSettings<T>,
+pub struct Mode<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> {
+    settings: ModeSettings<T, F>,
     state: ModeState<S>,
 }
 
@@ -354,25 +353,40 @@ pub enum AbsoluteMode {
 #[repr(usize)]
 pub enum FeedbackType {
     #[default]
-    #[display(fmt = "Numeric feedback: Transformation (EEL)")]
-    Numerical = 0,
+    #[display(fmt = "Numeric feedback: EEL transformation")]
+    Numeric = 0,
     #[display(fmt = "Textual feedback: Text expression")]
-    Textual = 1,
+    Text = 1,
+    #[display(fmt = "Dynamic feedback: Lua script")]
+    Dynamic = 2,
 }
 
 impl FeedbackType {
     pub fn is_textual(self) -> bool {
-        self == FeedbackType::Textual
+        matches!(self, FeedbackType::Text | FeedbackType::Dynamic)
     }
 }
 
-pub struct ModeGarbage<T> {
+#[derive(Clone, Debug)]
+pub enum FeedbackProcessor<F> {
+    Numeric,
+    Text { expression: String },
+    Dynamic { script: F },
+}
+
+impl<F> FeedbackProcessor<F> {
+    pub fn is_complex(&self) -> bool {
+        !matches!(self, FeedbackProcessor::Numeric)
+    }
+}
+
+pub struct ModeGarbage<T, F> {
     _control_transformation: Option<T>,
     _feedback_transformation: Option<T>,
     _target_value_sequence: ValueSequence,
     _unpacked_target_value_sequence: Vec<UnitValue>,
     _unpacked_target_value_set: BTreeSet<UnitValue>,
-    _textual_feedback_expression: String,
+    _feedback_processor: FeedbackProcessor<F>,
     _feedback_color: Option<VirtualColor>,
     _feedback_background_color: Option<VirtualColor>,
     _feedback_props_in_use: HashSet<String>,
@@ -491,8 +505,8 @@ impl NumericValue {
     }
 }
 
-impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
-    pub fn new(settings: ModeSettings<T>) -> Self {
+impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
+    pub fn new(settings: ModeSettings<T, F>) -> Self {
         let state = ModeState {
             press_duration_processor: PressDurationProcessor::new(
                 settings.fire_mode,
@@ -501,15 +515,26 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
             ),
             feedback_props_in_use: {
                 let mut set = HashSet::new();
-                if settings.feedback_type.is_textual() {
-                    if settings.textual_feedback_expression.is_empty() {
-                        set.insert(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY.to_string());
-                    } else {
-                        set.extend(
-                            textual_feedback_expression_regex()
-                                .captures_iter(&settings.textual_feedback_expression)
-                                .map(|cap| cap[1].to_string()),
-                        );
+                match &settings.feedback_processor {
+                    FeedbackProcessor::Numeric => {
+                        // Numeric feedback doesn't use any target props
+                    }
+                    FeedbackProcessor::Text { expression } => {
+                        // Text feedback based on a text expression probably uses target props.
+                        // We extract them statically by looking at the expression.
+                        if expression.is_empty() {
+                            set.insert(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY.to_string());
+                        } else {
+                            set.extend(
+                                textual_feedback_expression_regex()
+                                    .captures_iter(expression)
+                                    .map(|cap| cap[1].to_string()),
+                            );
+                        }
+                    }
+                    FeedbackProcessor::Dynamic { script } => {
+                        // Dynamic feedback based on a script probably uses target props.
+                        set.extend(script.used_props())
                     }
                 }
                 if let Some(VirtualColor::Prop { prop }) = settings.feedback_color.as_ref() {
@@ -527,19 +552,19 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         Mode { settings, state }
     }
 
-    pub fn settings(&self) -> &ModeSettings<T> {
+    pub fn settings(&self) -> &ModeSettings<T, F> {
         &self.settings
     }
 
     /// For deferring deallocation to non-real-time thread.
-    pub fn recycle(self) -> ModeGarbage<T> {
+    pub fn recycle(self) -> ModeGarbage<T, F> {
         ModeGarbage {
             _control_transformation: self.settings.control_transformation,
             _feedback_transformation: self.settings.feedback_transformation,
             _target_value_sequence: self.settings.target_value_sequence,
             _unpacked_target_value_sequence: self.state.unpacked_target_value_sequence,
             _unpacked_target_value_set: self.state.unpacked_target_value_set,
-            _textual_feedback_expression: self.settings.textual_feedback_expression,
+            _feedback_processor: self.settings.feedback_processor,
             _feedback_color: self.settings.feedback_color,
             _feedback_background_color: self.settings.feedback_background_color,
             _feedback_props_in_use: self.state.feedback_props_in_use,
@@ -615,29 +640,47 @@ impl<T: Transformation, S: AbstractTimestamp> Mode<T, S> {
         }
     }
 
-    pub fn wants_textual_feedback(&self) -> bool {
-        self.settings.feedback_type.is_textual()
+    /// When `true`, one must use methods such as `build_feedback`.
+    pub fn wants_advanced_feedback(&self) -> bool {
+        self.settings.feedback_processor.is_complex()
     }
 
     pub fn feedback_props_in_use(&self) -> &HashSet<String> {
         &self.state.feedback_props_in_use
     }
 
-    pub fn query_textual_feedback(
+    pub fn build_feedback(
         &self,
         get_prop_value: &impl Fn(&str) -> Option<PropValue>,
-    ) -> TextualFeedbackValue {
-        let text = if self.settings.textual_feedback_expression.is_empty() {
-            get_prop_value(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY)
-                .unwrap_or_default()
-                .into_textual()
-        } else {
-            textual_feedback_expression_regex().replace_all(
-                &self.settings.textual_feedback_expression,
-                |c: &Captures| get_prop_value(&c[1]).unwrap_or_default().into_textual(),
-            )
-        };
-        TextualFeedbackValue::new(self.feedback_style(get_prop_value), text)
+    ) -> FeedbackValue {
+        let style = self.feedback_style(get_prop_value);
+        match &self.settings.feedback_processor {
+            FeedbackProcessor::Numeric => {
+                unreachable!("Numeric feedback processor doesn't need build step");
+            }
+            FeedbackProcessor::Text { expression } => {
+                let text = if expression.is_empty() {
+                    get_prop_value(DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY)
+                        .unwrap_or_default()
+                        .into_textual()
+                } else {
+                    textual_feedback_expression_regex().replace_all(expression, |c: &Captures| {
+                        get_prop_value(&c[1]).unwrap_or_default().into_textual()
+                    })
+                };
+                FeedbackValue::Textual(TextualFeedbackValue::new(style, text))
+            }
+            FeedbackProcessor::Dynamic { script } => {
+                let input = FeedbackScriptInput { get_prop_value };
+                match script.feedback(input) {
+                    Ok(o) => o.feedback_value,
+                    Err(e) => FeedbackValue::Textual(TextualFeedbackValue::new(
+                        style,
+                        e.to_string().into(),
+                    )),
+                }
+            }
+        }
     }
 
     pub fn feedback_style(
@@ -2287,7 +2330,7 @@ const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
 mod tests {
     use super::*;
 
-    use crate::mode::test_util::{TestTarget, TestTransformation};
+    use crate::mode::test_util::{TestFeedbackScript, TestTarget, TestTransformation};
     use crate::{create_unit_value_interval, ControlType, Fraction, NoopTimestamp};
     use approx::*;
 
@@ -10618,7 +10661,7 @@ mod tests {
         assert_equals(result, output);
     }
 
-    type TestMode = Mode<TestTransformation, NoopTimestamp>;
+    type TestMode = Mode<TestTransformation, TestFeedbackScript, NoopTimestamp>;
 
     type TimelessControlEvent<P> = ControlEvent<P, NoopTimestamp>;
 

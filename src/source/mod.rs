@@ -13,6 +13,9 @@ pub use raw_midi::*;
 mod midi_source_script;
 pub use midi_source_script::*;
 
+mod feedback_script;
+pub use feedback_script::*;
+
 mod source_context;
 pub use source_context::*;
 

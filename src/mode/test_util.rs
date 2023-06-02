@@ -1,6 +1,8 @@
 use crate::{
-    AbsoluteValue, ControlType, Target, Transformation, TransformationInput, TransformationOutput,
+    AbsoluteValue, ControlType, FeedbackScript, FeedbackScriptInput, FeedbackScriptOutput, Target,
+    Transformation, TransformationInput, TransformationOutput,
 };
+use std::borrow::Cow;
 
 pub struct TestTarget {
     pub current_value: Option<AbsoluteValue>,
@@ -47,5 +49,17 @@ impl Transformation for TestTransformation {
 
     fn wants_to_be_polled(&self) -> bool {
         false
+    }
+}
+
+pub struct TestFeedbackScript;
+
+impl FeedbackScript for TestFeedbackScript {
+    fn feedback(&self, _: FeedbackScriptInput) -> Result<FeedbackScriptOutput, Cow<'static, str>> {
+        unimplemented!()
+    }
+
+    fn used_props(&self) -> Vec<String> {
+        vec![]
     }
 }
