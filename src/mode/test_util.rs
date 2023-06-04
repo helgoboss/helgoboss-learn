@@ -3,6 +3,7 @@ use crate::{
     Transformation, TransformationInput, TransformationOutput,
 };
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::error::Error;
 
 pub struct TestTarget {
@@ -60,7 +61,7 @@ impl FeedbackScript for TestFeedbackScript {
         unimplemented!()
     }
 
-    fn used_props(&self) -> Result<Vec<String>, Box<dyn Error>> {
-        Ok(vec![])
+    fn used_props(&self) -> Result<HashSet<String>, Box<dyn Error>> {
+        Ok(Default::default())
     }
 }

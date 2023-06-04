@@ -517,12 +517,13 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                 settings.turbo_rate,
             ),
             feedback_props_in_use: {
-                let mut set = HashSet::new();
-                match &settings.feedback_processor {
+                let mut set = match &settings.feedback_processor {
                     FeedbackProcessor::Numeric => {
                         // Numeric feedback doesn't use any target props
+                        HashSet::new()
                     }
                     FeedbackProcessor::Text { expression } => {
+                        let mut set = HashSet::new();
                         // Text feedback based on a text expression probably uses target props.
                         // We extract them statically by looking at the expression.
                         if expression.is_empty() {
@@ -534,12 +535,13 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                                     .map(|cap| cap[1].to_string()),
                             );
                         }
+                        set
                     }
                     FeedbackProcessor::Dynamic { script } => {
                         // Dynamic feedback based on a script probably uses target props.
-                        set.extend(script.used_props().unwrap_or_default())
+                        script.used_props().unwrap_or_default()
                     }
-                }
+                };
                 if let Some(VirtualColor::Prop { prop }) = settings.feedback_color.as_ref() {
                     set.insert(prop.to_string());
                 }
