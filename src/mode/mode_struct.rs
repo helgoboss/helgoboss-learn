@@ -417,6 +417,8 @@ pub enum PropValue {
     /// human-friendly position. We don't want to provide each prop value as both 0-rooted index and
     /// 1-rooted position.
     Index(u32),
+    /// On/off style.
+    Boolean(bool),
     /// Human-friendly numeric representation.
     Numeric(NumericValue),
     /// Textual representation.
@@ -491,6 +493,7 @@ impl PropValue {
             Index(i) => i.to_string().into(),
             Text(text) => text,
             Color(color) => format!("{color:?}").into(),
+            Boolean(state) => format!("{state:?}").into(),
         }
     }
 }
