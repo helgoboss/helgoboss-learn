@@ -425,6 +425,8 @@ pub enum PropValue {
     Text(Cow<'static, str>),
     /// Color.
     Color(RgbColor),
+    /// Duration in millisecond precision.
+    DurationInMillis(u64),
 }
 
 impl From<String> for PropValue {
@@ -494,6 +496,7 @@ impl PropValue {
             Text(text) => text,
             Color(color) => format!("{color:?}").into(),
             Boolean(state) => format!("{state:?}").into(),
+            DurationInMillis(millis) => format!("{millis}ms").into(),
         }
     }
 }
