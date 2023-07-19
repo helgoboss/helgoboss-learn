@@ -380,19 +380,6 @@ impl<F> FeedbackProcessor<F> {
     }
 }
 
-pub struct ModeGarbage<T, F> {
-    _control_transformation: Option<T>,
-    _feedback_transformation: Option<T>,
-    _target_value_sequence: ValueSequence,
-    _unpacked_target_value_sequence: Vec<UnitValue>,
-    _unpacked_target_value_set: BTreeSet<UnitValue>,
-    _feedback_processor: FeedbackProcessor<F>,
-    _feedback_color: Option<VirtualColor>,
-    _feedback_background_color: Option<VirtualColor>,
-    _feedback_props_in_use: HashSet<String>,
-    _feedback_value_table: Option<FeedbackValueTable>,
-}
-
 /// Human-readable numeric value (not normalized, not zero-rooted).
 ///
 /// The concrete type (decimal, discrete) just serves as a hint how to do the default formatting:
@@ -562,22 +549,6 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
 
     pub fn settings(&self) -> &ModeSettings<T, F> {
         &self.settings
-    }
-
-    /// For deferring deallocation to non-real-time thread.
-    pub fn recycle(self) -> ModeGarbage<T, F> {
-        ModeGarbage {
-            _control_transformation: self.settings.control_transformation,
-            _feedback_transformation: self.settings.feedback_transformation,
-            _target_value_sequence: self.settings.target_value_sequence,
-            _unpacked_target_value_sequence: self.state.unpacked_target_value_sequence,
-            _unpacked_target_value_set: self.state.unpacked_target_value_set,
-            _feedback_processor: self.settings.feedback_processor,
-            _feedback_color: self.settings.feedback_color,
-            _feedback_background_color: self.settings.feedback_background_color,
-            _feedback_props_in_use: self.state.feedback_props_in_use,
-            _feedback_value_table: self.settings.feedback_value_table,
-        }
     }
 
     /// Processes the given control value and maybe returns an appropriate target control value.
