@@ -1960,7 +1960,7 @@ impl SiniConE24Destination {
 
     pub fn line_length(&self) -> u8 {
         match self.item_index {
-            0 | 1 | 2 => 16,
+            0..=2 => 16,
             3 => 9,
             _ => 0,
         }

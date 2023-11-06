@@ -95,7 +95,7 @@ impl PressDurationProcessor {
                 } else {
                     // Looks like a button release.
                     // Measure duration since button press.
-                    match std::mem::replace(&mut self.last_button_press, None) {
+                    match self.last_button_press.take() {
                         // Button has not been pressed before. Just ignore.
                         None => None,
                         // Button has been pressed before.

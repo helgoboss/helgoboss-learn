@@ -1566,7 +1566,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                 if discrete_increment.is_positive() {
                     *target_value_set.iter().next().unwrap()
                 } else {
-                    *target_value_set.iter().rev().next().unwrap()
+                    *target_value_set.iter().next_back().unwrap()
                 }
             } else {
                 break;
@@ -1690,6 +1690,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
         v
     }
 
+    #[allow(clippy::redundant_locals)]
     fn hitting_target_considering_max_jump(
         &mut self,
         prepped_control_value: AbsoluteValue,
@@ -1700,13 +1701,10 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
     ) -> Option<ModeControlResult<AbsoluteValue>> {
         // If there's no target value available ... just deliver! Virtual targets take this
         // shortcut.
-        let current_target_value = match current_target_value {
-            None => {
-                let final_absolute_value =
-                    self.get_final_absolute_value(prepped_control_value, control_type);
-                return Some(ModeControlResult::hit_target(final_absolute_value));
-            }
-            Some(v) => v,
+        let Some(current_target_value) = current_target_value else {
+            let final_absolute_value =
+                self.get_final_absolute_value(prepped_control_value, control_type);
+            return Some(ModeControlResult::hit_target(final_absolute_value));
         };
         // If there are no jump restrictions whatsoever, we can skip the logic below!
         if !self.has_jump_restrictions() {
@@ -2301,7 +2299,7 @@ fn full_discrete_interval() -> Interval<u32> {
 }
 
 fn textual_feedback_expression_regex() -> &'static regex::Regex {
-    regex!(r#"\{\{ *([A-Za-z0-9._]+) *\}\}"#)
+    regex!(r"\{\{ *([A-Za-z0-9._]+) *\}\}")
 }
 
 const DEFAULT_TEXTUAL_FEEDBACK_PROP_KEY: &str = "target.text_value";
