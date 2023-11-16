@@ -182,7 +182,7 @@ pub enum MidiSource<S: MidiSourceScript> {
     // For advanced programmable feedback (e.g. to drive hardware displays).
     Script {
         #[derivative(PartialEq = "ignore")]
-        script: Option<S>,
+        script: S,
     },
     Display {
         spec: DisplaySpec,
@@ -303,7 +303,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Raw { pattern, .. } => MidiSourceAddress::Raw {
                 pattern: pattern.to_pattern_bytes(),
             },
-            Script { script } => script.as_ref()?.execute(FeedbackValue::Off).ok()?.address?,
+            Script { script } => script.execute(FeedbackValue::Off).ok()?.address?,
             // No feedback
             ClockTempo | ClockTransport { .. } | NoteKeyNumber { .. } => return None,
             // Non-feedback-compatible configurations (e.g. channel == <Any>)
@@ -963,7 +963,6 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Some(value)
             }
             Script { script } => {
-                let script = script.as_ref()?;
                 let outcome = script.execute(feedback_value).ok()?;
                 let value = V::Raw {
                     feedback_address_info: outcome.address.map(RawFeedbackAddressInfo::Custom),
