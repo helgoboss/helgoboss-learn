@@ -5,30 +5,29 @@ authors = ["Benjamin Klum <benjamin.klum@helgoboss.org>"]
 edition = "2021"
 
 [dependencies]
-helgoboss-midi = "0.4.0"
+helgoboss-midi.workspace = true
 num = "0.2.1"
-num_enum = "0.5.0"
-approx = "0.3.2"
-derive_more = "0.99.5"
-enum-iterator = "0.6.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_repr = { version = "0.1.5" }
+num_enum.workspace = true
+approx.workspace = true
+derive_more.workspace = true
+enum-iterator.workspace = true
+serde.workspace = true
+serde_repr.workspace = true
 # For being able to (de)serialize using FromStr
-serde_with = { version = "2.0.1" }
-lazycell = "1.2"
+serde_with.workspace = true
+lazycell.workspace = true
 # For being able to exclude some fields from the hash function (necessary for ignoring already learned sources)
-derivative = "2.2.0"
+derivative.workspace = true
 # For OSC
-rosc = "0.5.1"
+rosc.workspace = true
 # For letting the here defined raw MIDI data structure implement the REAPER MIDI event type
-reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master", optional = true }
+reaper-low = { workspace = true, optional = true }
 # For tokenizing sys-ex patterns
 logos = "0.12.0"
 partial-min-max = "0.4.0"
-nom = "7.0.0"
-regex = "1"
-once_cell = "1.4.0"
+nom.workspace = true
+regex.workspace = true
+once_cell.workspace = true
 # For convenient converting of OSC feedback arg prop to enum variant and back
-strum = { version = "0.24", features = ["derive"] }
-strum_macros = "0.23"
-serde_json = "1.0"
+strum.workspace = true
+serde_json.workspace = true
