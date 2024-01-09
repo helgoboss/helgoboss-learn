@@ -2,6 +2,7 @@ use crate::{AbsoluteValue, Fraction, PatternByte, RawMidiEvent, UnitValue};
 use logos::{Lexer, Logos};
 use std::fmt;
 use std::fmt::{Display, Formatter, Write};
+use std::num::ParseIntError;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
@@ -316,34 +317,55 @@ impl Display for BitPatternEntry {
 }
 
 impl FromStr for RawMidiPattern {
-    type Err = &'static str;
+    type Err = ParseRawMidiPatternError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let lex: Lexer<RawMidiPatternToken> = RawMidiPatternToken::lexer(s);
         use RawMidiPatternToken::*;
-        let entries: Result<Vec<_>, _> = lex
-            .map(|token| match token {
-                FixedByte(byte) => Ok(RawMidiPatternEntry::FixedByte(byte)),
-                Error => Err("invalid pattern expression"),
-                PotentiallyVariableByte(pattern) => {
-                    Ok(RawMidiPatternEntry::PotentiallyVariableByte(pattern))
-                }
+        let entries: Result<Vec<_>, ParseRawMidiPatternError> = lex
+            .map(|token| {
+                let entry = match token? {
+                    FixedByte(byte) => RawMidiPatternEntry::FixedByte(byte),
+                    PotentiallyVariableByte(pattern) => {
+                        RawMidiPatternEntry::PotentiallyVariableByte(pattern)
+                    }
+                };
+                Ok(entry)
             })
             .collect();
-        let p = RawMidiPattern::from_entries(entries?);
-        Ok(p)
+        let entries = entries.map_err(|_| "couldn't parse raw MIDI pattern")?;
+        Ok(RawMidiPattern::from_entries(entries))
     }
 }
 
-#[derive(Logos, Debug, PartialEq)]
+#[derive(Debug, PartialEq, Logos)]
+#[logos(skip r"[ \t\n\f]+")]
+#[logos(error = ParseRawMidiPatternError)]
 enum RawMidiPatternToken {
     #[regex(r"\[[01abcdefghijklmnop ]*\]", parse_as_bit_pattern)]
     PotentiallyVariableByte(BitPattern),
     #[regex(r"[0-9a-fA-F][0-9a-fA-F]?", parse_as_byte)]
     FixedByte(u8),
-    #[error]
-    #[regex(r"[ \t\n\f]+", logos::skip)]
-    Error,
+}
+
+#[derive(Clone, PartialEq, Debug, Default, thiserror::Error)]
+#[error("{msg}")]
+pub struct ParseRawMidiPatternError {
+    msg: &'static str,
+}
+
+impl From<&'static str> for ParseRawMidiPatternError {
+    fn from(msg: &'static str) -> Self {
+        Self { msg }
+    }
+}
+
+impl From<ParseIntError> for ParseRawMidiPatternError {
+    fn from(_: ParseIntError) -> Self {
+        Self {
+            msg: "problem parsing fixed byte",
+        }
+    }
 }
 
 fn parse_as_byte(lex: &mut Lexer<RawMidiPatternToken>) -> Result<u8, core::num::ParseIntError> {

@@ -23,7 +23,9 @@ rosc.workspace = true
 # For letting the here defined raw MIDI data structure implement the REAPER MIDI event type
 reaper-low = { workspace = true, optional = true }
 # For tokenizing sys-ex patterns
-logos = "0.12.0"
+logos.workspace = true
+# For easy error types
+thiserror.workspace = true
 partial-min-max = "0.4.0"
 nom.workspace = true
 regex.workspace = true
