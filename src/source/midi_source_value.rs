@@ -350,7 +350,7 @@ impl Default for RawMidiEvent {
 impl RawMidiEvent {
     pub const MAX_LENGTH: usize = 256;
 
-    pub fn new(frame_offset: u32, size: u32, midi_message: [u8; Self::MAX_LENGTH]) -> Self {
+    pub const fn new(frame_offset: u32, size: u32, midi_message: [u8; Self::MAX_LENGTH]) -> Self {
         Self {
             frame_offset: frame_offset as _,
             size: size as _,
