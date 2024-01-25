@@ -87,9 +87,15 @@ pub trait Target<'a> {
     /// In such cases, `None` should be returned so that the mode can handle this situation
     /// gracefully. Of course, some mode features won't work without knowing the current value,
     /// but others will still work.
-    fn current_value(&self, context: Self::Context) -> Option<AbsoluteValue>;
+    fn current_value(&self, context: Self::Context) -> Option<AbsoluteValue> {
+        let _ = context;
+        None
+    }
 
-    fn control_type(&self, context: Self::Context) -> ControlType;
+    fn control_type(&self, context: Self::Context) -> ControlType {
+        let _ = context;
+        ControlType::AbsoluteContinuous
+    }
 }
 
 /// Some standardized property keys.
