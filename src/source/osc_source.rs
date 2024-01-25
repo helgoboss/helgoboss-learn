@@ -7,12 +7,12 @@ use crate::{
     SourceCharacter, UnitValue, UNIT_INTERVAL,
 };
 use derive_more::Display;
-use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rosc::{OscColor, OscMessage, OscType};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;
+use strum::EnumIter;
 
 /// With OSC it's easy: The source address is the address!
 pub type OscSourceAddress = String;
@@ -172,7 +172,7 @@ fn get_range_value(arg: &OscType) -> Option<f64> {
     PartialEq,
     Eq,
     Hash,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,

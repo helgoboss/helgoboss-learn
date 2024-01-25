@@ -9,7 +9,6 @@ use crate::{
     BASE_EPSILON,
 };
 use derive_more::Display;
-use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use regex::Captures;
 use serde::{Deserialize, Serialize};
@@ -18,6 +17,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
+use strum::EnumIter;
 
 /// When interpreting target value, make only 4 fractional digits matter.
 ///
@@ -314,7 +314,7 @@ impl<S: AbstractTimestamp> Default for ModeState<S> {
     PartialEq,
     Eq,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -343,7 +343,7 @@ pub enum AbsoluteMode {
     Default,
     PartialEq,
     Eq,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,

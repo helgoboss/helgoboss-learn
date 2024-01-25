@@ -10,7 +10,6 @@ num = "0.2.1"
 num_enum.workspace = true
 approx.workspace = true
 derive_more.workspace = true
-enum-iterator.workspace = true
 serde.workspace = true
 serde_repr.workspace = true
 # For being able to (de)serialize using FromStr

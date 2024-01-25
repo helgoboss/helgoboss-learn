@@ -1,8 +1,8 @@
 use crate::{AbsoluteValue, Increment, Interval, IntervalMatchResult, MinIsMaxBehavior, UnitValue};
 use derive_more::Display;
-use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 
 /// This epsilon is used in helgoboss-learn at some places to make floating point comparison
 /// more tolerant. This is the same epsilon used in JSFX/EEL.   
@@ -17,7 +17,7 @@ pub const BASE_EPSILON: f64 = 0.00001;
     Hash,
     Debug,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -88,7 +88,7 @@ impl OutOfRangeBehavior {
     Hash,
     Debug,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -117,7 +117,7 @@ pub enum ButtonUsage {
     Hash,
     Debug,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -155,7 +155,7 @@ impl EncoderUsage {
     PartialEq,
     Hash,
     Debug,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -194,7 +194,7 @@ impl Default for FireMode {
     PartialEq,
     Hash,
     Debug,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -242,7 +242,7 @@ impl Default for TakeoverMode {
     PartialEq,
     Hash,
     Debug,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,

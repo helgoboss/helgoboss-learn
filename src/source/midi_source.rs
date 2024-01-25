@@ -9,9 +9,9 @@ use crate::{
 use core::iter;
 use derivative::Derivative;
 use derive_more::Display;
-use enum_iterator::IntoEnumIterator;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::cell::Cell;
+use strum::EnumIter;
 
 use crate::devices::x_touch::get_x_touch_color_index_for_color;
 use crate::source::color_util::find_closest_color_in_palette;
@@ -33,7 +33,7 @@ use std::ops::Range;
     Eq,
     Hash,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -90,7 +90,7 @@ impl SourceCharacter {
     Eq,
     Hash,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -1604,7 +1604,7 @@ fn filter_ascii_chars(text: &str) -> impl Iterator<Item = u8> + '_ {
     Hash,
     Debug,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
@@ -1745,7 +1745,7 @@ impl From<DisplaySpec> for DisplaySpecAddress {
     Hash,
     Debug,
     Default,
-    IntoEnumIterator,
+    EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
     Display,
