@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 helgoboss-midi.workspace = true
-num = "0.2.1"
+num.workspace = true
 num_enum.workspace = true
 approx.workspace = true
 derive_more.workspace = true
