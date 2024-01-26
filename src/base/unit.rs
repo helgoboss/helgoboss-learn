@@ -1,4 +1,5 @@
 use crate::{DiscreteIncrement, DiscreteValue, Interval, IntervalMatchResult};
+use bytemuck::NoUninit;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -91,8 +92,9 @@ pub enum MinIsMaxBehavior {
 }
 
 /// A number within the unit interval `(0.0..=1.0)`.
-#[derive(Clone, Copy, Debug, PartialEq, Display, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Display, Default, Serialize, Deserialize, NoUninit)]
 #[serde(try_from = "f64")]
+#[repr(transparent)]
 pub struct UnitValue(f64);
 
 impl Eq for UnitValue {}
