@@ -118,7 +118,7 @@ impl From<MidiClockTransportMessage> for ShortMessageType {
 
 #[derive(Clone, Debug, Derivative)]
 #[derivative(PartialEq)]
-pub enum MidiSource<S: MidiSourceScript> {
+pub enum MidiSource<S: for<'a> MidiSourceScript<'a>> {
     NoteVelocity {
         channel: Option<Channel>,
         key_number: Option<KeyNumber>,
@@ -241,7 +241,7 @@ pub enum PatternByte {
     Variable,
 }
 
-impl<S: MidiSourceScript> MidiSource<S> {
+impl<S: for<'a> MidiSourceScript<'a>> MidiSource<S> {
     /// This will be very fast except maybe for raw sources.
     pub fn extract_feedback_address(&self) -> Option<MidiSourceAddress> {
         use MidiSource::*;
@@ -303,7 +303,13 @@ impl<S: MidiSourceScript> MidiSource<S> {
             Raw { pattern, .. } => MidiSourceAddress::Raw {
                 pattern: pattern.to_pattern_bytes(),
             },
-            Script { script } => script.execute(FeedbackValue::Off).ok()?.address?,
+            // TODO-high CONTINUE Passing default here means we can't use additional input (e.g. common Lua) when extracting feedback address. Bad?
+            Script { script } => {
+                script
+                    .execute(FeedbackValue::Off, Default::default())
+                    .ok()?
+                    .address?
+            }
             // No feedback
             ClockTempo | ClockTransport { .. } | NoteKeyNumber { .. } => return None,
             // Non-feedback-compatible configurations (e.g. channel == <Any>)
@@ -846,11 +852,10 @@ impl<S: MidiSourceScript> MidiSource<S> {
     /// supported by this source.
     ///
     /// The source context allows us to pass in more global state, e.g. about the connected device.
-    /// At the moment not used.
     pub fn feedback_flexible<M: ShortMessage + ShortMessageFactory>(
         &self,
         feedback_value: FeedbackValue,
-        _: &SourceContext,
+        context: SourceContext<<S as MidiSourceScript<'_>>::AdditionalInput>,
     ) -> Option<PreliminaryMidiSourceFeedbackValue<'static, M>> {
         use MidiSource::*;
         use MidiSourceValue as V;
@@ -963,7 +968,9 @@ impl<S: MidiSourceScript> MidiSource<S> {
                 Some(value)
             }
             Script { script } => {
-                let outcome = script.execute(feedback_value).ok()?;
+                let outcome = script
+                    .execute(feedback_value, context.additional_script_input)
+                    .ok()?;
                 let value = V::Raw {
                     feedback_address_info: outcome.address.map(RawFeedbackAddressInfo::Custom),
                     events: outcome.events,
@@ -1123,10 +1130,7 @@ impl<S: MidiSourceScript> MidiSource<S> {
         feedback_value: FeedbackValue,
     ) -> Option<MidiSourceValue<'static, M>> {
         let context = SourceContext::default();
-        Some(
-            self.feedback_flexible(feedback_value, &context)?
-                .final_value,
-        )
+        Some(self.feedback_flexible(feedback_value, context)?.final_value)
     }
 
     /// Formats the given absolute control value.

@@ -1,3 +1,5 @@
-/// Reserved global state for sources.
-#[derive(Debug, Default)]
-pub struct SourceContext;
+/// Context for source-related functions.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct SourceContext<A> {
+    pub additional_script_input: A,
+}
