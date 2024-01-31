@@ -61,7 +61,7 @@ impl FeedbackScript for TestFeedbackScript {
         unimplemented!()
     }
 
-    fn used_props(&self) -> Result<HashSet<String>, Box<dyn Error>> {
+    fn used_props(&self) -> Result<NonCryptoHashSet<String>, Box<dyn Error>> {
         Ok(Default::default())
     }
 }

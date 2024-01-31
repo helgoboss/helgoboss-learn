@@ -1,6 +1,6 @@
 use crate::source::color_util::find_closest_color_in_palette;
 use crate::{MackieLcdScope, RgbColor};
-use std::collections::HashMap;
+use base::hash_util::NonCryptoHashMap;
 
 mod colors {
     use crate::RgbColor;
@@ -43,7 +43,7 @@ const COLOR_PALETTE: [RgbColor; 8] = [BLANK, RED, GREEN, YELLOW, BLUE, PURPLE, C
 /// source context state).
 #[derive(Debug, Default)]
 pub struct XTouchMackieLcdState {
-    state_by_extender: HashMap<u8, XTouchMackieExtenderLcdState>,
+    state_by_extender: NonCryptoHashMap<u8, XTouchMackieExtenderLcdState>,
 }
 
 #[derive(Debug, Default)]

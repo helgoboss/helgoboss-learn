@@ -1,6 +1,6 @@
 use crate::{FeedbackValue, PropValue};
+use base::hash_util::NonCryptoHashSet;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::error::Error;
 
 pub trait FeedbackScript {
@@ -9,7 +9,7 @@ pub trait FeedbackScript {
         input: FeedbackScriptInput,
     ) -> Result<FeedbackScriptOutput, Cow<'static, str>>;
 
-    fn used_props(&self) -> Result<HashSet<String>, Box<dyn Error>>;
+    fn used_props(&self) -> Result<NonCryptoHashSet<String>, Box<dyn Error>>;
 }
 
 pub trait PropProvider {

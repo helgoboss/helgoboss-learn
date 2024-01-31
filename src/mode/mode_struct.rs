@@ -8,6 +8,7 @@ use crate::{
     TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue, ValueSequence,
     BASE_EPSILON,
 };
+use base::hash_util::{NonCryptoHashMap, NonCryptoHashSet};
 use derive_more::Display;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use regex::Captures;
@@ -58,8 +59,8 @@ pub struct ModeFeedbackOptions {
 
 #[derive(Clone, Debug)]
 pub enum FeedbackValueTable {
-    FromTextToDiscrete(HashMap<String, u32>),
-    FromTextToContinuous(HashMap<String, f64>),
+    FromTextToDiscrete(NonCryptoHashMap<String, u32>),
+    FromTextToContinuous(NonCryptoHashMap<String, f64>),
 }
 
 impl FeedbackValueTable {
@@ -96,7 +97,7 @@ impl FeedbackValueTable {
 
 impl Default for FeedbackValueTable {
     fn default() -> Self {
-        Self::FromTextToDiscrete(HashMap::new())
+        Self::FromTextToDiscrete(HashMap::default())
     }
 }
 
@@ -250,7 +251,7 @@ struct ModeState<S: AbstractTimestamp> {
     /// For relative control
     unpacked_target_value_set: BTreeSet<UnitValue>,
     /// For textual feedback
-    feedback_props_in_use: HashSet<String>,
+    feedback_props_in_use: NonCryptoHashSet<String>,
     /// Supposed to contain the final target value after the last control with this mode.
     ///
     /// The mode knows the value that it produced for the consumer, so the consumer sends it
@@ -510,10 +511,10 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                 let mut set = match &settings.feedback_processor {
                     FeedbackProcessor::Numeric => {
                         // Numeric feedback doesn't use any target props
-                        HashSet::new()
+                        NonCryptoHashSet::default()
                     }
                     FeedbackProcessor::Text { expression } => {
-                        let mut set = HashSet::new();
+                        let mut set = HashSet::default();
                         // Text feedback based on a text expression probably uses target props.
                         // We extract them statically by looking at the expression.
                         if expression.is_empty() {
@@ -624,7 +625,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
         self.settings.feedback_processor.is_complex()
     }
 
-    pub fn feedback_props_in_use(&self) -> &HashSet<String> {
+    pub fn feedback_props_in_use(&self) -> &NonCryptoHashSet<String> {
         &self.state.feedback_props_in_use
     }
 

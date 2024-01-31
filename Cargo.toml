@@ -5,6 +5,7 @@ authors = ["Benjamin Klum <benjamin.klum@helgoboss.org>"]
 edition = "2021"
 
 [dependencies]
+base.workspace = true
 helgoboss-midi.workspace = true
 num.workspace = true
 num_enum.workspace = true
