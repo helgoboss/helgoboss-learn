@@ -10456,7 +10456,6 @@ mod tests {
             TextualFeedbackValue,
         };
         use std::borrow::Cow;
-        use std::collections::HashMap;
 
         #[test]
         fn pass_through() {
@@ -10489,7 +10488,7 @@ mod tests {
         #[test]
         fn feedback_value_table() {
             // Given
-            let map: NonCryptoHashMap<String, u32> = [("playing", 5), ("paused", 6)]
+            let map = [("playing", 5), ("paused", 6)]
                 .into_iter()
                 .map(|(key, value)| (key.to_owned(), value))
                 .collect();

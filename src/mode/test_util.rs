@@ -2,8 +2,8 @@ use crate::{
     AbsoluteValue, ControlType, FeedbackScript, FeedbackScriptInput, FeedbackScriptOutput, Target,
     Transformation, TransformationInput, TransformationOutput,
 };
+use base::hash_util::NonCryptoHashSet;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::error::Error;
 
 pub struct TestTarget {
