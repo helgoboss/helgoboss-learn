@@ -247,7 +247,10 @@ where
     S: for<'a> MidiSourceScript<'a>,
 {
     /// This will be very fast except maybe for raw or script sources.
-    pub fn extract_feedback_address(&self) -> Option<MidiSourceAddress> {
+    pub fn extract_feedback_address(
+        &self,
+        context: SourceContext<<S as MidiSourceScript<'_>>::AdditionalInput>,
+    ) -> Option<MidiSourceAddress> {
         use MidiSource::*;
         let res = match self {
             NoteVelocity {
@@ -308,12 +311,10 @@ where
                 pattern: pattern.to_pattern_bytes(),
             },
             Script { script } => {
-                // We pass default as additional input. That means e.g. Lua scripts will not be able to access common
-                // Lua when calculating the feedback address!
-                return match script.execute(FeedbackValue::Off, Default::default()) {
+                return match script.execute(FeedbackValue::Off, context.additional_script_input) {
                     Ok(outcome) => outcome.address,
                     Err(e) => {
-                        tracing::warn!(msg = "MIDI script returned an error when extracting feedback address", %e);
+                        tracing::warn!(msg = "MIDI script failed while extracting feedback address", %e);
                         None
                     }
                 };
@@ -334,9 +335,10 @@ where
     pub fn has_same_feedback_address_as_value(
         &self,
         value: &MidiSourceValue<RawShortMessage>,
+        context: SourceContext<<S as MidiSourceScript<'_>>::AdditionalInput>,
     ) -> bool {
         if let (Some(addr1), Some(addr2)) = (
-            self.extract_feedback_address(),
+            self.extract_feedback_address(context),
             value.extract_feedback_address(),
         ) {
             addr1 == addr2
@@ -359,8 +361,15 @@ where
     /// Used for:
     ///
     /// - Feedback diffing
-    pub fn has_same_feedback_address_as_source(&self, other: &Self) -> bool {
-        self.extract_feedback_address() == other.extract_feedback_address()
+    pub fn has_same_feedback_address_as_source(
+        &self,
+        other: &Self,
+        context: SourceContext<<S as MidiSourceScript<'_>>::AdditionalInput>,
+    ) -> bool
+    where
+        for<'a> <S as MidiSourceScript<'a>>::AdditionalInput: Copy,
+    {
+        self.extract_feedback_address(context) == other.extract_feedback_address(context)
     }
 
     /// Used for creating sources when learning.
