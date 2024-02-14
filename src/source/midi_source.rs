@@ -1,15 +1,16 @@
 use crate::{
     create_raw_midi_events_singleton, format_percentage_without_unit,
     parse_percentage_without_unit, AbsoluteValue, Bpm, ControlValue, DetailedSourceCharacter,
-    DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
-    PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents,
-    RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
+    DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceScriptOutcome,
+    MidiSourceValue, PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent,
+    RawMidiEvents, RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
     XTouchMackieLcdColorRequest,
 };
 use core::iter;
 use derivative::Derivative;
 use derive_more::Display;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use std::borrow::Cow;
 use std::cell::Cell;
 use strum::EnumIter;
 
@@ -241,8 +242,11 @@ pub enum PatternByte {
     Variable,
 }
 
-impl<S: for<'a> MidiSourceScript<'a>> MidiSource<S> {
-    /// This will be very fast except maybe for raw sources.
+impl<S> MidiSource<S>
+where
+    S: for<'a> MidiSourceScript<'a>,
+{
+    /// This will be very fast except maybe for raw or script sources.
     pub fn extract_feedback_address(&self) -> Option<MidiSourceAddress> {
         use MidiSource::*;
         let res = match self {
@@ -303,12 +307,16 @@ impl<S: for<'a> MidiSourceScript<'a>> MidiSource<S> {
             Raw { pattern, .. } => MidiSourceAddress::Raw {
                 pattern: pattern.to_pattern_bytes(),
             },
-            // TODO-high CONTINUE Passing default here means we can't use additional input (e.g. common Lua) when extracting feedback address. Bad?
             Script { script } => {
-                script
-                    .execute(FeedbackValue::Off, Default::default())
-                    .ok()?
-                    .address?
+                // We pass default as additional input. That means e.g. Lua scripts will not be able to access common
+                // Lua when calculating the feedback address!
+                return match script.execute(FeedbackValue::Off, Default::default()) {
+                    Ok(outcome) => outcome.address,
+                    Err(e) => {
+                        tracing::warn!(msg = "MIDI script returned an error when extracting feedback address", %e);
+                        None
+                    }
+                };
             }
             // No feedback
             ClockTempo | ClockTransport { .. } | NoteKeyNumber { .. } => return None,
