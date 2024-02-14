@@ -1,16 +1,15 @@
 use crate::{
     create_raw_midi_events_singleton, format_percentage_without_unit,
     parse_percentage_without_unit, AbsoluteValue, Bpm, ControlValue, DetailedSourceCharacter,
-    DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceScriptOutcome,
-    MidiSourceValue, PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent,
-    RawMidiEvents, RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
+    DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
+    PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents,
+    RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
     XTouchMackieLcdColorRequest,
 };
 use core::iter;
 use derivative::Derivative;
 use derive_more::Display;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-use std::borrow::Cow;
 use std::cell::Cell;
 use strum::EnumIter;
 
