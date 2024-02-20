@@ -21,6 +21,8 @@ lazycell.workspace = true
 derivative.workspace = true
 # For OSC
 rosc.workspace = true
+# For using the Bpm type
+reaper-common-types.workspace = true
 # For letting the here defined raw MIDI data structure implement the REAPER MIDI event type
 reaper-low = { workspace = true, optional = true }
 # For tokenizing sys-ex patterns

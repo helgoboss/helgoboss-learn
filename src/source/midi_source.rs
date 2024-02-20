@@ -1,6 +1,6 @@
 use crate::{
     create_raw_midi_events_singleton, format_percentage_without_unit,
-    parse_percentage_without_unit, AbsoluteValue, Bpm, ControlValue, DetailedSourceCharacter,
+    parse_percentage_without_unit, AbsoluteValue, ControlValue, DetailedSourceCharacter,
     DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
     PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents,
     RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
@@ -20,6 +20,7 @@ use helgoboss_midi::{
     ParameterNumberMessage, RawShortMessage, ShortMessage, ShortMessageFactory, ShortMessageType,
     StructuredShortMessage, U14, U7,
 };
+use reaper_common_types::Bpm;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::convert::{TryFrom, TryInto};
@@ -786,7 +787,7 @@ where
                 _ => None,
             },
             S::ClockTempo => match value {
-                Tempo(bpm) => Some(ControlValue::AbsoluteContinuous(bpm.to_unit_value())),
+                Tempo(bpm) => Some(ControlValue::AbsoluteContinuous((*bpm).into())),
                 _ => None,
             },
             S::Raw {
@@ -1161,7 +1162,7 @@ where
         use MidiSource::*;
         let result = match self {
             ClockTempo => {
-                let bpm = Bpm::from_unit_value(value.to_unit_value()?);
+                let bpm = Bpm::from(value.to_unit_value()?);
                 format!("{:.2}", bpm.get())
             }
             ClockTransport { .. } => {
@@ -1183,8 +1184,8 @@ where
         use MidiSource::*;
         let unit_value = match self {
             ClockTempo => {
-                let bpm: Bpm = text.parse()?;
-                bpm.to_unit_value()
+                let bpm: Bpm = text.parse().map_err(|_| "not a valid BPM value")?;
+                UnitValue::from(bpm)
             }
             ClockTransport { .. } => {
                 return Err("parsing doesn't make sense for clock transport MIDI source");
