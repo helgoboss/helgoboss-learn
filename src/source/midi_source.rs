@@ -3334,6 +3334,6 @@ mod tests {
     }
 
     fn tempo(bpm: f64) -> MidiSourceValue<'static, RawShortMessage> {
-        MidiSourceValue::Tempo(Bpm::new(bpm))
+        MidiSourceValue::Tempo(Bpm::new_panic(bpm))
     }
 }
