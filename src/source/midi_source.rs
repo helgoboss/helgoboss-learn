@@ -1934,7 +1934,7 @@ impl DisplayPositions {
     }
 
     /// Returns left-to-right display positions.
-    pub fn iter(&self) -> impl Iterator<Item = u8> + DoubleEndedIterator + '_ {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = u8> + '_ {
         self.positions.iter().copied()
     }
 }

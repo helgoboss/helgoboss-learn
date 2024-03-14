@@ -108,7 +108,7 @@ impl RawMidiPattern {
     pub fn byte_iter(
         &self,
         variable_value: AbsoluteValue,
-    ) -> impl Iterator<Item = u8> + ExactSizeIterator + '_ {
+    ) -> impl ExactSizeIterator<Item = u8> + '_ {
         let discrete_value = match variable_value {
             AbsoluteValue::Continuous(v) => v.to_discrete(self.max_discrete_value()),
             AbsoluteValue::Discrete(f) => {
