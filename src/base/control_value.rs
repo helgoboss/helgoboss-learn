@@ -163,6 +163,23 @@ impl ControlValue {
         }
     }
 
+    /// Extracts the discrete value if this is an absolute control value.
+    ///
+    /// The `value_count` is only used if this value is a unit value, in order to transform it into a discrete value.
+    pub fn to_discrete_value(self, value_count: u32) -> Result<Fraction, &'static str> {
+        match self {
+            ControlValue::AbsoluteContinuous(v) => {
+                if value_count == 0 {
+                    return Ok(Fraction::new_max(0));
+                }
+                let actual = (v.get() * (value_count - 1) as f64).round() as u32;
+                Ok(Fraction::new(actual, value_count))
+            }
+            ControlValue::AbsoluteDiscrete(f) => Ok(f),
+            _ => Err("control value is not absolute"),
+        }
+    }
+
     /// Extracts an absolute value if this is an absolute control value.
     pub fn to_absolute_value(self) -> Result<AbsoluteValue, &'static str> {
         match self {
