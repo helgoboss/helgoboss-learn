@@ -506,6 +506,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                 settings.fire_mode,
                 settings.press_duration_interval,
                 settings.turbo_rate,
+                settings.button_usage,
             ),
             feedback_props_in_use: {
                 let mut set = match &settings.feedback_processor {

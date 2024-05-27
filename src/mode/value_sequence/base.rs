@@ -21,27 +21,30 @@ impl ValueSequence {
             super::parser::parse_entries(input).map_err(|_| "couldn't parse sequence")?;
         let sequence = ValueSequence {
             entries: {
-                let result: Result<Vec<_>, &'static str> = raw_entries
+                raw_entries
                     .iter()
                     .map(|e| match e {
-                        RawEntry::SingleValue(e) => Ok(ValueSequenceEntry::SingleValue(
-                            single_value_parser.parse_value(e)?,
-                        )),
+                        RawEntry::SingleValue(e) => ValueSequenceEntry::SingleValue(
+                            single_value_parser.parse_value(e).unwrap_or_default(),
+                        ),
                         RawEntry::Range(e) => {
                             let entry = ValueSequenceRangeEntry {
-                                from: single_value_parser.parse_value(e.simple_range.from)?,
-                                to: single_value_parser.parse_value(e.simple_range.to)?,
+                                from: single_value_parser
+                                    .parse_value(e.simple_range.from)
+                                    .unwrap_or_default(),
+                                to: single_value_parser
+                                    .parse_value(e.simple_range.to)
+                                    .unwrap_or_default(),
                                 step_size: if let Some(s) = e.step_size {
-                                    Some(single_value_parser.parse_step(s)?)
+                                    Some(single_value_parser.parse_step(s).unwrap_or_default())
                                 } else {
                                     None
                                 },
                             };
-                            Ok(ValueSequenceEntry::Range(entry))
+                            ValueSequenceEntry::Range(entry)
                         }
                     })
-                    .collect();
-                result?
+                    .collect()
             },
         };
         Ok(sequence)

@@ -1,4 +1,4 @@
-use crate::{AbsoluteValue, FireMode, Interval};
+use crate::{AbsoluteValue, ButtonUsage, FireMode, Interval};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
@@ -10,6 +10,7 @@ pub struct PressDurationProcessor {
     turbo_rate: Duration,
     // Runtime data (changes during usage)
     last_button_press: Option<ButtonPress>,
+    button_usage: ButtonUsage,
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +44,7 @@ impl Default for PressDurationProcessor {
             multi_press_span: Duration::from_millis(300),
             turbo_rate: ZERO_DURATION,
             last_button_press: None,
+            button_usage: ButtonUsage::Both,
         }
     }
 }
@@ -52,11 +54,13 @@ impl PressDurationProcessor {
         mode: FireMode,
         interval: Interval<Duration>,
         turbo_rate: Duration,
+        button_usage: ButtonUsage,
     ) -> PressDurationProcessor {
         PressDurationProcessor {
             fire_mode: mode,
             interval,
             turbo_rate,
+            button_usage,
             ..Default::default()
         }
     }
@@ -122,8 +126,7 @@ impl PressDurationProcessor {
                     None
                 } else {
                     // Button release
-                    self.last_button_press = None;
-                    None
+                    self.process_timeout_button_release(control_value)
                 }
             }
             FireMode::AfterTimeoutKeepFiring => {
@@ -142,8 +145,7 @@ impl PressDurationProcessor {
                     result
                 } else {
                     // Button release
-                    self.last_button_press = None;
-                    None
+                    self.process_timeout_button_release(control_value)
                 }
             }
             FireMode::OnSinglePress => {
@@ -223,9 +225,6 @@ impl PressDurationProcessor {
                         None
                     }
                 };
-                if fire_value.is_some() {
-                    self.last_button_press = None;
-                }
                 fire_value
             }
             FireMode::AfterTimeoutKeepFiring => {
@@ -275,5 +274,19 @@ impl PressDurationProcessor {
                 Some(fire_value)
             }
         }
+    }
+
+    fn process_timeout_button_release(
+        &mut self,
+        control_value: AbsoluteValue,
+    ) -> Option<AbsoluteValue> {
+        let last_button_press = self.last_button_press.take()?;
+        if self.button_usage == ButtonUsage::PressOnly {
+            return None;
+        }
+        if last_button_press.time.elapsed() < self.interval.min_val() {
+            return None;
+        }
+        Some(control_value)
     }
 }
