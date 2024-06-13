@@ -35,11 +35,9 @@ impl ValueSequence {
                                 to: single_value_parser
                                     .parse_value(e.simple_range.to)
                                     .unwrap_or_default(),
-                                step_size: if let Some(s) = e.step_size {
-                                    Some(single_value_parser.parse_step(s).unwrap_or_default())
-                                } else {
-                                    None
-                                },
+                                step_size: e
+                                    .step_size
+                                    .map(|s| single_value_parser.parse_step(s).unwrap_or_default()),
                             };
                             ValueSequenceEntry::Range(entry)
                         }

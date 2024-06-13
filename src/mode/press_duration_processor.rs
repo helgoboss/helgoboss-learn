@@ -217,15 +217,12 @@ impl PressDurationProcessor {
         match self.fire_mode {
             FireMode::Normal | FireMode::OnDoublePress => None,
             FireMode::AfterTimeout => {
-                let fire_value = {
-                    let last_button_press = self.last_button_press.as_ref()?;
-                    if last_button_press.time.elapsed() >= self.interval.min_val() {
-                        Some(last_button_press.value)
-                    } else {
-                        None
-                    }
-                };
-                fire_value
+                let last_button_press = self.last_button_press.as_ref()?;
+                if last_button_press.time.elapsed() >= self.interval.min_val() {
+                    Some(last_button_press.value)
+                } else {
+                    None
+                }
             }
             FireMode::AfterTimeoutKeepFiring => {
                 let last_button_press = self.last_button_press.as_mut()?;
