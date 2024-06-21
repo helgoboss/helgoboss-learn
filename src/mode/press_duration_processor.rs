@@ -3,12 +3,13 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
 pub struct PressDurationProcessor {
-    // Configuration data (stays constant)
+    // # Configuration data (stays constant)
     fire_mode: FireMode,
     interval: Interval<Duration>,
+    /// Double press detection: How long to wait for a second press
     multi_press_span: Duration,
     turbo_rate: Duration,
-    // Runtime data (changes during usage)
+    // # Runtime data (changes during usage)
     last_button_press: Option<ButtonPress>,
     button_usage: ButtonUsage,
 }
@@ -17,8 +18,19 @@ pub struct PressDurationProcessor {
 struct ButtonPress {
     time: Instant,
     value: AbsoluteValue,
+    /// Used for after-timeout-keep-firing mode.
     time_of_last_turbo_fire: Option<Instant>,
-    count: u32,
+    /// Whether we already fired in response to this press.
+    ///
+    /// Important for after-timeout mode: We must not clear the press on first fire, otherwise we can't
+    /// decide anymore what will happen on release.
+    fired_already: bool,
+    /// Number of tap-downs so far. Used for double-press detection.
+    tap_down_count: u32,
+    /// Whether the button has been released already.
+    ///
+    /// This is relevant for distinction between single and double press. A button press that is
+    /// released after a short time can still develop into a double press, so we can't clear the press yet.
     released: bool,
 }
 
@@ -28,7 +40,8 @@ impl ButtonPress {
             time: Instant::now(),
             value,
             time_of_last_turbo_fire: None,
-            count: 1,
+            fired_already: false,
+            tap_down_count: 1,
             released: false,
         }
     }
@@ -153,7 +166,7 @@ impl PressDurationProcessor {
                     // Button press
                     if let Some(press) = self.last_button_press.as_mut() {
                         // Must be more than single press already.
-                        press.count += 1;
+                        press.tap_down_count += 1;
                         press.time = Instant::now();
                     } else {
                         // First press
@@ -164,7 +177,7 @@ impl PressDurationProcessor {
                     // Button release.
                     let fire_value = {
                         let press = self.last_button_press.as_mut()?;
-                        if press.count != 1 {
+                        if press.tap_down_count != 1 {
                             return None;
                         }
                         let elapsed = press.time.elapsed();
@@ -217,12 +230,14 @@ impl PressDurationProcessor {
         match self.fire_mode {
             FireMode::Normal | FireMode::OnDoublePress => None,
             FireMode::AfterTimeout => {
-                let last_button_press = self.last_button_press.as_ref()?;
-                if last_button_press.time.elapsed() >= self.interval.min_val() {
-                    Some(last_button_press.value)
-                } else {
-                    None
+                let last_button_press = self.last_button_press.as_mut()?;
+                if last_button_press.fired_already
+                    || last_button_press.time.elapsed() < self.interval.min_val()
+                {
+                    return None;
                 }
+                last_button_press.fired_already = true;
+                Some(last_button_press.value)
             }
             FireMode::AfterTimeoutKeepFiring => {
                 let last_button_press = self.last_button_press.as_mut()?;
@@ -260,7 +275,7 @@ impl PressDurationProcessor {
                         }
                         return None;
                     }
-                    if press.count > 1 {
+                    if press.tap_down_count > 1 {
                         // Button was pressed more than one time and waiting time is over. Reset!
                         self.last_button_press = None;
                         return None;
