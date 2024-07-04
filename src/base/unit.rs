@@ -504,14 +504,7 @@ impl UnitIncrement {
     #[allow(clippy::float_cmp)]
     pub fn new_clamped(number: f64) -> UnitIncrement {
         assert_ne!(number, 0.0);
-        let actual_number = if number > 1.0 {
-            1.0
-        } else if number < -1.0 {
-            -1.0
-        } else {
-            number
-        };
-        UnitIncrement(actual_number)
+        UnitIncrement(number.clamp(-1.0, 1.0))
     }
 
     /// Checks preconditions only in debug build. Should only be used if you want to squeeze out
