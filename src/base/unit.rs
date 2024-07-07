@@ -306,7 +306,7 @@ impl UnitValue {
     /// addition.
     ///
     /// Slight inaccuracies can have a big effect when actually rotating:
-    /// https://github.com/helgoboss/realearn/issues/208. That's why an epsilon needs to be passed
+    /// https://github.com/helgoboss/helgobox/issues/208. That's why an epsilon needs to be passed
     /// for the comparison that decides whether it's time to rotate already.
     pub fn add_rotating(
         &self,

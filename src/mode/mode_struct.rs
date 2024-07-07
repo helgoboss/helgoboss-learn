@@ -763,7 +763,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                 &self.settings.discrete_target_value_interval,
             )?
         };
-        // Tolerant interval bounds test because of https://github.com/helgoboss/realearn/issues/263.
+        // Tolerant interval bounds test because of https://github.com/helgoboss/helgobox/issues/263.
         // TODO-medium The most elaborate solution to deal with discrete values would be to actually
         //  know which interval of floating point values represents a specific discrete target value.
         //  However, is there a generic way to know that? Taking the target step size as epsilon in this
@@ -1450,7 +1450,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
                             // Target is not trigger-like, there's nothing we can do.
                             return None;
                         }
-                        // https://github.com/helgoboss/realearn/issues/613
+                        // https://github.com/helgoboss/helgobox/issues/613
                         // Target is like a trigger, so we don't actually need to know its
                         // value to trigger it. We consider a encoder movement as triggering!
                         // However, we also should support decreasing the encoder sensitivity, so
@@ -6960,7 +6960,7 @@ mod tests {
                 assert!(mode.control(rel_dis_evt(10), &target, ()).is_none());
             }
 
-            /// See https://github.com/helgoboss/realearn/issues/577.
+            /// See https://github.com/helgoboss/helgobox/issues/577.
             #[test]
             fn target_interval_max_not_exceedable() {
                 // Given
@@ -7062,7 +7062,7 @@ mod tests {
                 );
             }
 
-            /// See https://github.com/helgoboss/realearn/issues/100.
+            /// See https://github.com/helgoboss/helgobox/issues/100.
             #[test]
             fn not_get_stuck() {
                 // Given
