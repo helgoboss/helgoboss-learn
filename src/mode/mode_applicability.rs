@@ -42,6 +42,7 @@ pub struct ModeApplicabilityCheckInput {
     pub source_character: DetailedSourceCharacter,
     pub absolute_mode: AbsoluteMode,
     pub target_value_sequence_is_set: bool,
+    pub fire_mode: FireMode,
 }
 
 impl ModeApplicabilityCheckInput {
@@ -653,9 +654,19 @@ pub fn check_mode_applicability(
                     MomentaryOnOffButton | MomentaryVelocitySensitiveButton
                         if input.absolute_mode == crate::AbsoluteMode::Normal =>
                     {
-                        MakesSense(
-                            "Defines whether to process button presses only, releases only or both.",
-                        )
+                        match input.fire_mode {
+                            crate::FireMode::Normal | crate::FireMode::AfterTimeout | crate::FireMode::AfterTimeoutKeepFiring => {
+                                MakesSense(
+                                    "Defines whether to process button presses only, releases only or both.",
+                                )
+                            }
+                            crate::FireMode::OnSinglePress |
+                            crate::FireMode::OnDoublePress => {
+                                // In this case, we need both press and release as input for implementing the fire mode.
+                                // And the output is only press.
+                                MakesNoSenseUseDefault
+                            }
+                        }
                     }
                     RangeControl | Trigger => MakesNoSenseUseDefault,
                     _ => HasNoEffect,
