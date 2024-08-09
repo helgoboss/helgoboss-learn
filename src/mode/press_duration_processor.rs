@@ -92,11 +92,18 @@ impl PressDurationProcessor {
     pub fn process_press_or_release(
         &mut self,
         control_value: AbsoluteValue,
+        button_usage: ButtonUsage,
     ) -> Option<AbsoluteValue> {
         let min = self.interval.min_val();
         let max = self.interval.max_val();
         match self.fire_mode {
             FireMode::Normal => {
+                // In the past, the button usage setting was always checked before processing the press duration.
+                // In normal fire mode, we keep doing it that way (although the button setting actually doesn't make
+                // sense in case of min/max being > 0).
+                if button_usage.should_ignore(control_value) {
+                    return None;
+                }
                 if min == ZERO_DURATION && max == ZERO_DURATION {
                     // No-op case: Just fire immediately. If just min is zero, we don't fire
                     // immediately but wait for button release. That way we can support different
@@ -129,8 +136,13 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::AfterTimeout => {
+                // This fire mode has been improved in 2.16.0 to let button release fire 0% if not prevented
+                // by button usage setting.
                 if min == ZERO_DURATION {
                     // No-op case: Fire immediately.
+                    if button_usage.should_ignore(control_value) {
+                        return None;
+                    }
                     return Some(control_value);
                 }
                 if control_value.is_on() {
@@ -143,6 +155,12 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::AfterTimeoutKeepFiring => {
+                // In the past, the button usage setting was always checked before processing the press duration.
+                // We should keep doing it that way in order to not destroy existing setups. Also, that makes it
+                // possible to keep firing even after releasing a button!
+                if button_usage.should_ignore(control_value) {
+                    return None;
+                }
                 if control_value.is_on() {
                     // Button press
                     let mut button_press = ButtonPress::new(control_value);
@@ -162,6 +180,10 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::OnSinglePress => {
+                // Button usage setting doesn't make sense here. We need to process both press and release but only
+                // output press. That's why we started hiding the dropdown in 2.16.1. If someone has previously used
+                // the button filter together with this fire mode, it would have been a weird misconfiguration,
+                // qualifying as "undefined behavior". Breaking change is okay.
                 if control_value.is_on() {
                     // Button press
                     if let Some(press) = self.last_button_press.as_mut() {
@@ -198,6 +220,10 @@ impl PressDurationProcessor {
                 }
             }
             FireMode::OnDoublePress => {
+                // Button usage setting doesn't make sense here. We need to process both press and release but only
+                // output press. That's why we started hiding the dropdown in 2.16.1. If someone has previously used
+                // the button filter together with this fire mode, it would have been a weird misconfiguration,
+                // qualifying as "undefined behavior". Breaking change is okay.
                 if control_value.is_on() {
                     if let Some(press) = &self.last_button_press {
                         // Button was pressed before

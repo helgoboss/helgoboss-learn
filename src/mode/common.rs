@@ -109,6 +109,16 @@ pub enum ButtonUsage {
     ReleaseOnly,
 }
 
+impl ButtonUsage {
+    pub fn should_ignore(&self, value: AbsoluteValue) -> bool {
+        match self {
+            ButtonUsage::PressOnly if value.is_zero() => true,
+            ButtonUsage::ReleaseOnly if !value.is_zero() => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(
     Copy,
     Clone,

@@ -993,17 +993,19 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
         // Filter presses/releases. Makes sense only for absolute mode "Normal". If this is used
         // a filter is used with another absolute mode, it's considered a usage fault.
         let mut v = control_event.payload();
-        match self.settings.button_usage {
-            ButtonUsage::PressOnly if v.is_zero() => return None,
-            ButtonUsage::ReleaseOnly if !v.is_zero() => return None,
-            _ => {}
-        };
         // Press duration
         if consider_press_duration {
+            // When press duration is considered (in all cases except polling), the press duration processor
+            // should decide how to interpret the button usage settings.
             v = self
                 .state
                 .press_duration_processor
-                .process_press_or_release(v)?;
+                .process_press_or_release(v, self.settings.button_usage)?;
+        } else {
+            // When press duration must not be considered (when polling), process the button usage settings right here
+            if self.settings.button_usage.should_ignore(v) {
+                return None;
+            }
         }
         // Dispatch
         let control_event = control_event.with_payload(v);
