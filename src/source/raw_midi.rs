@@ -118,7 +118,11 @@ impl RawMidiPattern {
         self.entries.iter().map(move |e| e.to_byte(discrete_value))
     }
 
-    pub fn to_concrete_midi_event(&self, variable_value: AbsoluteValue) -> RawMidiEvent {
+    pub fn to_concrete_midi_event(
+        &self,
+        frame_offset: u32,
+        variable_value: AbsoluteValue,
+    ) -> RawMidiEvent {
         // TODO-medium Use RawMidiEvent::try_from_iter
         let mut array = [0; RawMidiEvent::MAX_LENGTH];
         let mut i = 0u32;
@@ -129,7 +133,7 @@ impl RawMidiPattern {
             array[i as usize] = byte;
             i += 1;
         }
-        RawMidiEvent::new(0, i, array)
+        RawMidiEvent::new(frame_offset, i, array)
     }
 }
 

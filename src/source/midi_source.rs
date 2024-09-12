@@ -977,7 +977,7 @@ where
             }
             Raw { pattern, .. } => {
                 let raw_midi_event =
-                    pattern.to_concrete_midi_event(feedback_value.to_numeric()?.value);
+                    pattern.to_concrete_midi_event(0, feedback_value.to_numeric()?.value);
                 let address_info = RawFeedbackAddressInfo::Raw {
                     variable_range: pattern.variable_range(),
                 };
