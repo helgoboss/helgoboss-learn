@@ -250,16 +250,16 @@ impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
 
 impl From<UnitValue> for Bpm {
     fn from(value: UnitValue) -> Self {
-        let min = Bpm::MIN.get();
-        let span = Bpm::MAX.get() - min;
+        let min = Bpm::ONE_BPM.get();
+        let span = Bpm::NINE_HUNDRED_SIXTY_BPM.get() - min;
         Bpm::new_panic(min + value.get() * span)
     }
 }
 
 impl From<Bpm> for UnitValue {
     fn from(value: Bpm) -> Self {
-        let min = Bpm::MIN.get();
-        let span = Bpm::MAX.get() - min;
+        let min = Bpm::ONE_BPM.get();
+        let span = Bpm::NINE_HUNDRED_SIXTY_BPM.get() - min;
         UnitValue::new((value.get() - min) / span)
     }
 }
