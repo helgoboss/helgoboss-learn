@@ -3,10 +3,10 @@ use crate::{
     negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
     ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackScript,
     FeedbackScriptInput, FeedbackStyle, FeedbackValue, FireMode, Fraction, Increment, Interval,
-    MinIsMaxBehavior, NumericFeedbackValue, OutOfRangeBehavior, PressDurationProcessor,
-    PropProvider, TakeoverMode, Target, TextualFeedbackValue, Transformation,
-    TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue, ValueSequence,
-    BASE_EPSILON,
+    MinIsMaxBehavior, ModeContext, NumericFeedbackValue, OutOfRangeBehavior,
+    PressDurationProcessor, PropProvider, TakeoverMode, Target, TextualFeedbackValue,
+    Transformation, TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue,
+    ValueSequence, BASE_EPSILON,
 };
 use base::hash_util::{NonCryptoHashMap, NonCryptoHashSet};
 use derive_more::Display;
@@ -102,7 +102,7 @@ impl Default for FeedbackValueTable {
 }
 
 #[derive(Clone, Debug)]
-pub struct ModeSettings<T: Transformation, F: FeedbackScript> {
+pub struct ModeSettings<T: Transformation, F: for<'a> FeedbackScript<'a>> {
     pub absolute_mode: AbsoluteMode,
     pub source_value_interval: Interval<UnitValue>,
     pub discrete_source_value_interval: Interval<u32>,
@@ -165,7 +165,7 @@ impl VirtualColor {
 
 const ZERO_DURATION: Duration = Duration::from_millis(0);
 
-impl<T: Transformation, F: FeedbackScript> Default for ModeSettings<T, F> {
+impl<T: Transformation, F: for<'a> FeedbackScript<'a>> Default for ModeSettings<T, F> {
     fn default() -> Self {
         ModeSettings {
             absolute_mode: AbsoluteMode::Normal,
@@ -220,7 +220,7 @@ impl<T: Transformation, F: FeedbackScript> Default for ModeSettings<T, F> {
 ///         - Displayed as: "{count} x" or "{count}" (former if source emits increments) TODO I
 ///           think now we have only the "x" variant
 #[derive(Clone, Debug)]
-pub struct Mode<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> {
+pub struct Mode<T: Transformation, F: for<'a> FeedbackScript<'a>, S: AbstractTimestamp> {
     settings: ModeSettings<T, F>,
     state: ModeState<S>,
 }
@@ -499,7 +499,12 @@ impl NumericValue {
     }
 }
 
-impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
+impl<T, F, S> Mode<T, F, S>
+where
+    T: Transformation,
+    F: for<'a> FeedbackScript<'a>,
+    S: AbstractTimestamp,
+{
     pub fn new(settings: ModeSettings<T, F>) -> Self {
         let state = ModeState {
             press_duration_processor: PressDurationProcessor::new(
@@ -630,7 +635,11 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
         &self.state.feedback_props_in_use
     }
 
-    pub fn build_feedback(&self, prop_provider: &impl PropProvider) -> FeedbackValue {
+    pub fn build_feedback(
+        &self,
+        prop_provider: &impl PropProvider,
+        context: ModeContext<<F as FeedbackScript<'_>>::AdditionalInput>,
+    ) -> FeedbackValue {
         match &self.settings.feedback_processor {
             FeedbackProcessor::Numeric => {
                 unreachable!("Numeric feedback processor doesn't need build step");
@@ -654,7 +663,7 @@ impl<T: Transformation, F: FeedbackScript, S: AbstractTimestamp> Mode<T, F, S> {
             }
             FeedbackProcessor::Dynamic { script } => {
                 let input = FeedbackScriptInput { prop_provider };
-                match script.feedback(input) {
+                match script.feedback(input, context.additional_script_input) {
                     Ok(o) => o.feedback_value,
                     Err(e) => {
                         let style = self.feedback_style(prop_provider);

@@ -12,6 +12,8 @@ mod press_duration_processor;
 pub use press_duration_processor::*;
 mod value_sequence;
 pub use value_sequence::*;
+mod mode_context;
+pub use mode_context::*;
 
 #[cfg(test)]
 mod test_util;
