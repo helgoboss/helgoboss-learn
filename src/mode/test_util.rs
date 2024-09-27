@@ -56,8 +56,14 @@ impl Transformation for TestTransformation {
 
 pub struct TestFeedbackScript;
 
-impl FeedbackScript for TestFeedbackScript {
-    fn feedback(&self, _: FeedbackScriptInput) -> Result<FeedbackScriptOutput, Cow<'static, str>> {
+impl FeedbackScript<'_> for TestFeedbackScript {
+    type AdditionalInput = ();
+
+    fn feedback(
+        &self,
+        _: FeedbackScriptInput,
+        _: (),
+    ) -> Result<FeedbackScriptOutput, Cow<'static, str>> {
         unimplemented!()
     }
 
