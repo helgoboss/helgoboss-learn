@@ -96,21 +96,30 @@ impl<P, T: AbstractTimestamp> ControlEvent<P, T> {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(u8)]
+pub enum ControlValueKind {
+    AbsoluteContinuous = 0,
+    RelativeDiscrete = 1,
+    RelativeContinuous = 2,
+    AbsoluteDiscrete = 3,
+}
+
 /// Value coming from a source (e.g. a MIDI source) which is supposed to control something.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum ControlValue {
     /// Absolute value that represents a percentage (e.g. fader position on the scale from lowest to
     /// highest, knob position on the scale from closed to fully opened, key press on the scale from
     /// not pressed to pressed with full velocity, key release).
     AbsoluteContinuous(UnitValue),
+    /// Relative increment that represents a number of increments/decrements.
+    RelativeDiscrete(DiscreteIncrement),
+    /// Relative increment that represents a continuous adjustment.
+    RelativeContinuous(UnitIncrement),
     /// Absolute value that is capable of retaining the original discrete value, e.g. the played
     /// note number, without immediately converting it into a UnitValue and thereby losing that
     /// information - which is important for the new "Discrete" mode.
     AbsoluteDiscrete(Fraction),
-    /// Relative increment that represents a continuous adjustment.
-    RelativeContinuous(UnitIncrement),
-    /// Relative increment that represents a number of increments/decrements.
-    RelativeDiscrete(DiscreteIncrement),
 }
 
 impl Display for ControlValue {
@@ -409,7 +418,7 @@ impl AbsoluteValue {
         is_discrete_mode: bool,
         meta_data: TransformationInputMetaData,
         additional_input: T::AdditionalInput,
-    ) -> Result<TransformationOutput<Self>, &'static str> {
+    ) -> Result<TransformationOutput<ControlValue>, &'static str> {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => {
@@ -422,7 +431,7 @@ impl AbsoluteValue {
                     current_target_value,
                     additional_input,
                 )?;
-                Ok(output.map(Continuous))
+                Ok(output.map(ControlValue::AbsoluteContinuous))
             }
             Discrete(v) => {
                 // Input value is discrete.
@@ -436,7 +445,7 @@ impl AbsoluteValue {
                             t,
                             additional_input,
                         )?;
-                        Ok(output.map(Continuous))
+                        Ok(output.map(ControlValue::AbsoluteContinuous))
                     }
                     Discrete(t) => {
                         // Target value is also discrete.
@@ -448,7 +457,7 @@ impl AbsoluteValue {
                                 t,
                                 additional_input,
                             )?;
-                            Ok(output.map(Discrete))
+                            Ok(output.map(ControlValue::AbsoluteDiscrete))
                         } else {
                             // Continuous mode.
                             // Transform using normalized floating point values, thereby destroying
@@ -458,7 +467,7 @@ impl AbsoluteValue {
                                 t.to_unit_value(),
                                 additional_input,
                             )?;
-                            Ok(output.map(Continuous))
+                            Ok(output.map(ControlValue::AbsoluteContinuous))
                         }
                     }
                 }

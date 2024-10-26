@@ -805,7 +805,8 @@ where
                 self.transformation_input_meta_data(),
                 additional_transformation_input,
             ) {
-                v = output.value()?;
+                // For feedback, only absolute result values are accepted, relative ones are ignored.
+                v = output.value()?.to_absolute_value().ok()?;
             }
         };
         // 1. Apply source interval
@@ -908,12 +909,20 @@ where
                         context.additional_input(),
                     )
                     .ok()?;
-                let mut v = self.process_control_transformation_output(output)?;
-                let control_type = target.control_type(context.into());
-                v = self.apply_reverse(control_type, v);
-                v = self.apply_rounded_target_interval_or_target_sequence(control_type, v);
-                let v = ControlValue::from_absolute(v);
-                return Some(ModeControlResult::hit_target(v));
+                let in_cv = self.process_control_transformation_output(output)?;
+                let out_cv = match in_cv.to_absolute_value() {
+                    // Absolute values might get reversed and rounded
+                    Ok(mut abs_v) => {
+                        let control_type = target.control_type(context.into());
+                        abs_v = self.apply_reverse(control_type, abs_v);
+                        abs_v = self
+                            .apply_rounded_target_interval_or_target_sequence(control_type, abs_v);
+                        ControlValue::from_absolute(abs_v)
+                    }
+                    // Relative value stay as they are
+                    _ => in_cv,
+                };
+                return Some(ModeControlResult::hit_target(out_cv));
             }
         }
         None
@@ -1020,10 +1029,7 @@ where
         let control_event = control_event.with_payload(v);
         use AbsoluteMode::*;
         match self.settings.absolute_mode {
-            Normal => Some(
-                self.control_absolute_normal(control_event, target, context, None)?
-                    .map(ControlValue::from_absolute),
-            ),
+            Normal => Some(self.control_absolute_normal(control_event, target, context, None)?),
             IncrementalButton => self.control_absolute_incremental_buttons(
                 control_event.with_payload(v.to_unit_value()),
                 target,
@@ -1037,15 +1043,12 @@ where
             MakeRelative => {
                 self.control_absolute_to_relative(control_event, target, context, options)
             }
-            PerformanceControl => Some(
-                self.control_absolute_normal(
-                    control_event,
-                    target,
-                    context,
-                    last_non_performance_target_value,
-                )?
-                .map(ControlValue::from_absolute),
-            ),
+            PerformanceControl => Some(self.control_absolute_normal(
+                control_event,
+                target,
+                context,
+                last_non_performance_target_value,
+            )?),
         }
     }
 
@@ -1063,7 +1066,7 @@ where
         target: &impl Target<'a, Context = TC>,
         context: C,
         last_non_performance_target_value: Option<AbsoluteValue>,
-    ) -> Option<ModeControlResult<AbsoluteValue>> {
+    ) -> Option<ModeControlResult<ControlValue>> {
         let res = self.pre_process_absolute_value(control_event)?;
         let current_target_value = target.current_value(context.into());
         let control_type = target.control_type(context.into());
@@ -1074,13 +1077,40 @@ where
             context.additional_input(),
             last_non_performance_target_value,
         )?;
-        self.hitting_target_considering_max_jump(
-            prepped_control_value,
-            current_target_value,
-            control_type,
-            res.control_event,
-            res.prev_control_event,
-        )
+        match prepped_control_value {
+            ControlValue::AbsoluteContinuous(v) => {
+                let abs_res = self.hitting_target_considering_max_jump(
+                    AbsoluteValue::Continuous(v),
+                    current_target_value,
+                    control_type,
+                    res.control_event,
+                    res.prev_control_event,
+                );
+                abs_res.map(|v| v.map(ControlValue::from_absolute))
+            }
+            ControlValue::AbsoluteDiscrete(v) => {
+                let abs_res = self.hitting_target_considering_max_jump(
+                    AbsoluteValue::Discrete(v),
+                    current_target_value,
+                    control_type,
+                    res.control_event,
+                    res.prev_control_event,
+                );
+                abs_res.map(|v| v.map(ControlValue::from_absolute))
+            }
+            ControlValue::RelativeContinuous(v) => self.control_relative_normal(
+                Increment::Continuous(v),
+                target,
+                context,
+                ModeControlOptions::default(),
+            ),
+            ControlValue::RelativeDiscrete(v) => self.control_relative_normal(
+                Increment::Discrete(v),
+                target,
+                context,
+                ModeControlOptions::default(),
+            ),
+        }
     }
 
     fn pre_process_absolute_value(
@@ -1417,12 +1447,23 @@ where
         };
         self.state.current_absolute_value = abs_input_value;
         // Do the usual absolute processing
-        self.control_absolute_normal(
+        let control_result = self.control_absolute_normal(
             control_event.with_payload(AbsoluteValue::Continuous(abs_input_value)),
             target,
             context,
             None,
-        )
+        );
+        // At this point, we only accept absolute control results and ignore relative ones
+        // (relative ones wouldn't make sense as the whole point of make-absolute is to
+        // make something absolute)
+        control_result.and_then(|r| match r {
+            ModeControlResult::HitTarget { value } => Some(ModeControlResult::hit_target(
+                value.to_absolute_value().ok()?,
+            )),
+            ModeControlResult::LeaveTargetUntouched(v) => Some(
+                ModeControlResult::LeaveTargetUntouched(v.to_absolute_value().ok()?),
+            ),
+        })
     }
 
     // Classic relative mode: We are getting encoder increments from the source.
@@ -1600,7 +1641,7 @@ where
         current_target_value: Option<AbsoluteValue>,
         additional_transformation_input: T::AdditionalInput,
         last_non_performance_target_value: Option<AbsoluteValue>,
-    ) -> Option<AbsoluteValue> {
+    ) -> Option<ControlValue> {
         let mut v = source_normalized_control_value;
         // 1. Performance control (optional)
         let performance_control = if let Some(y_last) = last_non_performance_target_value {
@@ -1629,7 +1670,12 @@ where
                 self.transformation_input_meta_data(),
                 additional_transformation_input,
             ) {
-                v = self.process_control_transformation_output(output)?;
+                let output = self.process_control_transformation_output(output)?;
+                match output.to_absolute_value() {
+                    Ok(abs_v) => v = abs_v,
+                    // Relative values are not further transformed
+                    Err(_) => return Some(output),
+                }
             }
         };
         if performance_control {
@@ -1645,7 +1691,7 @@ where
             v = self.apply_rounded_target_interval_or_target_sequence(control_type, v);
         }
         // Return
-        Some(v)
+        Some(ControlValue::from_absolute(v))
     }
 
     fn apply_rounded_target_interval_or_target_sequence(

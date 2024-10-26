@@ -1,4 +1,4 @@
-use crate::{Fraction, UnitValue};
+use crate::{ControlValueKind, Fraction, UnitValue};
 use std::time::Duration;
 
 /// Represents an arbitrary transformation from one unit value into another one, intended to be
@@ -9,7 +9,7 @@ pub trait Transformation {
     /// Applies the transformation.
     ///
     /// Should execute fast. If you use an expression or scripting language, make sure that you
-    /// compile the expression before-hand.
+    /// compile the expression beforehand.
     fn transform(
         &self,
         input: TransformationInput<f64>,
@@ -76,6 +76,36 @@ impl<T: Copy> TransformationInput<T> {
 
 #[derive(Copy, Clone, Debug)]
 pub enum TransformationOutput<T> {
+    Stop,
+    None,
+    /// A control value.
+    Control(T),
+    /// A combination of Control and Stop.
+    ControlAndStop(T),
+}
+
+/// Output of the transformation.
+///
+/// If both `value` and `instruction` are `None`, it means that the target shouldn't be invoked:
+///
+/// - Usually, each repeated invocation always results in a target invocation (unless the target is
+///   not retriggerable and already has the desired value).
+/// - Sometimes this is not desired. In this case, one can return `none`, in which case the target
+///   will not be touched.
+/// - Good for transitions that are not continuous, especially if other mappings want to control
+///   the parameter as well from time to time.
+#[derive(Copy, Clone, Debug)]
+pub struct TransOutput {
+    /// The kind of control values which this transformation produces.
+    ///
+    /// This should always be available, as it might be queried statically for GUI purposes.
+    pub produced_kind: ControlValueKind,
+    pub value: Option<f64>,
+    pub instruction: Option<TransInstruction>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum TransInstruction {
     /// This stops repeated invocation of the formula until the mapping is triggered again.
     ///
     /// - Good for building transitions with a defined end.
@@ -83,19 +113,6 @@ pub enum TransformationOutput<T> {
     ///   controlled by other mappings as well. If multiple mappings continuously change the target
     ///   parameter, only the last one wins.
     Stop,
-    /// Does nothing (doesn't invoke the target).
-    ///
-    /// - Usually, each repeated invocation always results in a target invocation (unless the target is
-    ///   not retriggerable and already has the desired value).
-    /// - Sometimes this is not desired. In this case, one can return `none`, in which case the target
-    ///   will not be touched.
-    /// - Good for transitions that are not continuous, especially if other mappings want to control
-    ///   the parameter as well from time to time.
-    None,
-    /// A control value.
-    Control(T),
-    /// A combination of Control and Stop.
-    ControlAndStop(T),
 }
 
 impl<T: Copy> TransformationOutput<T> {
