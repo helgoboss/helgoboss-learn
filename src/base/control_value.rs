@@ -426,12 +426,11 @@ impl AbsoluteValue {
                 let current_target_value = current_target_value
                     .map(|t| t.to_unit_value())
                     .unwrap_or_default();
-                let output = transformation.transform_continuous(
+                transformation.transform_continuous(
                     TransformationInput::new(v, meta_data),
                     current_target_value,
                     additional_input,
-                )?;
-                Ok(output.map(ControlValue::AbsoluteContinuous))
+                )
             }
             Discrete(v) => {
                 // Input value is discrete.
@@ -440,34 +439,31 @@ impl AbsoluteValue {
                 match current_target_value {
                     Continuous(t) => {
                         // Target value is continuous.
-                        let output = transformation.transform_continuous(
+                        transformation.transform_continuous(
                             TransformationInput::new(v.to_unit_value(), meta_data),
                             t,
                             additional_input,
-                        )?;
-                        Ok(output.map(ControlValue::AbsoluteContinuous))
+                        )
                     }
                     Discrete(t) => {
                         // Target value is also discrete.
                         if is_discrete_mode {
                             // Discrete mode.
                             // Transform using non-normalized rounded floating point values.
-                            let output = transformation.transform_discrete(
+                            transformation.transform_discrete(
                                 TransformationInput::new(v, meta_data),
                                 t,
                                 additional_input,
-                            )?;
-                            Ok(output.map(ControlValue::AbsoluteDiscrete))
+                            )
                         } else {
                             // Continuous mode.
                             // Transform using normalized floating point values, thereby destroying
                             // the value's discreteness.
-                            let output = transformation.transform_continuous(
+                            transformation.transform_continuous(
                                 TransformationInput::new(v.to_unit_value(), meta_data),
                                 t.to_unit_value(),
                                 additional_input,
-                            )?;
-                            Ok(output.map(ControlValue::AbsoluteContinuous))
+                            )
                         }
                     }
                 }

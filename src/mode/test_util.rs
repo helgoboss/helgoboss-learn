@@ -1,6 +1,6 @@
 use crate::{
-    AbsoluteValue, ControlType, FeedbackScript, FeedbackScriptInput, FeedbackScriptOutput, Target,
-    Transformation, TransformationInput, TransformationOutput,
+    AbsoluteValue, ControlType, ControlValueKind, FeedbackScript, FeedbackScriptInput,
+    FeedbackScriptOutput, Target, Transformation, TransformationInput, TransformationOutput,
 };
 use base::hash_util::NonCryptoHashSet;
 use std::borrow::Cow;
@@ -25,14 +25,17 @@ impl<'a> Target<'a> for TestTarget {
 
 pub struct TestTransformation {
     transformer: Box<dyn Fn(f64) -> Result<f64, &'static str>>,
+    produced_kind: ControlValueKind,
 }
 
 impl TestTransformation {
     pub fn new(
+        produced_kind: ControlValueKind,
         transformer: impl Fn(f64) -> Result<f64, &'static str> + 'static,
     ) -> TestTransformation {
         Self {
             transformer: Box::new(transformer),
+            produced_kind,
         }
     }
 }
@@ -46,7 +49,13 @@ impl Transformation for TestTransformation {
         _: f64,
         _: (),
     ) -> Result<TransformationOutput<f64>, &'static str> {
-        (self.transformer)(input.value).map(TransformationOutput::Control)
+        let out_val = (self.transformer)(input.value)?;
+        let out = TransformationOutput {
+            produced_kind: self.produced_kind,
+            value: Some(out_val),
+            instruction: None,
+        };
+        Ok(out)
     }
 
     fn wants_to_be_polled(&self) -> bool {

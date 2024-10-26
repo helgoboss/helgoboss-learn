@@ -1,4 +1,6 @@
-use crate::{ControlValueKind, Fraction, UnitValue};
+use crate::{
+    ControlValue, ControlValueKind, DiscreteIncrement, Fraction, UnitIncrement, UnitValue,
+};
 use std::time::Duration;
 
 /// Represents an arbitrary transformation from one unit value into another one, intended to be
@@ -24,27 +26,65 @@ pub trait Transformation {
         input: TransformationInput<UnitValue>,
         output_value: UnitValue,
         additional_input: Self::AdditionalInput,
-    ) -> Result<TransformationOutput<UnitValue>, &'static str> {
-        let res = self.transform(input.map(|v| v.get()), output_value.get(), additional_input)?;
-        Ok(res.map(UnitValue::new_clamped))
+    ) -> Result<TransformationOutput<ControlValue>, &'static str> {
+        let out = self.transform(input.map(|v| v.get()), output_value.get(), additional_input)?;
+        let out = TransformationOutput {
+            produced_kind: out.produced_kind,
+            value: out
+                .value
+                .map(|raw| convert_f64_to_control_value(raw, out.produced_kind, None)),
+            instruction: out.instruction,
+        };
+        Ok(out)
     }
 
+    // Not currently used as discrete control not yet unlocked.
     fn transform_discrete(
         &self,
         input: TransformationInput<Fraction>,
         output_value: Fraction,
         additional_input: Self::AdditionalInput,
-    ) -> Result<TransformationOutput<Fraction>, &'static str> {
-        let res = self.transform(
+    ) -> Result<TransformationOutput<ControlValue>, &'static str> {
+        let out = self.transform(
             input.map(|v| v.actual() as _),
             output_value.actual() as _,
             additional_input,
         )?;
-        let fraction = res.map(|v| {
-            let actual = v.round() as _;
-            Fraction::new(actual, std::cmp::max(input.value.max_val(), actual))
-        });
-        Ok(fraction)
+        let out = TransformationOutput {
+            produced_kind: out.produced_kind,
+            value: out.value.map(|raw| {
+                convert_f64_to_control_value(raw, out.produced_kind, Some(input.value.max_val()))
+            }),
+            instruction: out.instruction,
+        };
+        Ok(out)
+    }
+}
+
+fn convert_f64_to_control_value(
+    raw: f64,
+    kind: ControlValueKind,
+    in_discrete_max: Option<u32>,
+) -> ControlValue {
+    match kind {
+        ControlValueKind::AbsoluteContinuous => {
+            ControlValue::AbsoluteContinuous(UnitValue::new_clamped(raw))
+        }
+        ControlValueKind::RelativeDiscrete => {
+            let inc = raw.round() as i32;
+            ControlValue::RelativeDiscrete(DiscreteIncrement::new(inc))
+        }
+        ControlValueKind::RelativeContinuous => {
+            ControlValue::RelativeContinuous(UnitIncrement::new_clamped(raw))
+        }
+        ControlValueKind::AbsoluteDiscrete => {
+            let actual = raw.round() as _;
+            let max = match in_discrete_max {
+                None => actual,
+                Some(max) => std::cmp::max(max, actual),
+            };
+            ControlValue::AbsoluteDiscrete(Fraction::new(actual, max))
+        }
     }
 }
 
@@ -74,16 +114,6 @@ impl<T: Copy> TransformationInput<T> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum TransformationOutput<T> {
-    Stop,
-    None,
-    /// A control value.
-    Control(T),
-    /// A combination of Control and Stop.
-    ControlAndStop(T),
-}
-
 /// Output of the transformation.
 ///
 /// If both `value` and `instruction` are `None`, it means that the target shouldn't be invoked:
@@ -95,17 +125,17 @@ pub enum TransformationOutput<T> {
 /// - Good for transitions that are not continuous, especially if other mappings want to control
 ///   the parameter as well from time to time.
 #[derive(Copy, Clone, Debug)]
-pub struct TransOutput {
+pub struct TransformationOutput<T> {
     /// The kind of control values which this transformation produces.
     ///
     /// This should always be available, as it might be queried statically for GUI purposes.
     pub produced_kind: ControlValueKind,
-    pub value: Option<f64>,
-    pub instruction: Option<TransInstruction>,
+    pub value: Option<T>,
+    pub instruction: Option<TransformationInstruction>,
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum TransInstruction {
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum TransformationInstruction {
     /// This stops repeated invocation of the formula until the mapping is triggered again.
     ///
     /// - Good for building transitions with a defined end.
@@ -113,26 +143,4 @@ pub enum TransInstruction {
     ///   controlled by other mappings as well. If multiple mappings continuously change the target
     ///   parameter, only the last one wins.
     Stop,
-}
-
-impl<T: Copy> TransformationOutput<T> {
-    pub fn map<R>(&self, f: impl FnOnce(T) -> R) -> TransformationOutput<R> {
-        match self {
-            TransformationOutput::Stop => TransformationOutput::Stop,
-            TransformationOutput::None => TransformationOutput::None,
-            TransformationOutput::Control(v) => TransformationOutput::Control(f(*v)),
-            TransformationOutput::ControlAndStop(v) => TransformationOutput::ControlAndStop(f(*v)),
-        }
-    }
-
-    pub fn value(&self) -> Option<T> {
-        match self {
-            TransformationOutput::Control(v) | TransformationOutput::ControlAndStop(v) => Some(*v),
-            TransformationOutput::Stop | TransformationOutput::None => None,
-        }
-    }
-
-    pub fn is_stop(&self) -> bool {
-        matches!(self, Self::Stop | Self::ControlAndStop(_))
-    }
 }

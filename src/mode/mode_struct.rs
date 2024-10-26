@@ -5,8 +5,8 @@ use crate::{
     FeedbackScriptInput, FeedbackStyle, FeedbackValue, FireMode, Fraction, Increment, Interval,
     MinIsMaxBehavior, ModeContext, NumericFeedbackValue, OutOfRangeBehavior,
     PressDurationProcessor, PropProvider, TakeoverMode, Target, TextualFeedbackValue,
-    Transformation, TransformationInputMetaData, TransformationOutput, UnitIncrement, UnitValue,
-    ValueSequence, BASE_EPSILON,
+    Transformation, TransformationInputMetaData, TransformationInstruction, TransformationOutput,
+    UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
 };
 use base::hash_util::{NonCryptoHashMap, NonCryptoHashSet};
 use derive_more::Display;
@@ -806,7 +806,7 @@ where
                 additional_transformation_input,
             ) {
                 // For feedback, only absolute result values are accepted, relative ones are ignored.
-                v = output.value()?.to_absolute_value().ok()?;
+                v = output.value?.to_absolute_value().ok()?;
             }
         };
         // 1. Apply source interval
@@ -834,16 +834,20 @@ where
         &mut self,
         output: TransformationOutput<O>,
     ) -> Option<O> {
-        match output {
-            TransformationOutput::Stop => {
+        match (output.value, output.instruction) {
+            // Neither control nor stop instruction
+            (None, None) => None,
+            // Stop instruction without control
+            (None, Some(TransformationInstruction::Stop)) => {
                 // Resetting the previous event will stop polling until the next mapping
                 // invocation.
                 self.state.previous_source_normalized_control_event = None;
                 None
             }
-            TransformationOutput::None => None,
-            TransformationOutput::Control(v) => Some(v),
-            TransformationOutput::ControlAndStop(v) => {
+            // Control without stop instruction
+            (Some(v), None) => Some(v),
+            // Both control and stop instruction
+            (Some(v), Some(TransformationInstruction::Stop)) => {
                 // Resetting the previous event will stop polling until the next mapping
                 // invocation.
                 self.state.previous_source_normalized_control_event = None;
@@ -2376,6 +2380,7 @@ mod tests {
 
         mod continuous_processing {
             use super::*;
+            use crate::ControlValueKind;
 
             #[test]
             fn default() {
@@ -3518,7 +3523,10 @@ mod tests {
             fn transformation_ok() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
-                    control_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
+                    control_transformation: Some(TestTransformation::new(
+                        ControlValueKind::AbsoluteContinuous,
+                        |input| Ok(1.0 - input),
+                    )),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -3545,7 +3553,10 @@ mod tests {
             fn transformation_err() {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
-                    control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
+                    control_transformation: Some(TestTransformation::new(
+                        ControlValueKind::AbsoluteContinuous,
+                        |_| Err("oh no!"),
+                    )),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -4047,7 +4058,10 @@ mod tests {
             fn feedback_transformation() {
                 // Given
                 let mode: TestMode = Mode::new(ModeSettings {
-                    feedback_transformation: Some(TestTransformation::new(|input| Ok(1.0 - input))),
+                    feedback_transformation: Some(TestTransformation::new(
+                        ControlValueKind::AbsoluteContinuous,
+                        |input| Ok(1.0 - input),
+                    )),
                     ..Default::default()
                 });
                 // When
@@ -4060,6 +4074,7 @@ mod tests {
 
         mod discrete_processing {
             use super::*;
+            use crate::ControlValueKind;
 
             #[test]
             fn case_1_no_interval_restriction() {
@@ -5450,7 +5465,10 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
-                    control_transformation: Some(TestTransformation::new(|input| Ok(input + 20.0))),
+                    control_transformation: Some(TestTransformation::new(
+                        ControlValueKind::AbsoluteDiscrete,
+                        |input| Ok(input + 20.0),
+                    )),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -5481,7 +5499,10 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
-                    control_transformation: Some(TestTransformation::new(|input| Ok(input - 20.0))),
+                    control_transformation: Some(TestTransformation::new(
+                        ControlValueKind::AbsoluteDiscrete,
+                        |input| Ok(input - 20.0),
+                    )),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -5512,7 +5533,10 @@ mod tests {
                 // Given
                 let mut mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
-                    control_transformation: Some(TestTransformation::new(|_| Err("oh no!"))),
+                    control_transformation: Some(TestTransformation::new(
+                        ControlValueKind::AbsoluteDiscrete,
+                        |_| Err("oh no!"),
+                    )),
                     ..Default::default()
                 });
                 let target = TestTarget {
@@ -5971,6 +5995,7 @@ mod tests {
                 let mode: TestMode = Mode::new(ModeSettings {
                     use_discrete_processing: true,
                     feedback_transformation: Some(TestTransformation::new(
+                        ControlValueKind::AbsoluteDiscrete,
                         |input| Ok(input - 10.0),
                     )),
                     ..Default::default()
