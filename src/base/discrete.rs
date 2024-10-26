@@ -86,6 +86,14 @@ impl DiscreteIncrement {
         DiscreteIncrement(increment)
     }
 
+    /// Creates the discrete increment. Panics if the given number is 0.
+    pub fn new_checked(increment: i32) -> Option<DiscreteIncrement> {
+        if increment == 0 {
+            return None;
+        }
+        Some(DiscreteIncrement(increment))
+    }
+
     /// Checks preconditions only in debug build. Should only be used if you want to squeeze out
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those

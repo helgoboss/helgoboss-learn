@@ -3,6 +3,7 @@ use crate::{
     Transformation, TransformationInput, TransformationInputMetaData, TransformationOutput,
     UnitIncrement, UnitValue, BASE_EPSILON,
 };
+use num_enum::TryFromPrimitive;
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
 use std::time::{Duration, Instant};
@@ -96,9 +97,10 @@ impl<P, T: AbstractTimestamp> ControlEvent<P, T> {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Default, TryFromPrimitive)]
 #[repr(u8)]
 pub enum ControlValueKind {
+    #[default]
     AbsoluteContinuous = 0,
     RelativeDiscrete = 1,
     RelativeContinuous = 2,

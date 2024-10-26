@@ -32,7 +32,7 @@ pub trait Transformation {
             produced_kind: out.produced_kind,
             value: out
                 .value
-                .map(|raw| convert_f64_to_control_value(raw, out.produced_kind, None)),
+                .and_then(|raw| convert_f64_to_control_value(raw, out.produced_kind, None)),
             instruction: out.instruction,
         };
         Ok(out)
@@ -52,7 +52,7 @@ pub trait Transformation {
         )?;
         let out = TransformationOutput {
             produced_kind: out.produced_kind,
-            value: out.value.map(|raw| {
+            value: out.value.and_then(|raw| {
                 convert_f64_to_control_value(raw, out.produced_kind, Some(input.value.max_val()))
             }),
             instruction: out.instruction,
@@ -65,14 +65,14 @@ fn convert_f64_to_control_value(
     raw: f64,
     kind: ControlValueKind,
     in_discrete_max: Option<u32>,
-) -> ControlValue {
-    match kind {
+) -> Option<ControlValue> {
+    let cv = match kind {
         ControlValueKind::AbsoluteContinuous => {
             ControlValue::AbsoluteContinuous(UnitValue::new_clamped(raw))
         }
         ControlValueKind::RelativeDiscrete => {
             let inc = raw.round() as i32;
-            ControlValue::RelativeDiscrete(DiscreteIncrement::new(inc))
+            ControlValue::RelativeDiscrete(DiscreteIncrement::new_checked(inc)?)
         }
         ControlValueKind::RelativeContinuous => {
             ControlValue::RelativeContinuous(UnitIncrement::new_clamped(raw))
@@ -85,7 +85,8 @@ fn convert_f64_to_control_value(
             };
             ControlValue::AbsoluteDiscrete(Fraction::new(actual, max))
         }
-    }
+    };
+    Some(cv)
 }
 
 #[derive(Default)]
