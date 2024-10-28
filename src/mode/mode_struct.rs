@@ -1,12 +1,12 @@
 use crate::{
     create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
     negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
-    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, FeedbackScript,
-    FeedbackScriptInput, FeedbackStyle, FeedbackValue, FireMode, Fraction, Increment, Interval,
-    MinIsMaxBehavior, ModeContext, NumericFeedbackValue, OutOfRangeBehavior,
+    ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, EnhancedTransformationOutput,
+    FeedbackScript, FeedbackScriptInput, FeedbackStyle, FeedbackValue, FireMode, Fraction,
+    Increment, Interval, MinIsMaxBehavior, ModeContext, NumericFeedbackValue, OutOfRangeBehavior,
     PressDurationProcessor, PropProvider, TakeoverMode, Target, TextualFeedbackValue,
-    Transformation, TransformationInputMetaData, TransformationInstruction, TransformationOutput,
-    UnitIncrement, UnitValue, ValueSequence, BASE_EPSILON,
+    Transformation, TransformationInstruction, UnitIncrement, UnitValue, ValueSequence,
+    BASE_EPSILON,
 };
 use base::hash_util::{NonCryptoHashMap, NonCryptoHashSet};
 use derive_more::Display;
@@ -802,7 +802,7 @@ where
                 transformation,
                 Some(v),
                 self.settings.use_discrete_processing,
-                self.transformation_input_meta_data(),
+                self.calc_rel_time(),
                 additional_transformation_input,
             ) {
                 // For feedback, only absolute result values are accepted, relative ones are ignored.
@@ -832,7 +832,7 @@ where
 
     fn process_control_transformation_output<O>(
         &mut self,
-        output: TransformationOutput<O>,
+        output: EnhancedTransformationOutput<O>,
     ) -> Option<O> {
         match (output.value, output.instruction) {
             // Neither control nor stop instruction
@@ -856,13 +856,11 @@ where
         }
     }
 
-    fn transformation_input_meta_data(&self) -> TransformationInputMetaData {
-        let rel_time = self
-            .state
+    fn calc_rel_time(&self) -> Duration {
+        self.state
             .previous_source_normalized_control_event
             .map(|evt| S::now() - evt.timestamp())
-            .unwrap_or_default();
-        TransformationInputMetaData { rel_time }
+            .unwrap_or_default()
     }
 
     /// If this returns `true`, the `poll` method should be called, on a regular basis.
@@ -909,7 +907,7 @@ where
                         transformation,
                         target.current_value(context.into()),
                         self.settings.use_discrete_processing,
-                        self.transformation_input_meta_data(),
+                        self.calc_rel_time(),
                         context.additional_input(),
                     )
                     .ok()?;
@@ -1671,7 +1669,7 @@ where
                 transformation,
                 current_target_value,
                 self.settings.use_discrete_processing,
-                self.transformation_input_meta_data(),
+                self.calc_rel_time(),
                 additional_transformation_input,
             ) {
                 let output = self.process_control_transformation_output(output)?;

@@ -49,7 +49,7 @@ impl Transformation for TestTransformation {
         _: f64,
         _: (),
     ) -> Result<TransformationOutput<f64>, &'static str> {
-        let out_val = (self.transformer)(input.value)?;
+        let out_val = (self.transformer)(input.input_value)?;
         let out = TransformationOutput {
             produced_kind: self.produced_kind,
             value: Some(out_val),

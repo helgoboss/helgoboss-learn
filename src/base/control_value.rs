@@ -1,7 +1,7 @@
 use crate::{
     ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
-    Transformation, TransformationInput, TransformationInputMetaData, TransformationOutput,
-    UnitIncrement, UnitValue, BASE_EPSILON,
+    Transformation, TransformationInput, TransformationInputContext, TransformationInputEvent,
+    TransformationInstruction, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use num_enum::TryFromPrimitive;
 use std::fmt::{Display, Formatter};
@@ -418,9 +418,9 @@ impl AbsoluteValue {
         transformation: &T,
         current_target_value: Option<AbsoluteValue>,
         is_discrete_mode: bool,
-        meta_data: TransformationInputMetaData,
+        rel_time: Duration,
         additional_input: T::AdditionalInput,
-    ) -> Result<TransformationOutput<ControlValue>, &'static str> {
+    ) -> Result<EnhancedTransformationOutput<ControlValue>, &'static str> {
         use AbsoluteValue::*;
         match self {
             Continuous(v) => {
@@ -428,9 +428,11 @@ impl AbsoluteValue {
                 let current_target_value = current_target_value
                     .map(|t| t.to_unit_value())
                     .unwrap_or_default();
-                transformation.transform_continuous(
-                    TransformationInput::new(v, meta_data),
+                self.transform_continuous(
+                    transformation,
+                    v,
                     current_target_value,
+                    rel_time,
                     additional_input,
                 )
             }
@@ -441,9 +443,11 @@ impl AbsoluteValue {
                 match current_target_value {
                     Continuous(t) => {
                         // Target value is continuous.
-                        transformation.transform_continuous(
-                            TransformationInput::new(v.to_unit_value(), meta_data),
+                        self.transform_continuous(
+                            transformation,
+                            v.to_unit_value(),
                             t,
+                            rel_time,
                             additional_input,
                         )
                     }
@@ -452,18 +456,22 @@ impl AbsoluteValue {
                         if is_discrete_mode {
                             // Discrete mode.
                             // Transform using non-normalized rounded floating point values.
-                            transformation.transform_discrete(
-                                TransformationInput::new(v, meta_data),
+                            self.transform_discrete(
+                                transformation,
+                                v,
                                 t,
+                                rel_time,
                                 additional_input,
                             )
                         } else {
                             // Continuous mode.
                             // Transform using normalized floating point values, thereby destroying
                             // the value's discreteness.
-                            transformation.transform_continuous(
-                                TransformationInput::new(v.to_unit_value(), meta_data),
+                            self.transform_continuous(
+                                transformation,
+                                v.to_unit_value(),
                                 t.to_unit_value(),
+                                rel_time,
                                 additional_input,
                             )
                         }
@@ -471,6 +479,63 @@ impl AbsoluteValue {
                 }
             }
         }
+    }
+
+    fn transform_continuous<T: Transformation>(
+        self,
+        transformation: &T,
+        input_value: UnitValue,
+        output_value: UnitValue,
+        rel_time: Duration,
+        additional_input: T::AdditionalInput,
+    ) -> Result<EnhancedTransformationOutput<ControlValue>, &'static str> {
+        let input = TransformationInput {
+            event: TransformationInputEvent {
+                input_value: input_value.get(),
+                timestamp: Default::default(),
+            },
+            context: TransformationInputContext {
+                output_value: output_value.get(),
+                rel_time,
+            },
+            additional_input,
+        };
+        let output = transformation.transform(input)?;
+        let output = EnhancedTransformationOutput {
+            produced_kind: output.produced_kind,
+            value: output.extract_control_value(None),
+            instruction: output.instruction,
+        };
+        Ok(output)
+    }
+
+    // Not currently used as discrete control not yet unlocked.
+    fn transform_discrete<T: Transformation>(
+        self,
+        transformation: &T,
+        input_value: Fraction,
+        output_value: Fraction,
+        rel_time: Duration,
+        additional_input: T::AdditionalInput,
+    ) -> Result<EnhancedTransformationOutput<ControlValue>, &'static str> {
+        let input = TransformationInput {
+            event: TransformationInputEvent {
+                input_value: input_value.actual() as _,
+                timestamp: Default::default(),
+            },
+            context: TransformationInputContext {
+                output_value: output_value.actual() as _,
+                rel_time,
+            },
+            additional_input,
+        };
+        let output = transformation.transform(input)?;
+        let out = EnhancedTransformationOutput {
+            produced_kind: output.produced_kind,
+            value: output.extract_control_value(Some(input_value.max_val())),
+            instruction: output.instruction,
+        };
+        Ok(out)
     }
 
     pub fn inverse(self, new_discrete_max: Option<u32>) -> Self {
@@ -698,4 +763,10 @@ fn round_to_nearest_discrete_value(
         }
     };
     approximate_control_value.snap_to_grid_by_interval_size(step_size)
+}
+
+pub struct EnhancedTransformationOutput<T> {
+    pub produced_kind: ControlValueKind,
+    pub value: Option<T>,
+    pub instruction: Option<TransformationInstruction>,
 }
