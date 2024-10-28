@@ -6,9 +6,10 @@ use crate::{
 use num_enum::TryFromPrimitive;
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
-/// The timestamp is intended to be be used for things like takeover modes. Ideally, the event
+/// The timestamp is intended to be used for things like takeover modes. Ideally, the event
 /// time should be captured when the event occurs but it's also okay to do that somewhat later
 /// in the same callstack because event processing within the same thread happens very fast.
 /// Most importantly, if the event is sent to another thread, then the time should be captured
@@ -17,6 +18,8 @@ use std::time::{Duration, Instant};
 pub trait AbstractTimestamp: Copy + Sub<Output = Duration> + std::fmt::Debug {
     /// Creates a timestamp corresponding to "now".
     fn now() -> Self;
+
+    fn duration(&self) -> Duration;
 }
 
 /// A timestamp that does nothing and takes no space.
@@ -26,6 +29,10 @@ pub struct NoopTimestamp;
 impl AbstractTimestamp for NoopTimestamp {
     fn now() -> Self {
         Self
+    }
+
+    fn duration(&self) -> Duration {
+        Duration::ZERO
     }
 }
 
@@ -39,7 +46,12 @@ impl Sub for NoopTimestamp {
 
 impl AbstractTimestamp for Instant {
     fn now() -> Self {
-        Self::now()
+        Instant::now()
+    }
+
+    fn duration(&self) -> Duration {
+        static INSTANT: LazyLock<Instant> = LazyLock::new(|| Instant::now());
+        self.saturating_duration_since(*INSTANT)
     }
 }
 
@@ -419,6 +431,7 @@ impl AbsoluteValue {
         current_target_value: Option<AbsoluteValue>,
         is_discrete_mode: bool,
         rel_time: Duration,
+        timestamp: Duration,
         additional_input: T::AdditionalInput,
     ) -> Result<EnhancedTransformationOutput<ControlValue>, &'static str> {
         use AbsoluteValue::*;
@@ -433,6 +446,7 @@ impl AbsoluteValue {
                     v,
                     current_target_value,
                     rel_time,
+                    timestamp,
                     additional_input,
                 )
             }
@@ -448,6 +462,7 @@ impl AbsoluteValue {
                             v.to_unit_value(),
                             t,
                             rel_time,
+                            timestamp,
                             additional_input,
                         )
                     }
@@ -461,6 +476,7 @@ impl AbsoluteValue {
                                 v,
                                 t,
                                 rel_time,
+                                timestamp,
                                 additional_input,
                             )
                         } else {
@@ -472,6 +488,7 @@ impl AbsoluteValue {
                                 v.to_unit_value(),
                                 t.to_unit_value(),
                                 rel_time,
+                                timestamp,
                                 additional_input,
                             )
                         }
@@ -487,12 +504,13 @@ impl AbsoluteValue {
         input_value: UnitValue,
         output_value: UnitValue,
         rel_time: Duration,
+        timestamp: Duration,
         additional_input: T::AdditionalInput,
     ) -> Result<EnhancedTransformationOutput<ControlValue>, &'static str> {
         let input = TransformationInput {
             event: TransformationInputEvent {
                 input_value: input_value.get(),
-                timestamp: Default::default(),
+                timestamp,
             },
             context: TransformationInputContext {
                 output_value: output_value.get(),
@@ -516,12 +534,13 @@ impl AbsoluteValue {
         input_value: Fraction,
         output_value: Fraction,
         rel_time: Duration,
+        timestamp: Duration,
         additional_input: T::AdditionalInput,
     ) -> Result<EnhancedTransformationOutput<ControlValue>, &'static str> {
         let input = TransformationInput {
             event: TransformationInputEvent {
                 input_value: input_value.actual() as _,
-                timestamp: Default::default(),
+                timestamp,
             },
             context: TransformationInputContext {
                 output_value: output_value.actual() as _,

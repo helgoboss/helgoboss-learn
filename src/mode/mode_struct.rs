@@ -17,7 +17,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use strum::EnumIter;
 
 /// When interpreting target value, make only 4 fractional digits matter.
@@ -803,6 +803,7 @@ where
                 Some(v),
                 self.settings.use_discrete_processing,
                 self.calc_rel_time(),
+                Instant::now().duration(),
                 additional_transformation_input,
             ) {
                 // For feedback, only absolute result values are accepted, relative ones are ignored.
@@ -908,6 +909,7 @@ where
                         target.current_value(context.into()),
                         self.settings.use_discrete_processing,
                         self.calc_rel_time(),
+                        timestamp.duration(),
                         context.additional_input(),
                     )
                     .ok()?;
@@ -1073,7 +1075,7 @@ where
         let current_target_value = target.current_value(context.into());
         let control_type = target.control_type(context.into());
         let prepped_control_value = self.prepare_absolute_value(
-            res.control_event.payload(),
+            res.control_event,
             control_type,
             current_target_value,
             context.additional_input(),
@@ -1638,13 +1640,13 @@ where
 
     fn prepare_absolute_value(
         &mut self,
-        source_normalized_control_value: AbsoluteValue,
+        source_normalized_control_event: ControlEvent<AbsoluteValue, S>,
         control_type: ControlType,
         current_target_value: Option<AbsoluteValue>,
         additional_transformation_input: T::AdditionalInput,
         last_non_performance_target_value: Option<AbsoluteValue>,
     ) -> Option<ControlValue> {
-        let mut v = source_normalized_control_value;
+        let mut v = source_normalized_control_event.payload();
         // 1. Performance control (optional)
         let performance_control = if let Some(y_last) = last_non_performance_target_value {
             let x = v.to_unit_value().get();
@@ -1670,6 +1672,7 @@ where
                 current_target_value,
                 self.settings.use_discrete_processing,
                 self.calc_rel_time(),
+                source_normalized_control_event.timestamp().duration(),
                 additional_transformation_input,
             ) {
                 let output = self.process_control_transformation_output(output)?;
