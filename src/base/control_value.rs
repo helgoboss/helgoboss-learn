@@ -16,21 +16,14 @@ use std::time::{Duration, Instant};
 /// *before* the event leaves the thread and saved. That allows more accurate processing in the
 /// destination thread.  
 pub trait AbstractTimestamp: Copy + Sub<Output = Duration> + std::fmt::Debug {
-    /// Creates a timestamp corresponding to "now".
-    fn now() -> Self;
-
     fn duration(&self) -> Duration;
 }
 
 /// A timestamp that does nothing and takes no space.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct NoopTimestamp;
 
 impl AbstractTimestamp for NoopTimestamp {
-    fn now() -> Self {
-        Self
-    }
-
     fn duration(&self) -> Duration {
         Duration::ZERO
     }
@@ -45,10 +38,6 @@ impl Sub for NoopTimestamp {
 }
 
 impl AbstractTimestamp for Instant {
-    fn now() -> Self {
-        Instant::now()
-    }
-
     fn duration(&self) -> Duration {
         static INSTANT: LazyLock<Instant> = LazyLock::new(|| Instant::now());
         self.saturating_duration_since(*INSTANT)

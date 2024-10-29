@@ -73,7 +73,7 @@ impl TransformationOutput {
                 ControlValue::RelativeDiscrete(DiscreteIncrement::new_checked(inc)?)
             }
             ControlValueKind::RelativeContinuous => {
-                ControlValue::RelativeContinuous(UnitIncrement::new_clamped(raw))
+                ControlValue::RelativeContinuous(UnitIncrement::new_clamped_checked(raw)?)
             }
             ControlValueKind::AbsoluteDiscrete => {
                 let actual = raw.round() as _;

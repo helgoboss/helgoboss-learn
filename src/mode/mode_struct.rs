@@ -802,7 +802,7 @@ where
                 transformation,
                 Some(v),
                 self.settings.use_discrete_processing,
-                self.calc_rel_time(),
+                Duration::ZERO,
                 Instant::now().duration(),
                 additional_transformation_input,
             ) {
@@ -857,10 +857,10 @@ where
         }
     }
 
-    fn calc_rel_time(&self) -> Duration {
+    fn calc_rel_time(&self, now: S) -> Duration {
         self.state
             .previous_source_normalized_control_event
-            .map(|evt| S::now() - evt.timestamp())
+            .map(|evt| now - evt.timestamp())
             .unwrap_or_default()
     }
 
@@ -908,7 +908,7 @@ where
                         transformation,
                         target.current_value(context.into()),
                         self.settings.use_discrete_processing,
-                        self.calc_rel_time(),
+                        self.calc_rel_time(timestamp),
                         timestamp.duration(),
                         context.additional_input(),
                     )
@@ -1671,7 +1671,7 @@ where
                 transformation,
                 current_target_value,
                 self.settings.use_discrete_processing,
-                self.calc_rel_time(),
+                self.calc_rel_time(source_normalized_control_event.timestamp()),
                 source_normalized_control_event.timestamp().duration(),
                 additional_transformation_input,
             ) {

@@ -507,6 +507,15 @@ impl UnitIncrement {
         UnitIncrement(number.clamp(-1.0, 1.0))
     }
 
+    /// Creates the unit increment. Clamps it if not in the positive or negative unit interval.
+    #[allow(clippy::float_cmp)]
+    pub fn new_clamped_checked(number: f64) -> Option<UnitIncrement> {
+        if number == 0.0 {
+            return None;
+        }
+        Some(UnitIncrement(number.clamp(-1.0, 1.0)))
+    }
+
     /// Checks preconditions only in debug build. Should only be used if you want to squeeze out
     /// every last bit of performance and you are super sure that the number meets the
     /// preconditions. This constructor is offered because it's not unlikely that a lot of those
