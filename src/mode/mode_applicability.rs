@@ -36,6 +36,7 @@ pub struct ModeApplicabilityCheckInput {
     pub target_is_virtual: bool,
     pub target_supports_discrete_values: bool,
     pub control_transformation_uses_time: bool,
+    pub control_transformation_produces_relative_values: bool,
     pub is_feedback: bool,
     pub make_absolute: bool,
     pub use_textual_feedback: bool,
@@ -122,9 +123,13 @@ pub enum ModeApplicability {
     /// of choosing the correct default.
     MakesNoSenseParentTakesCareOfDefault,
     /// Parameter is relevant. Contains description of what it does.
+    ///
+    /// The contained text is not in use anymore (is now part of the ReaLearn Reference)!
     MakesSense(&'static str),
     /// Has an effect but a rather undesired one. The description should suggest alternatives if
     /// possible.
+    ///
+    /// The contained text is not in use anymore (is now part of the ReaLearn Reference)!
     Awkward(&'static str),
 }
 
@@ -463,6 +468,8 @@ pub fn check_mode_applicability(
         StepSizeMin | StepFactorMin => {
             if input.is_feedback {
                 HasNoEffect
+            } else if input.control_transformation_produces_relative_values {
+                MakesSense("-")
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
@@ -513,6 +520,8 @@ pub fn check_mode_applicability(
         StepSizeMax | StepFactorMax => {
             if input.is_feedback {
                 HasNoEffect
+            } else if input.control_transformation_produces_relative_values {
+                MakesSense("-")
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {
@@ -564,6 +573,8 @@ pub fn check_mode_applicability(
         Rotate => {
             if input.is_feedback {
                 HasNoEffect
+            } else if input.control_transformation_produces_relative_values {
+                MakesSense("-")
             } else {
                 use DetailedSourceCharacter::*;
                 match input.source_character {

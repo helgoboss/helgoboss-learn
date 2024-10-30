@@ -39,7 +39,7 @@ impl Sub for NoopTimestamp {
 
 impl AbstractTimestamp for Instant {
     fn duration(&self) -> Duration {
-        static INSTANT: LazyLock<Instant> = LazyLock::new(|| Instant::now());
+        static INSTANT: LazyLock<Instant> = LazyLock::new(Instant::now);
         self.saturating_duration_since(*INSTANT)
     }
 }
