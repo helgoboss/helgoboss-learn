@@ -429,8 +429,20 @@ impl From<Cow<'static, str>> for PropValue {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash, Serialize, Deserialize)]
 pub struct RgbColor(u8, u8, u8);
+
+impl From<RgbColor> for image::Rgb<u8> {
+    fn from(value: RgbColor) -> Self {
+        Self([value.0, value.1, value.2])
+    }
+}
+
+impl From<RgbColor> for image::Rgba<u8> {
+    fn from(value: RgbColor) -> Self {
+        Self([value.0, value.1, value.2, 255])
+    }
+}
 
 impl Display for RgbColor {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {

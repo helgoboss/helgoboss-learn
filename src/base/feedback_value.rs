@@ -37,7 +37,7 @@ impl NumericFeedbackValue {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Default)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct TextualFeedbackValue<'a> {
     pub style: FeedbackStyle,
     pub text: Cow<'a, str>,
@@ -49,7 +49,7 @@ impl<'a> TextualFeedbackValue<'a> {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug, Default)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct FeedbackStyle {
     pub color: Option<RgbColor>,
     pub background_color: Option<RgbColor>,

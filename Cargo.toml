@@ -25,6 +25,8 @@ rosc.workspace = true
 reaper-common-types.workspace = true
 # For letting the here defined raw MIDI data structure implement the REAPER MIDI event type
 reaper-low = { workspace = true, optional = true }
+# For RgbColor type conversion
+image = { workspace = true, default-features = false }
 # For tokenizing sys-ex patterns
 logos.workspace = true
 # For easy error types
@@ -37,4 +39,4 @@ once_cell.workspace = true
 strum.workspace = true
 serde_json.workspace = true
 # For making consumers being able to use some newtypes as atomics
-bytemuck = { workspace = true, features = ["derive"]}
+bytemuck = { workspace = true, features = ["derive"] }
