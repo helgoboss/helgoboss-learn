@@ -4,9 +4,10 @@ use crate::{
     TransformationInstruction, UnitIncrement, UnitValue, BASE_EPSILON,
 };
 use num_enum::TryFromPrimitive;
+// Use once_cell::sync::Lazy instead of std::sync::LazyLock in order to be able to build with Rust 1.77.2 (to stay Win7-compatible)
+use once_cell::sync::Lazy as LazyLock;
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
-use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 /// The timestamp is intended to be used for things like takeover modes. Ideally, the event
