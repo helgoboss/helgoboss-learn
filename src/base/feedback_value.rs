@@ -5,6 +5,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum FeedbackValue<'a> {
+    /// Switch lights and displays completely off. Used for example if target inactive.
     Off,
     Numeric(NumericFeedbackValue),
     // This Cow is in case the producer of the feedback value can use the borrowed value. At the

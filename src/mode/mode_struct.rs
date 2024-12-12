@@ -719,7 +719,8 @@ where
             Default::default(),
             target_value,
         )));
-        let out_cow = self.feedback_with_options_detail(in_cow, options, Default::default())?;
+        let out_cow =
+            self.feedback_with_options_detail(Some(in_cow), options, Default::default())?;
         Some(out_cow.to_numeric()?.value)
     }
 
@@ -727,12 +728,28 @@ where
     /// maybe returns an appropriate source value that should be sent to the source.
     pub fn feedback_with_options_detail<'a, 'c>(
         &self,
-        target_value: Cow<'a, FeedbackValue<'c>>,
+        target_value: Option<Cow<'a, FeedbackValue<'c>>>,
         options: ModeFeedbackOptions,
         additional_transformation_input: T::AdditionalInput,
     ) -> Option<Cow<'a, FeedbackValue<'c>>> {
         match target_value {
-            Cow::Owned(FeedbackValue::Numeric(feedback_value)) => {
+            None => {
+                // Target didn't return any value. Return minimum value and apply at least source min/max.
+                // I think the best way to deal with it is to emit the minimum feedback value = 0%. Emitting 0% is different
+                // from off. "Off" means, the mapping and/or target is inactive. So emitting 0% makes the source aware that
+                // an active target is connected.
+                // Important: Don't feed the numeric feedback transformation with 0%. Either omit feedback
+                // transformation (the current way) or let feedback transformation know if a "none" value is passed
+                // (a possible future improvement).
+                let v = self.apply_feedback_source_interval(
+                    AbsoluteValue::Continuous(UnitValue::MIN),
+                    options,
+                );
+                let result = NumericFeedbackValue::new(FeedbackStyle::default(), v);
+                Some(Cow::Owned(FeedbackValue::Numeric(result)))
+            }
+            // Numeric value
+            Some(Cow::Owned(FeedbackValue::Numeric(feedback_value))) => {
                 let res = self.feedback_numerical_target_value(
                     feedback_value,
                     options,
@@ -740,7 +757,8 @@ where
                 )?;
                 Some(Cow::Owned(res))
             }
-            Cow::Borrowed(FeedbackValue::Numeric(feedback_value)) => {
+            // Numeric value
+            Some(Cow::Borrowed(FeedbackValue::Numeric(feedback_value))) => {
                 let res = self.feedback_numerical_target_value(
                     *feedback_value,
                     options,
@@ -748,7 +766,9 @@ where
                 )?;
                 Some(Cow::Owned(res))
             }
-            v => {
+            // Text or complex
+            Some(v) => {
+                // Either return directly or - if applicable - apply feedback table
                 if let Some(table) = self.settings.feedback_value_table.as_ref() {
                     table.transform_value(v)
                 } else {
@@ -823,6 +843,16 @@ where
             }
         };
         // 1. Apply source interval
+        v = self.apply_feedback_source_interval(v, options);
+        let result = NumericFeedbackValue::new(feedback_value.style, v);
+        Some(FeedbackValue::Numeric(result))
+    }
+
+    fn apply_feedback_source_interval(
+        &self,
+        mut v: AbsoluteValue,
+        options: ModeFeedbackOptions,
+    ) -> AbsoluteValue {
         v = v.denormalize(
             &self.settings.source_value_interval,
             &self.settings.discrete_source_value_interval,
@@ -837,10 +867,7 @@ where
             // discrete processing enabled).
             v = v.to_continuous_value();
         };
-        Some(FeedbackValue::Numeric(NumericFeedbackValue::new(
-            feedback_value.style,
-            v,
-        )))
+        v
     }
 
     fn process_control_transformation_output<O>(
@@ -10564,21 +10591,14 @@ mod tests {
                 color: Some(RgbColor::new(10, 10, 10)),
                 background_color: None,
             };
+            let playing = TextualFeedbackValue::new(style, "playing".into());
             let result = mode.feedback_with_options_detail(
-                Cow::Owned(FeedbackValue::Textual(TextualFeedbackValue::new(
-                    style,
-                    "playing".into(),
-                ))),
+                Some(Cow::Owned(FeedbackValue::Textual(playing.clone()))),
                 ModeFeedbackOptions::default(),
                 (),
             );
             // Then
-            assert_eq!(
-                result,
-                Some(Cow::Owned(FeedbackValue::Textual(
-                    TextualFeedbackValue::new(style, "playing".into(),)
-                )))
-            );
+            assert_eq!(result, Some(Cow::Owned(FeedbackValue::Textual(playing))));
         }
 
         #[test]
@@ -10597,19 +10617,15 @@ mod tests {
                 color: Some(RgbColor::new(10, 10, 10)),
                 background_color: None,
             };
+            let playing = TextualFeedbackValue::new(style, "playing".into());
             let matched_result = mode.feedback_with_options_detail(
-                Cow::Owned(FeedbackValue::Textual(TextualFeedbackValue::new(
-                    style,
-                    "playing".into(),
-                ))),
+                Some(Cow::Owned(FeedbackValue::Textual(playing))),
                 ModeFeedbackOptions::default(),
                 (),
             );
+            let bla = TextualFeedbackValue::new(style, "bla".into());
             let unmatched_result = mode.feedback_with_options_detail(
-                Cow::Owned(FeedbackValue::Textual(TextualFeedbackValue::new(
-                    style,
-                    "bla".into(),
-                ))),
+                Some(Cow::Owned(FeedbackValue::Textual(bla))),
                 ModeFeedbackOptions::default(),
                 (),
             );
