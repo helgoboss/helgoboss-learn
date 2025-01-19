@@ -260,7 +260,9 @@ impl From<Bpm> for UnitValue {
     fn from(value: Bpm) -> Self {
         let min = Bpm::ONE_BPM.get();
         let span = Bpm::NINE_HUNDRED_SIXTY_BPM.get() - min;
-        UnitValue::new((value.get() - min) / span)
+        // At some point, we allowed BPM values higher than 960 BPM (it's just that REAPER doesn't take them).
+        // That's why we clamp.
+        UnitValue::new_clamped((value.get() - min) / span)
     }
 }
 
