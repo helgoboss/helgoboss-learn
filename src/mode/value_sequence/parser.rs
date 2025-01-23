@@ -80,7 +80,7 @@ pub struct RawSimpleRange<'a> {
     pub to: &'a str,
 }
 
-impl<'a> RawSimpleRange<'a> {
+impl RawSimpleRange<'_> {
     #[cfg(test)]
     fn new(from: &'a str, to: &'a str) -> Self {
         Self { from, to }

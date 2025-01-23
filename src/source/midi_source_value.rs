@@ -65,7 +65,7 @@ pub enum RawFeedbackAddressInfo {
     Custom(MidiSourceAddress),
 }
 
-impl<'a, M: ShortMessage> MidiSourceValue<'a, M> {
+impl<M: ShortMessage> MidiSourceValue<'_, M> {
     pub fn single_raw(
         feedback_address_info: Option<RawFeedbackAddressInfo>,
         event: RawMidiEvent,
@@ -81,7 +81,7 @@ pub fn create_raw_midi_events_singleton(event: RawMidiEvent) -> RawMidiEvents {
     vec![event]
 }
 
-impl<'a, M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'a, M> {
+impl<M: ShortMessage + ShortMessageFactory + Copy> MidiSourceValue<'_, M> {
     pub fn extract_feedback_address(&self) -> Option<MidiSourceAddress> {
         use MidiSourceValue::*;
         let res = match self {

@@ -104,7 +104,7 @@ struct DisplayableValueSequence<'a, F> {
     value_formatter: &'a F,
 }
 
-impl<'a, F: ValueFormatter> Display for DisplayableValueSequence<'a, F> {
+impl<F: ValueFormatter> Display for DisplayableValueSequence<'_, F> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let snippets: Vec<_> = self
             .value_sequence
@@ -133,7 +133,7 @@ pub enum ValueSequenceEntry {
     Range(ValueSequenceRangeEntry),
 }
 
-impl<'a, F: ValueFormatter> Display for WithFormatter<'a, ValueSequenceEntry, F> {
+impl<F: ValueFormatter> Display for WithFormatter<'_, ValueSequenceEntry, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use ValueSequenceEntry::*;
         match self.actual {
@@ -143,7 +143,7 @@ impl<'a, F: ValueFormatter> Display for WithFormatter<'a, ValueSequenceEntry, F>
     }
 }
 
-impl<'a> IntoIterator for WithDefaultStepSize<'a, ValueSequenceEntry> {
+impl IntoIterator for WithDefaultStepSize<'_, ValueSequenceEntry> {
     type Item = UnitValue;
     type IntoIter = ValueSequenceRangeIterator;
 
@@ -170,7 +170,7 @@ pub struct ValueSequenceRangeEntry {
     step_size: Option<UnitValue>,
 }
 
-impl<'a, F: ValueFormatter> Display for WithFormatter<'a, ValueSequenceRangeEntry, F> {
+impl<F: ValueFormatter> Display for WithFormatter<'_, ValueSequenceRangeEntry, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.value_formatter.format_value(self.actual.from, f)?;
         f.write_str(" - ")?;
@@ -184,7 +184,7 @@ impl<'a, F: ValueFormatter> Display for WithFormatter<'a, ValueSequenceRangeEntr
     }
 }
 
-impl<'a> IntoIterator for WithDefaultStepSize<'a, ValueSequenceRangeEntry> {
+impl IntoIterator for WithDefaultStepSize<'_, ValueSequenceRangeEntry> {
     type Item = UnitValue;
     type IntoIter = ValueSequenceRangeIterator;
 

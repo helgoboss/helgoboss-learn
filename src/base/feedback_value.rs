@@ -56,7 +56,7 @@ pub struct FeedbackStyle {
     pub background_color: Option<RgbColor>,
 }
 
-impl<'a> FeedbackValue<'a> {
+impl FeedbackValue<'_> {
     pub fn to_numeric(&self) -> Option<NumericFeedbackValue> {
         use FeedbackValue::*;
         match self {
@@ -117,7 +117,7 @@ impl<'a> FeedbackValue<'a> {
     }
 }
 
-impl<'a> Display for FeedbackValue<'a> {
+impl Display for FeedbackValue<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let textual = self.to_textual();
         f.write_str(textual.text.as_ref())?;
