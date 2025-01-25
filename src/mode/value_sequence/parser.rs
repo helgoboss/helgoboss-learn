@@ -80,7 +80,8 @@ pub struct RawSimpleRange<'a> {
     pub to: &'a str,
 }
 
-impl RawSimpleRange<'_> {
+#[allow(clippy::needless_lifetimes)]
+impl<'a> RawSimpleRange<'a> {
     #[cfg(test)]
     fn new(from: &'a str, to: &'a str) -> Self {
         Self { from, to }
