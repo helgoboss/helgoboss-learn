@@ -999,6 +999,7 @@ where
         &mut self,
         target: &impl Target<'a, Context = TC>,
         context: C,
+        is_just_refresh: bool,
     ) {
         let default_step_size = target
             .control_type(context.into())
@@ -1010,8 +1011,12 @@ where
             .unpack(default_step_size);
         self.state.unpacked_target_value_set = unpacked_sequence.iter().copied().collect();
         self.state.unpacked_target_value_sequence = unpacked_sequence;
-        self.state.previous_jump_prevention_state = None;
-        self.state.final_target_value_from_previous_control = None;
+        // If this is just a target refresh, we don't want to clear the following states because this
+        // would break takeover modes (https://github.com/helgoboss/helgobox/issues/1545).
+        if !is_just_refresh {
+            self.state.previous_jump_prevention_state = None;
+            self.state.final_target_value_from_previous_control = None;
+        }
     }
 
     fn control_relative<
@@ -1818,7 +1823,7 @@ where
         let prev_jump_state = match self.state.previous_jump_prevention_state {
             None => {
                 // First control of this target. We don't have a meaningful previous control value
-                // to relate to. Memorize the current but don't do anything.
+                // to relate to. Memorize the current one but don't do anything.
                 let fresh_state = JumpPreventionState {
                     prepped_control_event,
                     takeover_in_sync: false,
@@ -3631,7 +3636,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target, ());
+                mode.update_from_target(&target, (), false);
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -3723,7 +3728,7 @@ mod tests {
                         is_retriggerable: false,
                     },
                 };
-                mode.update_from_target(&target, ());
+                mode.update_from_target(&target, (), false);
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -3815,7 +3820,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target, ());
+                mode.update_from_target(&target, (), false);
                 // When
                 // Then
                 assert_eq!(29, count);
@@ -6545,7 +6550,7 @@ mod tests {
                 current_value: Some(con_val(0.6)),
                 control_type: ControlType::AbsoluteContinuous,
             };
-            mode.update_from_target(&target, ());
+            mode.update_from_target(&target, (), false);
             // When
             // Then
             let mut test = |i, o| {
@@ -7339,7 +7344,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target, ());
+                mode.update_from_target(&target, (), false);
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -7387,7 +7392,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target, ());
+                mode.update_from_target(&target, (), false);
                 // When
                 // Then
                 assert_abs_diff_eq!(
@@ -9688,7 +9693,7 @@ mod tests {
                     current_value: Some(con_val(0.6)),
                     control_type: ControlType::AbsoluteContinuous,
                 };
-                mode.update_from_target(&target, ());
+                mode.update_from_target(&target, (), false);
                 // When
                 // Then
                 assert_eq!(mode.control(abs_con_evt(0.0), &target, ()), None);
