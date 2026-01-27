@@ -49,9 +49,9 @@ impl OutOfRangeBehavior {
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
     ) -> Option<(AbsoluteValue, MinIsMaxBehavior)> {
-        use OutOfRangeBehavior::*;
+        use OutOfRangeBehavior as B;
         match self {
-            MinOrMax => {
+            B::MinOrMax => {
                 if interval_match_result == IntervalMatchResult::Lower {
                     Some((
                         control_value.select_appropriate_interval_min(
@@ -70,12 +70,12 @@ impl OutOfRangeBehavior {
                     ))
                 }
             }
-            Min => Some((
+            B::Min => Some((
                 control_value
                     .select_appropriate_interval_min(continuous_interval, discrete_interval),
                 MinIsMaxBehavior::PreferZero,
             )),
-            Ignore => None,
+            B::Ignore => None,
         }
     }
 }
@@ -292,18 +292,18 @@ impl Default for GroupInteraction {
 
 impl GroupInteraction {
     pub fn is_target_based(&self) -> bool {
-        use GroupInteraction::*;
-        matches!(self, SameTargetValue | InverseTargetValue)
+        use GroupInteraction as I;
+        matches!(self, I::SameTargetValue | I::InverseTargetValue)
     }
 
     pub fn is_inverse(self) -> bool {
-        use GroupInteraction::*;
+        use GroupInteraction as I;
         matches!(
             self,
-            InverseControl
-                | InverseTargetValue
-                | InverseTargetValueOnOnly
-                | InverseTargetValueOffOnly
+            I::InverseControl
+                | I::InverseTargetValue
+                | I::InverseTargetValueOnOnly
+                | I::InverseTargetValueOffOnly
         )
     }
 }

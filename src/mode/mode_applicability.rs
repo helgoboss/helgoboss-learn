@@ -23,10 +23,10 @@ pub enum DetailedSourceCharacter {
 
 impl DetailedSourceCharacter {
     fn is_button(self) -> bool {
-        use DetailedSourceCharacter::*;
+        use DetailedSourceCharacter as C;
         matches!(
             self,
-            MomentaryOnOffButton | MomentaryVelocitySensitiveButton | Trigger
+            C::MomentaryOnOffButton | C::MomentaryVelocitySensitiveButton | C::Trigger
         )
     }
 }
@@ -135,16 +135,18 @@ pub enum ModeApplicability {
 
 impl ModeApplicability {
     pub fn hint(self) -> Option<&'static str> {
-        use ModeApplicability::*;
+        use ModeApplicability as A;
         match self {
-            HasNoEffect | MakesNoSenseUseDefault | MakesNoSenseParentTakesCareOfDefault => None,
-            MakesSense(h) | Awkward(h) => Some(h),
+            A::HasNoEffect
+            | A::MakesNoSenseUseDefault
+            | A::MakesNoSenseParentTakesCareOfDefault => None,
+            A::MakesSense(h) | A::Awkward(h) => Some(h),
         }
     }
 
     pub fn is_relevant(self) -> bool {
-        use ModeApplicability::*;
-        matches!(self, MakesSense(_) | Awkward(_))
+        use ModeApplicability as A;
+        matches!(self, A::MakesSense(_) | A::Awkward(_))
     }
 }
 

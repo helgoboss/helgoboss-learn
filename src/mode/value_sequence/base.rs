@@ -135,10 +135,10 @@ pub enum ValueSequenceEntry {
 
 impl<F: ValueFormatter> Display for WithFormatter<'_, ValueSequenceEntry, F> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use ValueSequenceEntry::*;
+        use ValueSequenceEntry as E;
         match self.actual {
-            SingleValue(v) => self.value_formatter.format_value(*v, f),
-            Range(r) => WithFormatter::new(r, self.value_formatter).fmt(f),
+            E::SingleValue(v) => self.value_formatter.format_value(*v, f),
+            E::Range(r) => WithFormatter::new(r, self.value_formatter).fmt(f),
         }
     }
 }
@@ -148,9 +148,9 @@ impl IntoIterator for WithDefaultStepSize<'_, ValueSequenceEntry> {
     type IntoIter = ValueSequenceRangeIterator;
 
     fn into_iter(self) -> ValueSequenceRangeIterator {
-        use ValueSequenceEntry::*;
+        use ValueSequenceEntry as E;
         match self.actual {
-            SingleValue(uv) => {
+            E::SingleValue(uv) => {
                 let simple_range_entry = ValueSequenceRangeEntry {
                     from: *uv,
                     to: *uv,
@@ -158,7 +158,7 @@ impl IntoIterator for WithDefaultStepSize<'_, ValueSequenceEntry> {
                 };
                 WithDefaultStepSize::new(&simple_range_entry, self.default_step_size).into_iter()
             }
-            Range(r) => WithDefaultStepSize::new(r, self.default_step_size).into_iter(),
+            E::Range(r) => WithDefaultStepSize::new(r, self.default_step_size).into_iter(),
         }
     }
 }

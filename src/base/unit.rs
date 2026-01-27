@@ -202,20 +202,20 @@ impl UnitValue {
         min_is_max_behavior: MinIsMaxBehavior,
         epsilon: f64,
     ) -> UnitValue {
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         match current_interval.value_matches_tolerant(*self, epsilon) {
-            Between => UnitValue::new_clamped(
+            R::Between => UnitValue::new_clamped(
                 (*self - current_interval.min_val()) / current_interval.span(),
             ),
-            MinAndMax => {
-                use MinIsMaxBehavior::*;
+            R::MinAndMax => {
+                use MinIsMaxBehavior as B;
                 match min_is_max_behavior {
-                    PreferZero => UnitValue::MIN,
-                    PreferOne => UnitValue::MAX,
+                    B::PreferZero => UnitValue::MIN,
+                    B::PreferOne => UnitValue::MAX,
                 }
             }
-            Min | Lower => UnitValue::MIN,
-            Max | Greater => UnitValue::MAX,
+            R::Min | R::Lower => UnitValue::MIN,
+            R::Max | R::Greater => UnitValue::MAX,
         }
     }
 
@@ -315,22 +315,22 @@ impl UnitValue {
         epsilon: f64,
     ) -> UnitValue {
         let (min, max) = (interval.min_val(), interval.max_val());
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         match interval.value_matches_tolerant(*self, epsilon) {
-            Lower | Greater => {
+            R::Lower | R::Greater => {
                 if increment.is_positive() {
                     min
                 } else {
                     max
                 }
             }
-            Between | Min | Max | MinAndMax => {
+            R::Between | R::Min | R::Max | R::MinAndMax => {
                 let sum = self.0 + increment.get();
                 let raw_interval: Interval<f64> = (*interval).into();
                 match raw_interval.value_matches_tolerant(sum, epsilon) {
-                    Between => UnitValue::new_clamped(sum),
-                    Min | Greater => min,
-                    Max | Lower | MinAndMax => max,
+                    R::Between => UnitValue::new_clamped(sum),
+                    R::Min | R::Greater => min,
+                    R::Max | R::Lower | R::MinAndMax => max,
                 }
             }
         }
@@ -346,11 +346,11 @@ impl UnitValue {
         epsilon: f64,
     ) -> UnitValue {
         let (min, max) = (interval.min_val(), interval.max_val());
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         match interval.value_matches_tolerant(*self, epsilon) {
-            Lower => min,
-            Greater => max,
-            Between | Min | Max | MinAndMax => {
+            R::Lower => min,
+            R::Greater => max,
+            R::Between | R::Min | R::Max | R::MinAndMax => {
                 UnitValue::new_clamped(num::clamp(self.0 + increment.get(), min.get(), max.get()))
             }
         }

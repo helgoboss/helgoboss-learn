@@ -164,10 +164,10 @@ pub enum IntervalMatchResult {
 
 impl IntervalMatchResult {
     pub fn matches(self) -> bool {
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         match self {
-            Between | Min | Max | MinAndMax => true,
-            Lower | Greater => false,
+            R::Between | R::Min | R::Max | R::MinAndMax => true,
+            R::Lower | R::Greater => false,
         }
     }
 }

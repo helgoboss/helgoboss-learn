@@ -317,10 +317,10 @@ impl AbsoluteValue {
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
     ) -> AbsoluteValue {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(_) => Continuous(continuous_interval.min_val()),
-            Discrete(v) => Discrete(v.with_actual(discrete_interval.min_val())),
+            V::Continuous(_) => V::Continuous(continuous_interval.min_val()),
+            V::Discrete(v) => V::Discrete(v.with_actual(discrete_interval.min_val())),
         }
     }
 
@@ -329,10 +329,10 @@ impl AbsoluteValue {
         continuous_interval: &Interval<UnitValue>,
         discrete_interval: &Interval<u32>,
     ) -> AbsoluteValue {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(_) => Continuous(continuous_interval.max_val()),
-            Discrete(v) => Discrete(v.with_actual(discrete_interval.max_val())),
+            V::Continuous(_) => V::Continuous(continuous_interval.max_val()),
+            V::Discrete(v) => V::Discrete(v.with_actual(discrete_interval.max_val())),
         }
     }
 
@@ -350,20 +350,20 @@ impl AbsoluteValue {
         is_discrete_mode: bool,
         epsilon: f64,
     ) -> Self {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(v) => {
+            V::Continuous(v) => {
                 let scaled = v.normalize(continuous_interval, min_is_max_behavior, epsilon);
-                Continuous(scaled)
+                V::Continuous(scaled)
             }
-            Discrete(v) => {
+            V::Discrete(v) => {
                 if is_discrete_mode {
                     // Normalize without scaling.
                     let rooted = v.normalize(discrete_interval, min_is_max_behavior);
-                    Discrete(rooted)
+                    V::Discrete(rooted)
                 } else if continuous_interval.is_full() {
                     // Retain discreteness of value even in non-discrete mode if this is a no-op!
-                    Discrete(v)
+                    V::Discrete(v)
                 } else {
                     // Use scaling if we are in non-discrete mode, thereby destroying the
                     // value's discreteness.
@@ -372,7 +372,7 @@ impl AbsoluteValue {
                         min_is_max_behavior,
                         epsilon,
                     );
-                    Continuous(scaled)
+                    V::Continuous(scaled)
                 }
             }
         }
@@ -391,25 +391,25 @@ impl AbsoluteValue {
         is_discrete_mode: bool,
         discrete_max: Option<u32>,
     ) -> Self {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(v) => {
+            V::Continuous(v) => {
                 let scaled = v.denormalize(continuous_interval);
-                Continuous(scaled)
+                V::Continuous(scaled)
             }
-            Discrete(v) => {
+            V::Discrete(v) => {
                 if is_discrete_mode {
                     // Denormalize without scaling.
                     let unrooted = v.denormalize(discrete_interval, discrete_max);
-                    Discrete(unrooted)
+                    V::Discrete(unrooted)
                 } else if continuous_interval.is_full() {
                     // Retain discreteness of value even in non-discrete mode if this is a no-op!
-                    Discrete(v)
+                    V::Discrete(v)
                 } else {
                     // Use scaling if we are in non-discrete mode, thereby destroying the
                     // value's discreteness.
                     let scaled = v.to_unit_value().denormalize(continuous_interval);
-                    Continuous(scaled)
+                    V::Continuous(scaled)
                 }
             }
         }
@@ -424,9 +424,9 @@ impl AbsoluteValue {
         timestamp: Duration,
         additional_input: T::AdditionalInput,
     ) -> Result<EnhancedTransformationOutput<ControlValue>, &'static str> {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(v) => {
+            V::Continuous(v) => {
                 // Input value is continuous.
                 let current_target_value = current_target_value
                     .map(|t| t.to_unit_value())
@@ -440,12 +440,12 @@ impl AbsoluteValue {
                     additional_input,
                 )
             }
-            Discrete(v) => {
+            V::Discrete(v) => {
                 // Input value is discrete.
                 let current_target_value = current_target_value
                     .unwrap_or_else(|| AbsoluteValue::Discrete(v.with_actual(0)));
                 match current_target_value {
-                    Continuous(t) => {
+                    V::Continuous(t) => {
                         // Target value is continuous.
                         self.transform_continuous(
                             transformation,
@@ -456,7 +456,7 @@ impl AbsoluteValue {
                             additional_input,
                         )
                     }
-                    Discrete(t) => {
+                    V::Discrete(t) => {
                         // Target value is also discrete.
                         if is_discrete_mode {
                             // Discrete mode.
@@ -548,14 +548,14 @@ impl AbsoluteValue {
     }
 
     pub fn inverse(self, new_discrete_max: Option<u32>) -> Self {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(v) => Self::Continuous(v.inverse()),
+            V::Continuous(v) => Self::Continuous(v.inverse()),
             // 100/100 (max 150) =>   0/150
             //   0/100 (max 150) => 100/150
             // 100/100 (max 50) =>    0/50
             //   0/100 (max 50) =>   50/50
-            Discrete(f) => {
+            V::Discrete(f) => {
                 let res = if let Some(new_max) = new_discrete_max {
                     let min_max = std::cmp::min(new_max, f.max_val());
                     let inversed_with_min_max = f.with_max_clamped(min_max).inverse();
@@ -569,13 +569,13 @@ impl AbsoluteValue {
     }
 
     pub fn round(self, control_type: ControlType) -> Self {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(v) => {
+            V::Continuous(v) => {
                 let value = round_to_nearest_discrete_value(control_type, v);
                 Self::Continuous(value)
             }
-            Discrete(f) => Self::Discrete(f),
+            V::Discrete(f) => Self::Discrete(f),
         }
     }
 
@@ -593,9 +593,9 @@ impl AbsoluteValue {
     }
 
     pub fn calc_distance_from(self, rhs: Self) -> Self {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match (self, rhs) {
-            (Discrete(f1), Discrete(f2)) => {
+            (V::Discrete(f1), V::Discrete(f2)) => {
                 let distance = (f2.actual() as i32 - f1.actual() as i32).unsigned_abs();
                 Self::Discrete(Fraction::new_max(distance))
             }
@@ -607,18 +607,18 @@ impl AbsoluteValue {
     }
 
     pub fn is_greater_than(&self, continuous_jump_max: UnitValue, discrete_jump_max: u32) -> bool {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(d) => d.get() > continuous_jump_max.get() + BASE_EPSILON,
-            Discrete(d) => d.actual() > discrete_jump_max,
+            V::Continuous(d) => d.get() > continuous_jump_max.get() + BASE_EPSILON,
+            V::Discrete(d) => d.actual() > discrete_jump_max,
         }
     }
 
     pub fn is_lower_than(&self, continuous_jump_min: UnitValue, discrete_jump_min: u32) -> bool {
-        use AbsoluteValue::*;
+        use AbsoluteValue as V;
         match self {
-            Continuous(d) => d.get() + BASE_EPSILON < continuous_jump_min.get(),
-            Discrete(d) => d.actual() < discrete_jump_min,
+            V::Continuous(d) => d.get() + BASE_EPSILON < continuous_jump_min.get(),
+            V::Discrete(d) => d.actual() < discrete_jump_min,
         }
     }
 }
@@ -757,17 +757,17 @@ fn round_to_nearest_discrete_value(
 ) -> UnitValue {
     // round() is the right choice here vs. floor() because we don't want slight numerical
     // inaccuracies lead to surprising jumps
-    use ControlType::*;
+    use ControlType as T;
     let step_size = match control_type {
-        AbsoluteContinuousRoundable { rounding_step_size } => rounding_step_size,
-        AbsoluteDiscrete {
+        T::AbsoluteContinuousRoundable { rounding_step_size } => rounding_step_size,
+        T::AbsoluteDiscrete {
             atomic_step_size, ..
         } => atomic_step_size,
-        AbsoluteContinuousRetriggerable
-        | AbsoluteContinuous
-        | Relative
-        | VirtualMulti
-        | VirtualButton => {
+        T::AbsoluteContinuousRetriggerable
+        | T::AbsoluteContinuous
+        | T::Relative
+        | T::VirtualMulti
+        | T::VirtualButton => {
             return approximate_control_value;
         }
     };

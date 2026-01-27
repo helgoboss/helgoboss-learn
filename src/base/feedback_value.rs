@@ -58,61 +58,61 @@ pub struct FeedbackStyle {
 
 impl FeedbackValue<'_> {
     pub fn to_numeric(&self) -> Option<NumericFeedbackValue> {
-        use FeedbackValue::*;
+        use FeedbackValue as V;
         match self {
-            Off => Some(NumericFeedbackValue::new(
+            V::Off => Some(NumericFeedbackValue::new(
                 Default::default(),
                 AbsoluteValue::Continuous(UnitValue::MIN),
             )),
-            Numeric(v) => Some(*v),
-            Textual(_) | Complex(_) => None,
+            V::Numeric(v) => Some(*v),
+            V::Textual(_) | V::Complex(_) => None,
         }
     }
 
     pub fn to_textual(&self) -> TextualFeedbackValue {
-        use FeedbackValue::*;
+        use FeedbackValue as V;
         match self {
-            Off | Complex(_) => Default::default(),
-            Numeric(v) => TextualFeedbackValue::new(
+            V::Off | V::Complex(_) => Default::default(),
+            V::Numeric(v) => TextualFeedbackValue::new(
                 v.style,
                 Cow::Owned(format_percentage_without_unit(
                     v.value.to_unit_value().get(),
                 )),
             ),
-            Textual(v) => TextualFeedbackValue::new(v.style, Cow::Borrowed(v.text.as_ref())),
+            V::Textual(v) => TextualFeedbackValue::new(v.style, Cow::Borrowed(v.text.as_ref())),
         }
     }
 
     pub fn make_owned(self) -> FeedbackValue<'static> {
-        use FeedbackValue::*;
+        use FeedbackValue as V;
         match self {
-            Off => Off,
-            Numeric(v) => Numeric(v),
-            Textual(v) => {
+            V::Off => V::Off,
+            V::Numeric(v) => V::Numeric(v),
+            V::Textual(v) => {
                 let new = TextualFeedbackValue::new(v.style, Cow::Owned(v.text.into_owned()));
-                Textual(new)
+                V::Textual(new)
             }
-            Complex(v) => Complex(v),
+            V::Complex(v) => V::Complex(v),
         }
     }
 
     pub fn color(&self) -> Option<RgbColor> {
-        use FeedbackValue::*;
+        use FeedbackValue as V;
         match self {
-            Off => None,
-            Numeric(v) => v.style.color,
-            Textual(v) => v.style.color,
-            Complex(v) => v.style.color,
+            V::Off => None,
+            V::Numeric(v) => v.style.color,
+            V::Textual(v) => v.style.color,
+            V::Complex(v) => v.style.color,
         }
     }
 
     pub fn background_color(&self) -> Option<RgbColor> {
-        use FeedbackValue::*;
+        use FeedbackValue as V;
         match self {
-            Off => None,
-            Numeric(v) => v.style.background_color,
-            Textual(v) => v.style.background_color,
-            Complex(v) => v.style.background_color,
+            V::Off => None,
+            V::Numeric(v) => v.style.background_color,
+            V::Textual(v) => v.style.background_color,
+            V::Complex(v) => v.style.background_color,
         }
     }
 }

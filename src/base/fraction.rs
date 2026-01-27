@@ -75,10 +75,10 @@ impl Fraction {
 
     /// Tests if this value is within the given interval.
     pub fn is_within_interval(&self, interval: &Interval<u32>) -> bool {
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         match interval.value_matches(self.actual) {
-            Between | Min | Max | MinAndMax => true,
-            Lower | Greater => false,
+            R::Between | R::Min | R::Max | R::MinAndMax => true,
+            R::Lower | R::Greater => false,
         }
     }
 
@@ -93,24 +93,24 @@ impl Fraction {
             let min_span = unrooted_max - interval.min_val();
             std::cmp::min(min_span, interval.span())
         };
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         match interval.value_matches(self.actual) {
-            Between => {
+            R::Between => {
                 let unrooted_actual = self.actual;
                 // actual
                 let rooted_actual = unrooted_actual - interval.min_val();
                 // fraction
                 Fraction::new(rooted_actual, rooted_max)
             }
-            MinAndMax => {
-                use MinIsMaxBehavior::*;
+            R::MinAndMax => {
+                use MinIsMaxBehavior as B;
                 match min_is_max_behavior {
-                    PreferZero => Self::new_min(0),
-                    PreferOne => Self::new_max(1),
+                    B::PreferZero => Self::new_min(0),
+                    B::PreferOne => Self::new_max(1),
                 }
             }
-            Min | Lower => Fraction::new_min(rooted_max),
-            Max | Greater => Fraction::new_max(rooted_max),
+            R::Min | R::Lower => Fraction::new_min(rooted_max),
+            R::Max | R::Greater => Fraction::new_max(rooted_max),
         }
     }
 
@@ -128,25 +128,25 @@ impl Fraction {
     /// addition.
     pub fn add_rotating(&self, increment: DiscreteIncrement, interval: &Interval<u32>) -> Fraction {
         let (min, max) = (interval.min_val(), interval.max_val());
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         let new_actual = match interval.value_matches(self.actual) {
-            Lower | Greater => {
+            R::Lower | R::Greater => {
                 if increment.is_positive() {
                     min
                 } else {
                     max
                 }
             }
-            Between | Min | Max | MinAndMax => {
+            R::Between | R::Min | R::Max | R::MinAndMax => {
                 let sum = self.actual as i32 + increment.get();
                 if sum < 0 {
                     max
                 } else {
                     let sum = sum as u32;
                     match interval.value_matches(sum) {
-                        Between => sum,
-                        Min | Greater => min,
-                        Max | Lower | MinAndMax => max,
+                        R::Between => sum,
+                        R::Min | R::Greater => min,
+                        R::Max | R::Lower | R::MinAndMax => max,
                     }
                 }
             }
@@ -159,20 +159,20 @@ impl Fraction {
     /// the first place, it returns the closest interval bound instead of doing the addition.
     pub fn add_clamping(&self, increment: DiscreteIncrement, interval: &Interval<u32>) -> Fraction {
         let (min, max) = (interval.min_val(), interval.max_val());
-        use IntervalMatchResult::*;
+        use IntervalMatchResult as R;
         let new_actual = match interval.value_matches(self.actual) {
-            Lower => min,
-            Greater => max,
-            Between | Min | Max | MinAndMax => {
+            R::Lower => min,
+            R::Greater => max,
+            R::Between | R::Min | R::Max | R::MinAndMax => {
                 let sum = self.actual as i32 + increment.get();
                 if sum < 0 {
                     min
                 } else {
                     let sum = sum as u32;
                     match interval.value_matches(sum) {
-                        Between => sum,
-                        Min | Lower => min,
-                        Max | Greater | MinAndMax => max,
+                        R::Between => sum,
+                        R::Min | R::Lower => min,
+                        R::Max | R::Greater | R::MinAndMax => max,
                     }
                 }
             }
