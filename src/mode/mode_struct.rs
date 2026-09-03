@@ -829,8 +829,8 @@ where
             v = v.inverse(normalized_max_discrete_source_value);
         };
         // 2. Apply transformation
-        if let Some(transformation) = self.settings.feedback_transformation.as_ref() {
-            if let Ok(output) = v.transform(
+        if let Some(transformation) = self.settings.feedback_transformation.as_ref()
+            && let Ok(output) = v.transform(
                 transformation,
                 Some(v),
                 self.settings.use_discrete_processing,
@@ -840,8 +840,7 @@ where
             ) {
                 // For feedback, only absolute result values are accepted, relative ones are ignored.
                 v = output.value?.to_absolute_value().ok()?;
-            }
-        };
+            };
         // 1. Apply source interval
         v = self.apply_feedback_source_interval(v, options);
         let result = NumericFeedbackValue::new(feedback_value.style, v);
@@ -938,8 +937,8 @@ where
         };
         // If we have a transition (a transformation which depends on the current timestamp), we
         // poll this one as well.
-        if let Some(transformation) = &self.settings.control_transformation {
-            if transformation.wants_to_be_polled() {
+        if let Some(transformation) = &self.settings.control_transformation
+            && transformation.wants_to_be_polled() {
                 let evt = self.state.previous_source_normalized_control_event?;
                 let output = evt
                     .payload()
@@ -967,7 +966,6 @@ where
                 };
                 return Some(ModeControlResult::hit_target(out_cv));
             }
-        }
         None
     }
 
@@ -1710,8 +1708,8 @@ where
             false
         };
         // 2. Apply transformation
-        if let Some(transformation) = self.settings.control_transformation.as_ref() {
-            if let Ok(output) = v.transform(
+        if let Some(transformation) = self.settings.control_transformation.as_ref()
+            && let Ok(output) = v.transform(
                 transformation,
                 current_target_value,
                 self.settings.use_discrete_processing,
@@ -1725,8 +1723,7 @@ where
                     // Relative values are not further transformed
                     Err(_) => return Some(output),
                 }
-            }
-        };
+            };
         if performance_control {
             // Performance control. Just apply rounding.
             if self.settings.round_target_value {
