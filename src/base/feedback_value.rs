@@ -69,7 +69,7 @@ impl FeedbackValue<'_> {
         }
     }
 
-    pub fn to_textual(&self) -> TextualFeedbackValue {
+    pub fn to_textual(&self) -> TextualFeedbackValue<'_> {
         use FeedbackValue as V;
         match self {
             V::Off | V::Complex(_) => Default::default(),

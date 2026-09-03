@@ -651,7 +651,7 @@ where
         &self,
         prop_provider: &impl PropProvider,
         context: ModeContext<<F as FeedbackScript<'_>>::AdditionalInput>,
-    ) -> FeedbackValue {
+    ) -> FeedbackValue<'_> {
         match &self.settings.feedback_processor {
             FeedbackProcessor::Numeric => {
                 unreachable!("Numeric feedback processor doesn't need build step");
