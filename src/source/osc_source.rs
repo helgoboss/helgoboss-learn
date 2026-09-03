@@ -2,9 +2,9 @@ use crate::DetailedSourceCharacter::Trigger;
 use std::cmp;
 
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, AbsoluteValue, ControlValue,
-    DetailedSourceCharacter, DiscreteIncrement, FeedbackValue, Fraction, Interval, RgbColor,
-    SourceCharacter, UnitValue, UNIT_INTERVAL,
+    AbsoluteValue, ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue,
+    Fraction, Interval, RgbColor, SourceCharacter, UNIT_INTERVAL, UnitValue,
+    format_percentage_without_unit, parse_percentage_without_unit,
 };
 use derive_more::Display;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
@@ -370,7 +370,7 @@ impl OscSource {
                         ))
                     }
                     String(_) | Blob(_) | Time(_) | Char(_) | Color(_) | Midi(_) | Array(_) => {
-                        return None
+                        return None;
                     }
                 };
                 (v, desc.is_relative)

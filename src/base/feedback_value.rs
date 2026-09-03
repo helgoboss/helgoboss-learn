@@ -1,4 +1,4 @@
-use crate::{format_percentage_without_unit, AbsoluteValue, RgbColor, UnitValue};
+use crate::{AbsoluteValue, RgbColor, UnitValue, format_percentage_without_unit};
 use core::fmt;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};

@@ -1,6 +1,6 @@
 use crate::mode::value_sequence::parser::RawEntry;
 use crate::{
-    format_percentage_without_unit, parse_percentage_without_unit, UnitValue, BASE_EPSILON,
+    BASE_EPSILON, UnitValue, format_percentage_without_unit, parse_percentage_without_unit,
 };
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::convert::TryInto;

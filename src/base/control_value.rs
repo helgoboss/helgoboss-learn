@@ -1,7 +1,7 @@
 use crate::{
-    ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult, MinIsMaxBehavior,
-    Transformation, TransformationInput, TransformationInputContext, TransformationInputEvent,
-    TransformationInstruction, UnitIncrement, UnitValue, BASE_EPSILON,
+    BASE_EPSILON, ControlType, DiscreteIncrement, Fraction, Interval, IntervalMatchResult,
+    MinIsMaxBehavior, Transformation, TransformationInput, TransformationInputContext,
+    TransformationInputEvent, TransformationInstruction, UnitIncrement, UnitValue,
 };
 use num_enum::TryFromPrimitive;
 // Use once_cell::sync::Lazy instead of std::sync::LazyLock to be able to build with Rust 1.77.2 (to stay Win7-compatible)

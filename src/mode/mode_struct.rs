@@ -1,12 +1,12 @@
 use crate::{
-    create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
-    negative_if, AbsoluteValue, AbstractTimestamp, ButtonUsage, ControlEvent, ControlType,
+    AbsoluteValue, AbstractTimestamp, BASE_EPSILON, ButtonUsage, ControlEvent, ControlType,
     ControlValue, DiscreteIncrement, DiscreteValue, EncoderUsage, EnhancedTransformationOutput,
     FeedbackScript, FeedbackScriptInput, FeedbackStyle, FeedbackValue, FireMode, Fraction,
     Increment, Interval, MinIsMaxBehavior, ModeContext, NumericFeedbackValue, OutOfRangeBehavior,
     PressDurationProcessor, PropProvider, TakeoverMode, Target, TextualFeedbackValue,
     Transformation, TransformationInstruction, UnitIncrement, UnitValue, ValueSequence,
-    BASE_EPSILON,
+    create_discrete_increment_interval, create_unit_value_interval, full_unit_interval,
+    negative_if,
 };
 use base::hash_util::{NonCryptoHashMap, NonCryptoHashSet};
 use derive_more::Display;
@@ -837,10 +837,11 @@ where
                 Duration::ZERO,
                 Instant::now().duration(),
                 additional_transformation_input,
-            ) {
-                // For feedback, only absolute result values are accepted, relative ones are ignored.
-                v = output.value?.to_absolute_value().ok()?;
-            };
+            )
+        {
+            // For feedback, only absolute result values are accepted, relative ones are ignored.
+            v = output.value?.to_absolute_value().ok()?;
+        };
         // 1. Apply source interval
         v = self.apply_feedback_source_interval(v, options);
         let result = NumericFeedbackValue::new(feedback_value.style, v);
@@ -938,34 +939,35 @@ where
         // If we have a transition (a transformation which depends on the current timestamp), we
         // poll this one as well.
         if let Some(transformation) = &self.settings.control_transformation
-            && transformation.wants_to_be_polled() {
-                let evt = self.state.previous_source_normalized_control_event?;
-                let output = evt
-                    .payload()
-                    .transform(
-                        transformation,
-                        target.current_value(context.into()),
-                        self.settings.use_discrete_processing,
-                        self.calc_rel_time(timestamp),
-                        timestamp.duration(),
-                        context.additional_input(),
-                    )
-                    .ok()?;
-                let in_cv = self.process_control_transformation_output(output)?;
-                let out_cv = match in_cv.to_absolute_value() {
-                    // Absolute values might get reversed and rounded
-                    Ok(mut abs_v) => {
-                        let control_type = target.control_type(context.into());
-                        abs_v = self.apply_reverse(control_type, abs_v);
-                        abs_v = self
-                            .apply_rounded_target_interval_or_target_sequence(control_type, abs_v);
-                        ControlValue::from_absolute(abs_v)
-                    }
-                    // Relative value stay as they are
-                    _ => in_cv,
-                };
-                return Some(ModeControlResult::hit_target(out_cv));
-            }
+            && transformation.wants_to_be_polled()
+        {
+            let evt = self.state.previous_source_normalized_control_event?;
+            let output = evt
+                .payload()
+                .transform(
+                    transformation,
+                    target.current_value(context.into()),
+                    self.settings.use_discrete_processing,
+                    self.calc_rel_time(timestamp),
+                    timestamp.duration(),
+                    context.additional_input(),
+                )
+                .ok()?;
+            let in_cv = self.process_control_transformation_output(output)?;
+            let out_cv = match in_cv.to_absolute_value() {
+                // Absolute values might get reversed and rounded
+                Ok(mut abs_v) => {
+                    let control_type = target.control_type(context.into());
+                    abs_v = self.apply_reverse(control_type, abs_v);
+                    abs_v =
+                        self.apply_rounded_target_interval_or_target_sequence(control_type, abs_v);
+                    ControlValue::from_absolute(abs_v)
+                }
+                // Relative value stay as they are
+                _ => in_cv,
+            };
+            return Some(ModeControlResult::hit_target(out_cv));
+        }
         None
     }
 
@@ -1716,14 +1718,15 @@ where
                 self.calc_rel_time(source_normalized_control_event.timestamp()),
                 source_normalized_control_event.timestamp().duration(),
                 additional_transformation_input,
-            ) {
-                let output = self.process_control_transformation_output(output)?;
-                match output.to_absolute_value() {
-                    Ok(abs_v) => v = abs_v,
-                    // Relative values are not further transformed
-                    Err(_) => return Some(output),
-                }
-            };
+            )
+        {
+            let output = self.process_control_transformation_output(output)?;
+            match output.to_absolute_value() {
+                Ok(abs_v) => v = abs_v,
+                // Relative values are not further transformed
+                Err(_) => return Some(output),
+            }
+        };
         if performance_control {
             // Performance control. Just apply rounding.
             if self.settings.round_target_value {
@@ -2414,7 +2417,7 @@ mod tests {
     use super::*;
 
     use crate::mode::test_util::{TestFeedbackScript, TestTarget, TestTransformation};
-    use crate::{create_unit_value_interval, ControlType, Fraction, NoopTimestamp};
+    use crate::{ControlType, Fraction, NoopTimestamp, create_unit_value_interval};
     use approx::*;
 
     mod absolute_normal {

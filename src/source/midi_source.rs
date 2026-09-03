@@ -1,10 +1,9 @@
 use crate::{
-    create_raw_midi_events_singleton, format_percentage_without_unit,
-    parse_percentage_without_unit, AbsoluteValue, ControlValue, DetailedSourceCharacter,
-    DiscreteIncrement, FeedbackValue, Fraction, MidiSourceScript, MidiSourceValue,
-    PreliminaryMidiSourceFeedbackValue, RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents,
-    RawMidiPattern, RgbColor, SourceContext, TextualFeedbackValue, UnitValue,
-    XTouchMackieLcdColorRequest,
+    AbsoluteValue, ControlValue, DetailedSourceCharacter, DiscreteIncrement, FeedbackValue,
+    Fraction, MidiSourceScript, MidiSourceValue, PreliminaryMidiSourceFeedbackValue,
+    RawFeedbackAddressInfo, RawMidiEvent, RawMidiEvents, RawMidiPattern, RgbColor, SourceContext,
+    TextualFeedbackValue, UnitValue, XTouchMackieLcdColorRequest, create_raw_midi_events_singleton,
+    format_percentage_without_unit, parse_percentage_without_unit,
 };
 use core::iter;
 use derivative::Derivative;
@@ -18,7 +17,7 @@ use crate::source::color_util::find_closest_color_in_palette;
 use helgoboss_midi::{
     Channel, ControlChange14BitMessage, ControllerNumber, DataType, KeyNumber,
     ParameterNumberMessage, RawShortMessage, ShortMessage, ShortMessageFactory, ShortMessageType,
-    StructuredShortMessage, U14, U7,
+    StructuredShortMessage, U7, U14,
 };
 use reaper_common_types::Bpm;
 use serde::{Deserialize, Serialize};
@@ -2065,11 +2064,11 @@ const ASCII_SPACE: u8 = b' ';
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::test_util::TestMidiSourceScript;
     use crate::NumericFeedbackValue;
+    use crate::source::test_util::TestMidiSourceScript;
     use approx::*;
-    use helgoboss_midi::test_util::{channel as ch, controller_number as cn, key_number as kn, *};
     use helgoboss_midi::RawShortMessage;
+    use helgoboss_midi::test_util::{channel as ch, controller_number as cn, key_number as kn, *};
 
     type TestMidiSource = MidiSource<TestMidiSourceScript>;
 

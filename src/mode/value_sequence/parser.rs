@@ -4,8 +4,8 @@ use nom::combinator::opt;
 use nom::multi::separated_list0;
 use nom::sequence::separated_pair;
 use nom::{
-    bytes::complete::is_not, character::complete::char, sequence::delimited, sequence::tuple,
-    IResult,
+    IResult, bytes::complete::is_not, character::complete::char, sequence::delimited,
+    sequence::tuple,
 };
 
 fn parse_value(input: &str) -> IResult<&str, &str> {

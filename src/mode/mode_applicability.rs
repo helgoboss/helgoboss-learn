@@ -172,7 +172,9 @@ pub fn check_mode_applicability(
     match mode_parameter {
         UseDiscreteProcessing => {
             if input.target_supports_discrete_values {
-                MakesSense("By default, ReaLearn uses continuous processing logic. That means it considers all values as percentages and scales (stretches/squeezes) them as needed. If your target is discrete, you can enable discrete processing, which will prevent scaling and deliver your control value to the target as discrete integer (and vice versa in the feedback direction).")
+                MakesSense(
+                    "By default, ReaLearn uses continuous processing logic. That means it considers all values as percentages and scales (stretches/squeezes) them as needed. If your target is discrete, you can enable discrete processing, which will prevent scaling and deliver your control value to the target as discrete integer (and vice versa in the feedback direction).",
+                )
             } else {
                 MakesNoSenseUseDefault
             }
@@ -442,12 +444,10 @@ pub fn check_mode_applicability(
             } else {
                 use crate::AbsoluteMode::*;
                 match input.absolute_mode {
-                    Normal | IncrementalButton | MakeRelative => {
-                        MakesSense("Allows you to step through a sequence of comma-separated user-defined target values and value ranges. When using relative control, duplicate values and direction changes are ignored. Example: 25 - 50 (2), 75, 50, 100 %")
-                    }
-                    ToggleButton | PerformanceControl => {
-                        MakesNoSenseUseDefault
-                    }
+                    Normal | IncrementalButton | MakeRelative => MakesSense(
+                        "Allows you to step through a sequence of comma-separated user-defined target values and value ranges. When using relative control, duplicate values and direction changes are ignored. Example: 25 - 50 (2), 75, 50, 100 %",
+                    ),
+                    ToggleButton | PerformanceControl => MakesNoSenseUseDefault,
                 }
             }
         }
@@ -462,7 +462,9 @@ pub fn check_mode_applicability(
         }
         TextualFeedbackExpression => {
             if input.is_feedback && input.use_textual_feedback && !input.target_is_virtual {
-                MakesSense("Text that you write here will appear on your hardware display. You can access lots of mapping and target properties using double braces. Example: \"{{ target.normalized_value }} %\".")
+                MakesSense(
+                    "Text that you write here will appear on your hardware display. You can access lots of mapping and target properties using double braces. Example: \"{{ target.normalized_value }} %\".",
+                )
             } else {
                 HasNoEffect
             }
@@ -629,8 +631,8 @@ pub fn check_mode_applicability(
                         MakesNoSenseParentTakesCareOfDefault
                     } else {
                         MakesSense(
-                                "If min and max is 0 ms, fires immediately on button press. If one of them is > 0 ms, fires on release if the button press duration was in range.",
-                            )
+                            "If min and max is 0 ms, fires immediately on button press. If one of them is > 0 ms, fires on release if the button press duration was in range.",
+                        )
                     }
                 }
                 AfterTimeout => {
@@ -648,8 +650,8 @@ pub fn check_mode_applicability(
                         MakesNoSenseParentTakesCareOfDefault
                     } else {
                         MakesSense(
-                                "When button pressed, waits until specified timeout and then fires continuously with the specified rate until button released.",
-                            )
+                            "When button pressed, waits until specified timeout and then fires continuously with the specified rate until button released.",
+                        )
                     }
                 }
                 OnSinglePress => MakesSense("Reacts to single button presses only."),
@@ -668,13 +670,12 @@ pub fn check_mode_applicability(
                         if input.absolute_mode == crate::AbsoluteMode::Normal =>
                     {
                         match input.fire_mode {
-                            crate::FireMode::Normal | crate::FireMode::AfterTimeout | crate::FireMode::AfterTimeoutKeepFiring => {
-                                MakesSense(
-                                    "Defines whether to process button presses only, releases only or both.",
-                                )
-                            }
-                            crate::FireMode::OnSinglePress |
-                            crate::FireMode::OnDoublePress => {
+                            crate::FireMode::Normal
+                            | crate::FireMode::AfterTimeout
+                            | crate::FireMode::AfterTimeoutKeepFiring => MakesSense(
+                                "Defines whether to process button presses only, releases only or both.",
+                            ),
+                            crate::FireMode::OnSinglePress | crate::FireMode::OnDoublePress => {
                                 // In this case, we need both press and release as input for implementing the fire mode.
                                 // And the output is only press.
                                 MakesNoSenseUseDefault
@@ -693,8 +694,8 @@ pub fn check_mode_applicability(
                 || input.absolute_mode == crate::AbsoluteMode::IncrementalButton
             {
                 MakesSense(
-                        "Converts relative increments/decrements into an absolute value. This allows you to use control transformation and discontinuous target value sequences but comes with the disadvantage of parameter jumps (which can be mitigated using the jump settings).",
-                    )
+                    "Converts relative increments/decrements into an absolute value. This allows you to use control transformation and discontinuous target value sequences but comes with the disadvantage of parameter jumps (which can be mitigated using the jump settings).",
+                )
             } else {
                 HasNoEffect
             }
@@ -750,66 +751,50 @@ pub fn check_mode_applicability(
                 use crate::AbsoluteMode::*;
                 use DetailedSourceCharacter::*;
                 match input.source_character {
-                    MomentaryOnOffButton | Trigger | MomentaryVelocitySensitiveButton => {
-                        match m {
-                            Normal => {
-                                if input.source_character == MomentaryVelocitySensitiveButton {
-                                    MakesSense(
-                                        "When pressing the button, sets the target value to a velocity-dependent value. Sets it back to minimum when releasing it.",
-                                    )
-                                } else {
-                                    MakesSense(
-                                        "Sets target value to its maximum when pressing the button and back to its minimum when releasing it.",
-                                    )
-                                }
+                    MomentaryOnOffButton | Trigger | MomentaryVelocitySensitiveButton => match m {
+                        Normal => {
+                            if input.source_character == MomentaryVelocitySensitiveButton {
+                                MakesSense(
+                                    "When pressing the button, sets the target value to a velocity-dependent value. Sets it back to minimum when releasing it.",
+                                )
+                            } else {
+                                MakesSense(
+                                    "Sets target value to its maximum when pressing the button and back to its minimum when releasing it.",
+                                )
                             }
-                            IncrementalButton => {
-                                if input.source_character == MomentaryVelocitySensitiveButton {
-                                    MakesSense(
-                                        "Increases the target value with each button press with the defined step size range, taking the velocity of the button press into account.",
-                                    )
-                                } else {
-                                    MakesSense(
-                                        "Increases the target value with each button press with the defined min step size.",
-                                    )
-                                }
-                            }
-                            ToggleButton => MakesSense(
-                                "Switches the target value between its minimum and maximum on each button press.",
-                            ),
-                            MakeRelative | PerformanceControl => MakesNoSenseUseDefault,
                         }
-                    }
-                    RangeControl => {
-                        match m {
-                            Normal => {
+                        IncrementalButton => {
+                            if input.source_character == MomentaryVelocitySensitiveButton {
                                 MakesSense(
-                                    NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC,
+                                    "Increases the target value with each button press with the defined step size range, taking the velocity of the button press into account.",
                                 )
-
-                            }
-                            MakeRelative => {
+                            } else {
                                 MakesSense(
-                                    "Attempts to convert incoming absolute control values to relative increments, making it possible to control targets relatively with absolute controls."
+                                    "Increases the target value with each button press with the defined min step size.",
                                 )
                             }
-                            PerformanceControl => {
-                                MakesSense(
-                                    "Changes the target value starting from its last position set within REAPER."
-                                )
-                            }
-                            IncrementalButton | ToggleButton => MakesNoSenseParentTakesCareOfDefault
                         }
-                    }
+                        ToggleButton => MakesSense(
+                            "Switches the target value between its minimum and maximum on each button press.",
+                        ),
+                        MakeRelative | PerformanceControl => MakesNoSenseUseDefault,
+                    },
+                    RangeControl => match m {
+                        Normal => MakesSense(NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC),
+                        MakeRelative => MakesSense(
+                            "Attempts to convert incoming absolute control values to relative increments, making it possible to control targets relatively with absolute controls.",
+                        ),
+                        PerformanceControl => MakesSense(
+                            "Changes the target value starting from its last position set within REAPER.",
+                        ),
+                        IncrementalButton | ToggleButton => MakesNoSenseParentTakesCareOfDefault,
+                    },
                     Relative => {
                         if input.make_absolute {
                             match m {
-                                Normal => {
-                                    MakesSense(
-                                        NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC,
-                                    )
-                                }
-                                MakeRelative | IncrementalButton | ToggleButton | PerformanceControl => MakesNoSenseParentTakesCareOfDefault
+                                Normal => MakesSense(NORMAL_ABSOLUTE_MODE_FOR_RANGE_DESC),
+                                MakeRelative | IncrementalButton | ToggleButton
+                                | PerformanceControl => MakesNoSenseParentTakesCareOfDefault,
                             }
                         } else {
                             HasNoEffect
@@ -833,23 +818,21 @@ pub fn check_mode_applicability(
                 use crate::GroupInteraction::*;
                 match i {
                     None => MakesSense("Other mappings in the same group will not be touched."),
-                    SameControl => {
-                        MakesSense("Other non-virtual mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete glue section of the other mapping.")
-                    }
-                    SameTargetValue => {
-                        MakesSense(
-                            "Other non-virtual mappings in this group will receive the same target value as this one with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Same control\".",
-                        )
-                    }
-                    InverseControl => {
-                        MakesSense("Other non-virtual mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete glue section of the other mapping.")
-                    }
+                    SameControl => MakesSense(
+                        "Other non-virtual mappings in this group will receive the same control value. Unlike \"Same target value\", this will run the complete glue section of the other mapping.",
+                    ),
+                    SameTargetValue => MakesSense(
+                        "Other non-virtual mappings in this group will receive the same target value as this one with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Same control\".",
+                    ),
+                    InverseControl => MakesSense(
+                        "Other non-virtual mappings in this group will receive the opposite control value. Unlike \"Inverse target value\", this will run the complete glue section of the other mapping.",
+                    ),
                     InverseTargetValue => {
                         use DetailedSourceCharacter::*;
                         match input.source_character {
-                            MomentaryOnOffButton | Trigger => {
-                                MakesSense("Other non-virtual mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. Great for making something exclusive within a group!")
-                            }
+                            MomentaryOnOffButton | Trigger => MakesSense(
+                                "Other non-virtual mappings in this group will receive the opposite target value, e.g. their targets will be switched off when this target is switched on. Great for making something exclusive within a group!",
+                            ),
                             RangeControl | Relative | MomentaryVelocitySensitiveButton => {
                                 MakesSense(
                                     "Other non-virtual mappings in this group will receive the inverse target value with respect to their corresponding target range. This can lead to jumps. If you don't like this, use \"Inverse control\".",
@@ -857,16 +840,12 @@ pub fn check_mode_applicability(
                             }
                         }
                     }
-                    InverseTargetValueOnOnly => {
-                        MakesSense(
-                            "Like \"Inverse target value\" but doesn't apply the inverse to other mappings if the target value is zero. Useful for exclusive toggle buttons.",
-                        )
-                    }
-                    InverseTargetValueOffOnly => {
-                        MakesSense(
-                            "Like \"Inverse target value\" but doesn't apply the inverse to other mappings if the target value is not zero. Useful for exclusive toggle buttons.",
-                        )
-                    }
+                    InverseTargetValueOnOnly => MakesSense(
+                        "Like \"Inverse target value\" but doesn't apply the inverse to other mappings if the target value is zero. Useful for exclusive toggle buttons.",
+                    ),
+                    InverseTargetValueOffOnly => MakesSense(
+                        "Like \"Inverse target value\" but doesn't apply the inverse to other mappings if the target value is not zero. Useful for exclusive toggle buttons.",
+                    ),
                 }
             }
         }
