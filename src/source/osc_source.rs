@@ -33,6 +33,7 @@ pub struct OscSource {
     Eq,
     PartialEq,
     Debug,
+    Default,
     strum::EnumString,
     strum::Display,
     SerializeDisplay,
@@ -50,6 +51,7 @@ pub enum OscFeedbackProp {
     ValueAsBool,
     // Nil
     #[strum(serialize = "nil")]
+    #[default]
     Nil,
     // Inf
     #[strum(serialize = "inf")]
@@ -72,12 +74,6 @@ pub enum OscFeedbackProp {
     Color,
     #[strum(serialize = "style.backround_color")]
     BackgroundColor,
-}
-
-impl Default for OscFeedbackProp {
-    fn default() -> Self {
-        Self::Nil
-    }
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -172,6 +168,7 @@ fn get_range_value(arg: &OscType) -> Option<f64> {
     PartialEq,
     Eq,
     Hash,
+    Default,
     EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
@@ -184,6 +181,7 @@ fn get_range_value(arg: &OscType) -> Option<f64> {
 // TODO-low Rename. This it not the tag, it's rather the OscType without value.
 pub enum OscTypeTag {
     #[display(fmt = "Float")]
+    #[default]
     Float,
     #[display(fmt = "Double")]
     Double,
@@ -211,12 +209,6 @@ pub enum OscTypeTag {
     Midi,
     #[display(fmt = "Array (ignored)")]
     Array,
-}
-
-impl Default for OscTypeTag {
-    fn default() -> Self {
-        Self::Float
-    }
 }
 
 impl OscTypeTag {
@@ -347,44 +339,41 @@ impl OscSource {
                 return None;
             }
             if let Some(desc) = self.arg_descriptor {
-                if let Some(arg) = msg.args.get(desc.index as usize) {
-                    use OscType::*;
-                    let v =
-                        match arg {
-                            Float(f) => AbsoluteValue::Continuous(
-                                map_continuous_from_range_to_unit(*f as f64, desc.value_range),
-                            ),
-                            Double(d) => AbsoluteValue::Continuous(
-                                map_continuous_from_range_to_unit(*d, desc.value_range),
-                            ),
-                            Bool(on) => AbsoluteValue::Continuous(if *on {
-                                UnitValue::MAX
-                            } else {
-                                UnitValue::MIN
-                            }),
-                            // Infinity/impulse or nil/null - act like a trigger.
-                            Inf | Nil => AbsoluteValue::Continuous(UnitValue::MAX),
-                            Int(i) => AbsoluteValue::Discrete(map_discrete_from_range_to_positive(
-                                *i,
-                                desc.value_range,
-                            )),
-                            Long(l) => {
-                                // TODO-low-discrete Maybe increase fraction integers to 64-bit? Right now
-                                //  we don't really take advantage of fractions, so we emit continuous control
-                                //  values as long as this doesn't change.
-                                AbsoluteValue::Continuous(map_continuous_from_range_to_unit(
-                                    *l as f64,
-                                    desc.value_range,
-                                ))
-                            }
-                            String(_) | Blob(_) | Time(_) | Char(_) | Color(_) | Midi(_)
-                            | Array(_) => return None,
-                        };
-                    (v, desc.is_relative)
-                } else {
-                    // Argument not found. Don't do anything.
-                    return None;
-                }
+                // If argument not found, don't do anything.
+                let arg = msg.args.get(desc.index as usize)?;
+                use OscType::*;
+                let v = match arg {
+                    Float(f) => AbsoluteValue::Continuous(map_continuous_from_range_to_unit(
+                        *f as f64,
+                        desc.value_range,
+                    )),
+                    Double(d) => AbsoluteValue::Continuous(map_continuous_from_range_to_unit(
+                        *d,
+                        desc.value_range,
+                    )),
+                    Bool(on) => {
+                        AbsoluteValue::Continuous(if *on { UnitValue::MAX } else { UnitValue::MIN })
+                    }
+                    // Infinity/impulse or nil/null - act like a trigger.
+                    Inf | Nil => AbsoluteValue::Continuous(UnitValue::MAX),
+                    Int(i) => AbsoluteValue::Discrete(map_discrete_from_range_to_positive(
+                        *i,
+                        desc.value_range,
+                    )),
+                    Long(l) => {
+                        // TODO-low-discrete Maybe increase fraction integers to 64-bit? Right now
+                        //  we don't really take advantage of fractions, so we emit continuous control
+                        //  values as long as this doesn't change.
+                        AbsoluteValue::Continuous(map_continuous_from_range_to_unit(
+                            *l as f64,
+                            desc.value_range,
+                        ))
+                    }
+                    String(_) | Blob(_) | Time(_) | Char(_) | Color(_) | Midi(_) | Array(_) => {
+                        return None
+                    }
+                };
+                (v, desc.is_relative)
             } else {
                 // Source shall not look at any argument. Act like a trigger.
                 (AbsoluteValue::Continuous(UnitValue::MAX), false)

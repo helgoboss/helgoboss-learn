@@ -53,7 +53,7 @@ pub struct ControlEvent<P, T: AbstractTimestamp> {
 
 impl<P: Display, T: AbstractTimestamp + Display> Display for ControlEvent<P, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at {}", &self.payload, self.timestamp)
+        write!(f, "{} at {}", self.payload, self.timestamp)
     }
 }
 

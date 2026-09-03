@@ -1108,7 +1108,7 @@ where
                             .rev()
                             .map(|pos| {
                                 let bytes = [0xB0, 0x40 + pos, codes.next().unwrap_or(ASCII_SPACE)];
-                                RawMidiEvent::try_from_iter(0, bytes.into_iter()).unwrap()
+                                RawMidiEvent::try_from_iter(0, bytes).unwrap()
                             })
                             .collect();
                         (events, None)

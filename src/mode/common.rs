@@ -165,6 +165,7 @@ impl EncoderUsage {
     PartialEq,
     Hash,
     Debug,
+    Default,
     EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
@@ -176,6 +177,7 @@ impl EncoderUsage {
 pub enum FireMode {
     #[serde(rename = "release")]
     #[display(fmt = "Fire on press (or release if > 0 ms)")]
+    #[default]
     Normal,
     #[serde(rename = "timeout")]
     #[display(fmt = "Fire after timeout")]
@@ -191,12 +193,6 @@ pub enum FireMode {
     OnDoublePress,
 }
 
-impl Default for FireMode {
-    fn default() -> Self {
-        Self::Normal
-    }
-}
-
 #[derive(
     Copy,
     Clone,
@@ -204,6 +200,7 @@ impl Default for FireMode {
     PartialEq,
     Hash,
     Debug,
+    Default,
     EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
@@ -215,6 +212,7 @@ impl Default for FireMode {
 pub enum TakeoverMode {
     #[serde(rename = "off")]
     #[display(fmt = "Off (may cause jumps)")]
+    #[default]
     Off,
     #[serde(rename = "pickup")]
     #[display(fmt = "Pick up")]
@@ -239,12 +237,6 @@ impl TakeoverMode {
     }
 }
 
-impl Default for TakeoverMode {
-    fn default() -> Self {
-        Self::Off
-    }
-}
-
 #[derive(
     Copy,
     Clone,
@@ -252,6 +244,7 @@ impl Default for TakeoverMode {
     PartialEq,
     Hash,
     Debug,
+    Default,
     EnumIter,
     TryFromPrimitive,
     IntoPrimitive,
@@ -263,6 +256,7 @@ impl Default for TakeoverMode {
 pub enum GroupInteraction {
     #[serde(rename = "none")]
     #[display(fmt = "None")]
+    #[default]
     None,
     #[serde(rename = "same-control")]
     #[display(fmt = "Same control")]
@@ -282,12 +276,6 @@ pub enum GroupInteraction {
     #[serde(rename = "inverse-target-value-off-only")]
     #[display(fmt = "Inverse target value (off only)")]
     InverseTargetValueOffOnly,
-}
-
-impl Default for GroupInteraction {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 impl GroupInteraction {

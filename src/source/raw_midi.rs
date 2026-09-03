@@ -91,11 +91,8 @@ impl RawMidiPattern {
         let mut current_value: u16 = 0;
         for (i, b) in bytes.iter().enumerate() {
             let pattern_entry = self.entries[i];
-            if let Some(v) = pattern_entry.match_and_capture(*b, current_value) {
-                current_value = v;
-            } else {
-                return None;
-            }
+            let v = pattern_entry.match_and_capture(*b, current_value)?;
+            current_value = v;
         }
         let fraction = Fraction::new(current_value as _, self.max_discrete_value() as _);
         Some(fraction)
