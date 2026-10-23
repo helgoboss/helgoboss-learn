@@ -1137,6 +1137,11 @@ where
                 abs_res.map(|v| v.map(ControlValue::from_absolute))
             }
             ControlValue::AbsoluteDiscrete(v) => {
+                // We don't quantize the incoming value to the grid (step size) at this point.
+                // The target can quantize the value itself and then decide to not do anything if it
+                // detects that it already has the correct value.
+                // Reason 1:
+
                 let abs_res = self.hitting_target_considering_max_jump(
                     AbsoluteValue::Discrete(v),
                     current_target_value,
