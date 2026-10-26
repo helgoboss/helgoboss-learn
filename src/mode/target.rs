@@ -21,7 +21,22 @@ pub enum ControlType {
     AbsoluteContinuousRoundable { rounding_step_size: UnitValue },
     /// Targets which have a grid of discrete values (and therefore a step size).
     AbsoluteDiscrete {
+        /// Step size that defines the value grid.
+        ///
+        /// Example: 0.2 means the target has discrete values at 0.0, 0.2, 0.4, 0.6, 0.8, 1.0.
         atomic_step_size: UnitValue,
+
+        /// If `true`, the target will receive values that are already snapped to the grid
+        /// (using the step size) even for absolute control values.
+        ///
+        /// If `false`, the step size will be used for relative control values only.
+        ///
+        /// Should normally be set to `true`. Only set it to `false` if there are cases
+        /// in which the target reports to be discrete but actually might be continuous (e.g. FX
+        /// parameters of some Native Instruments plug-ins).
+        absolute_snap_to_grid: bool,
+
+        /// Whether to hit the target even if it already has the desired value.
         is_retriggerable: bool,
     },
     /// If target wants to be controlled via relative increments.

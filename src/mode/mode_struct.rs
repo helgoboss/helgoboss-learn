@@ -1137,11 +1137,6 @@ where
                 abs_res.map(|v| v.map(ControlValue::from_absolute))
             }
             ControlValue::AbsoluteDiscrete(v) => {
-                // We don't quantize the incoming value to the grid (step size) at this point.
-                // The target can quantize the value itself and then decide to not do anything if it
-                // detects that it already has the correct value.
-                // Reason 1:
-
                 let abs_res = self.hitting_target_considering_max_jump(
                     AbsoluteValue::Discrete(v),
                     current_target_value,
@@ -1695,6 +1690,10 @@ where
         additional_transformation_input: T::AdditionalInput,
         last_non_performance_target_value: Option<AbsoluteValue>,
     ) -> Option<ControlValue> {
+        // Historically, we don't quantize absolute control values to the target grid (step size) in
+        // the mode (the step size is only used for relative control).
+        // The target receives all values and should snap to the grid itself and also may
+        // ignore the event if the snapped result value is not different from the previous one.
         let mut v = source_normalized_control_event.payload();
         // 1. Performance control (optional)
         let performance_control = if let Some(y_last) = last_non_performance_target_value {
@@ -1744,6 +1743,19 @@ where
             // 4. Apply target interval and rounding OR target value sequence
             v = self.apply_rounded_target_interval_or_target_sequence(control_type, v);
         }
+        // Snap to grid if desired
+        if let ControlType::AbsoluteDiscrete {
+            atomic_step_size,
+            absolute_snap_to_grid: true,
+            ..
+        } = control_type
+            && self.state.unpacked_target_value_sequence.is_empty()
+        {
+            v = AbsoluteValue::Continuous(
+                v.to_unit_value()
+                    .snap_to_grid_by_interval_size(atomic_step_size),
+            );
+        };
         // Return
         Some(ControlValue::from_absolute(v))
     }
@@ -3011,6 +3023,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -3042,6 +3055,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.2),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -3059,6 +3073,42 @@ mod tests {
                 assert_abs_diff_eq!(
                     mode.control(abs_con_evt(0.49), &target, ()).unwrap(),
                     abs_con_val(0.49)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(1.0), &target, ()).unwrap(),
+                    abs_con_val(1.0)
+                );
+            }
+
+            #[test]
+            fn discrete_target_snap_to_grid() {
+                // Given
+                let mut mode: TestMode = Mode::new(ModeSettings {
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(dis_val(4, 5)),
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(0.2),
+                        is_retriggerable: false,
+                        absolute_snap_to_grid: true,
+                    },
+                };
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.0), &target, ()).unwrap(),
+                    abs_con_val(0.0)
+                );
+                assert_eq!(mode.control(abs_con_evt(0.8), &target, ()), None);
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.19), &target, ()).unwrap(),
+                    abs_con_val(0.2)
+                );
+
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.49), &target, ()).unwrap(),
+                    abs_con_val(0.4)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_con_evt(1.0), &target, ()).unwrap(),
@@ -3731,6 +3781,100 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.5),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
+                    },
+                };
+                mode.update_from_target(&target, (), false);
+                // When
+                // Then
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.0), &target, ()).unwrap(),
+                    abs_con_val(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(0, 20), &target, ()).unwrap(),
+                    abs_con_val(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.09), &target, ()).unwrap(),
+                    abs_con_val(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(1, 20), &target, ()).unwrap(),
+                    abs_con_val(0.2)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.1), &target, ()).unwrap(),
+                    abs_con_val(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(3, 20), &target, ()).unwrap(),
+                    abs_con_val(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.2), &target, ()).unwrap(),
+                    abs_con_val(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(4, 20), &target, ()).unwrap(),
+                    abs_con_val(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.4), &target, ()).unwrap(),
+                    abs_con_val(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(8, 20), &target, ()).unwrap(),
+                    abs_con_val(0.4)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.6), &target, ()).unwrap(),
+                    abs_con_val(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(12, 20), &target, ()).unwrap(),
+                    abs_con_val(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.65), &target, ()).unwrap(),
+                    abs_con_val(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(13, 20), &target, ()).unwrap(),
+                    abs_con_val(0.5)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(0.8), &target, ()).unwrap(),
+                    abs_con_val(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(16, 20), &target, ()).unwrap(),
+                    abs_con_val(0.0)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_con_evt(1.0), &target, ()).unwrap(),
+                    abs_con_val(0.9)
+                );
+                assert_abs_diff_eq!(
+                    mode.control(abs_dis_evt(20, 20), &target, ()).unwrap(),
+                    abs_con_val(0.9)
+                );
+            }
+
+            /// Discrete steps dictated by target itself should be ignored when a sequence is given.
+            #[test]
+            fn target_value_sequence_discrete_target_snap_to_grid() {
+                // Given
+                let mut mode: TestMode = Mode::new(ModeSettings {
+                    target_value_sequence: "0.2, 0.4, 0.4, 0.5, 0.0, 0.9".parse().unwrap(),
+                    ..Default::default()
+                });
+                let target = TestTarget {
+                    current_value: Some(con_val(0.6)),
+                    control_type: ControlType::AbsoluteDiscrete {
+                        atomic_step_size: UnitValue::new(0.5),
+                        is_retriggerable: false,
+                        absolute_snap_to_grid: true,
                     },
                 };
                 mode.update_from_target(&target, (), false);
@@ -4138,6 +4282,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4196,6 +4341,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4254,6 +4400,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4313,6 +4460,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4372,6 +4520,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4436,6 +4585,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 350.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -4515,6 +4665,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 150.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -4573,6 +4724,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 150.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -4631,6 +4783,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4685,6 +4838,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4739,6 +4893,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4794,6 +4949,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -4849,6 +5005,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 350.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -4924,6 +5081,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 150.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -4983,6 +5141,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 150.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 let fb_opts = ModeFeedbackOptions {
@@ -5108,6 +5267,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5144,6 +5304,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5192,6 +5353,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5222,6 +5384,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5262,6 +5425,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5304,6 +5468,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5343,6 +5508,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5404,7 +5570,7 @@ mod tests {
             //         current_value: Some(dis_val(60, 200)),
             //         control_type: ControlType::AbsoluteDiscrete {
             //             atomic_step_size: UnitValue::new(1.0 / 200.0),
-            //             is_retriggerable: false,
+            //             is_retriggerable: false, absolute_snap_to_grid: false,
             //         },
             //     };
             //     // When
@@ -5440,7 +5606,7 @@ mod tests {
             //         current_value: Some(dis_val(60, 200)),
             //         control_type: ControlType::AbsoluteDiscrete {
             //             atomic_step_size: UnitValue::new(1.0 / 200.0),
-            //             is_retriggerable: false,
+            //             is_retriggerable: false, absolute_snap_to_grid: false,
             //         },
             //     };
             //     // When
@@ -5526,6 +5692,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5560,6 +5727,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -5594,6 +5762,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(1.0 / 200.0),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -6459,6 +6628,7 @@ mod tests {
                 control_type: ControlType::AbsoluteDiscrete {
                     atomic_step_size: UnitValue::new(0.5),
                     is_retriggerable: false,
+                    absolute_snap_to_grid: false,
                 },
             };
             // When
@@ -6520,6 +6690,7 @@ mod tests {
                 control_type: ControlType::AbsoluteDiscrete {
                     atomic_step_size: UnitValue::new(0.5),
                     is_retriggerable: false,
+                    absolute_snap_to_grid: false,
                 },
             };
             // When
@@ -7532,6 +7703,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7564,6 +7736,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7597,6 +7770,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7643,6 +7817,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7678,6 +7853,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7711,6 +7887,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7749,6 +7926,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7782,6 +7960,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7815,6 +7994,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7857,6 +8037,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7899,6 +8080,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7932,6 +8114,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -7965,6 +8148,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8008,6 +8192,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8051,6 +8236,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.2),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8075,6 +8261,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8118,6 +8305,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8161,6 +8349,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8203,6 +8392,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8229,6 +8419,62 @@ mod tests {
                 }
 
                 #[test]
+                fn make_absolute_1_snap_to_grid() {
+                    // Given
+                    let mut mode: TestMode = Mode::new(ModeSettings {
+                        make_absolute: true,
+                        ..Default::default()
+                    });
+                    let target = TestTarget {
+                        current_value: Some(dis_val(0, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                            is_retriggerable: false,
+                            absolute_snap_to_grid: true,
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_eq!(mode.control(rel_dis_evt(-10), &target, ()), None);
+                    assert_eq!(mode.control(rel_dis_evt(-2), &target, ()), None);
+                    assert_eq!(mode.control(rel_dis_evt(-1), &target, ()), None);
+                    assert_eq!(
+                        mode.control(rel_dis_evt(1), &target, ()),
+                        None,
+                        "should still be zero, no retrigger"
+                    );
+                    assert_eq!(
+                        mode.control(rel_dis_evt(2), &target, ()),
+                        None,
+                        "should still be zero, no retrigger"
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(2), &target, ()).unwrap(),
+                        abs_con_val(0.05)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(2), &target, ()).unwrap(),
+                        abs_con_val(0.05)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(2), &target, ()).unwrap(),
+                        abs_con_val(0.05)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(10), &target, ()).unwrap(),
+                        abs_con_val(0.05)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(10), &target, ()).unwrap(),
+                        abs_con_val(0.05)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(10), &target, ()).unwrap(),
+                        abs_con_val(0.10)
+                    );
+                }
+
+                #[test]
                 fn make_absolute_2() {
                     // Given
                     let mut mode: TestMode = Mode::new(ModeSettings {
@@ -8241,6 +8487,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(0.05),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8274,6 +8521,54 @@ mod tests {
                         abs_con_val(0.03)
                     );
                 }
+
+                #[test]
+                fn make_absolute_2_snap_to_grid() {
+                    // Given
+                    let mut mode: TestMode = Mode::new(ModeSettings {
+                        make_absolute: true,
+                        step_size_interval: create_unit_value_interval(0.01, 0.05),
+                        ..Default::default()
+                    });
+                    let target = TestTarget {
+                        current_value: Some(dis_val(10, 20)),
+                        control_type: ControlType::AbsoluteDiscrete {
+                            atomic_step_size: UnitValue::new(0.05),
+                            is_retriggerable: false,
+                            absolute_snap_to_grid: true,
+                        },
+                    };
+                    // When
+                    // Then
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(-10), &target, ()).unwrap(),
+                        abs_con_val(0.0)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(-2), &target, ()).unwrap(),
+                        abs_con_val(0.0)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(-1), &target, ()).unwrap(),
+                        abs_con_val(0.0)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(1), &target, ()).unwrap(),
+                        abs_con_val(0.0)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(2), &target, ()).unwrap(),
+                        abs_con_val(0.05)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(10), &target, ()).unwrap(),
+                        abs_con_val(0.1)
+                    );
+                    assert_abs_diff_eq!(
+                        mode.control(rel_dis_evt(-5), &target, ()).unwrap(),
+                        abs_con_val(0.05)
+                    );
+                }
             }
 
             mod discrete_processing {
@@ -8291,6 +8586,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(1.0 / 20.0),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8324,6 +8620,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(1.0 / 20.0),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8358,6 +8655,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(1.0 / 200.0),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -8399,6 +8697,7 @@ mod tests {
                         control_type: ControlType::AbsoluteDiscrete {
                             atomic_step_size: UnitValue::new(1.0 / 20.0),
                             is_retriggerable: false,
+                            absolute_snap_to_grid: false,
                         },
                     };
                     // When
@@ -9724,6 +10023,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9755,6 +10055,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9778,6 +10079,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9810,6 +10112,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9842,6 +10145,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9865,6 +10169,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9897,6 +10202,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9931,6 +10237,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9965,6 +10272,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -9998,6 +10306,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10021,6 +10330,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10053,6 +10363,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10085,6 +10396,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10117,6 +10429,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10140,6 +10453,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10172,6 +10486,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10205,6 +10520,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10238,6 +10554,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10271,6 +10588,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10304,6 +10622,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
@@ -10338,6 +10657,7 @@ mod tests {
                     control_type: ControlType::AbsoluteDiscrete {
                         atomic_step_size: UnitValue::new(0.05),
                         is_retriggerable: false,
+                        absolute_snap_to_grid: false,
                     },
                 };
                 // When
