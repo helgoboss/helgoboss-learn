@@ -5545,16 +5545,17 @@ mod tests {
                 // Then
                 assert_abs_diff_eq!(
                     mode.control(abs_dis_evt(0, 127), &target, ()).unwrap(),
-                    abs_dis_val(0, 5)
+                    abs_con_val(0.0)
                 );
                 assert_eq!(mode.control(abs_dis_evt(2, 127), &target, ()), None);
                 assert_abs_diff_eq!(
                     mode.control(abs_dis_evt(3, 127), &target, ()).unwrap(),
-                    abs_dis_val(3, 5)
+                    // TODO-medium Why? If we enable discrete processing one day, check this!
+                    abs_con_val(0.6)
                 );
                 assert_abs_diff_eq!(
                     mode.control(abs_dis_evt(127, 127), &target, ()).unwrap(),
-                    abs_dis_val(5, 5)
+                    abs_con_val(1.0)
                 );
             }
             //

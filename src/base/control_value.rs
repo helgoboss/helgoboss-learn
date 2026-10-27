@@ -569,14 +569,8 @@ impl AbsoluteValue {
     }
 
     pub fn round(self, control_type: ControlType) -> Self {
-        use AbsoluteValue as V;
-        match self {
-            V::Continuous(v) => {
-                let value = round_to_nearest_discrete_value(control_type, v);
-                Self::Continuous(value)
-            }
-            V::Discrete(f) => Self::Discrete(f),
-        }
+        let value = round_to_nearest_discrete_value(control_type, self.to_unit_value());
+        Self::Continuous(value)
     }
 
     pub fn has_same_effect_as(self, other: AbsoluteValue) -> bool {
