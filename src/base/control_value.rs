@@ -582,6 +582,11 @@ impl AbsoluteValue {
             // target cares about minimal differences and then not hitting the target would be
             // bad. Better hit it redundantly instead of omitting a hit that would have made a
             // difference.
+            // TODO-high When using discrete targets (with snapped target values) and "Beep on success",
+            // we can sometimes hear that it fails to recognize that the target already has the desired value
+            // (many beeps in a row).
+            // I think for targets with ControlType AbsoluteDiscrete and absolute_snap_to_grid == true,
+            // we should either use BASE_EPSILON tolerance or compare the snapped value as integers.
             self.to_unit_value() == other.to_unit_value()
         }
     }
